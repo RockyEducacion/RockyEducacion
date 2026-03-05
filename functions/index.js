@@ -17,19 +17,21 @@ const WHATSAPP_APP_SECRET = String(process.env.WHATSAPP_APP_SECRET || '').trim()
 const DAILY_CLOSURES_COL = 'daily_closures';
 const DAILY_SNAPSHOTS_COL = 'daily_closure_snapshots';
 const DAILY_METRICS_COL = 'daily_metrics';
+const INCAPACITADOS_COL = 'incapacitados';
 const DASHBOARD_DOCS_COL = 'dashboard_docs';
 const DASHBOARD_BUCKETS_ATTENDANCE_COL = 'attendance_buckets';
 const DASHBOARD_BUCKETS_REPLACEMENTS_COL = 'replacement_buckets';
 const DASHBOARD_BUCKET_COUNT = 32;
 const OPERATION_CACHE_TTL_MS = 5 * 1000;
 const LOOKUP_CACHE_TTL_MS = 10 * 60 * 1000;
+const LOOKUP_NEGATIVE_CACHE_TTL_MS = 30 * 1000;
 const SEDES_LOOKUP_CACHE_TTL_MS = 10 * 60 * 1000;
 const METRICS_REFRESH_DEBOUNCE_MS = 2 * 60 * 1000;
 const operationCache = {
   sedesRows: null,
   employeesRows: null,
   novedadesRows: null,
-  supernumerariosActivosRows: null
+  cargosRows: null
 };
 const lookupCache = {
   employeeByPhone: new Map(),
@@ -57,7 +59,8 @@ async function getCachedRows(cacheKey, loader, ttlMs = OPERATION_CACHE_TTL_MS) {
 function getLookupCached(map, key, ttlMs = LOOKUP_CACHE_TTL_MS) {
   const item = map.get(key);
   if (!item) return { hit: false, value: null };
-  if (Date.now() - Number(item.ts || 0) > ttlMs) {
+  const cacheTtl = item.value == null ? LOOKUP_NEGATIVE_CACHE_TTL_MS : ttlMs;
+  if (Date.now() - Number(item.ts || 0) > cacheTtl) {
     map.delete(key);
     return { hit: false, value: null };
   }
@@ -517,10 +520,11 @@ async function processIncomingMessage(docRef, data) {
     const employeeDocument = String(emp.documento || documento || '').trim();
     const supernumerario = await findActiveSupernumerarioByDocument(employeeDocument);
     const isSupernumerario = Boolean(supernumerario);
+    const sedeDisplay = await resolveSedeNameByCode(emp.sedeCodigo, emp.sedeNombre);
     const prompt = buildMainPrompt({
       nombre: String(emp.nombre || 'colaborador(a)'),
       cedula: employeeDocument,
-      sede: String(emp.sedeNombre || emp.sedeCodigo || 'sin sede'),
+      sede: sedeDisplay,
       isSupernumerario
     });
     if (isSupernumerario) {
@@ -535,7 +539,7 @@ async function processIncomingMessage(docRef, data) {
         employeeId: employee.id,
         employeeName: String(emp.nombre || null),
         employeeDocument: employeeDocument,
-        employeeSede: String(emp.sedeNombre || emp.sedeCodigo || null),
+        employeeSede: sedeDisplay,
         employeePhone: String(emp.telefono || fromDigits),
         isSupernumerario,
         supernumerarioId: supernumerario?.id || null,
@@ -581,7 +585,7 @@ async function processIncomingMessage(docRef, data) {
     }
     const nombre = String(emp.nombre || 'colaborador(a)');
     const cedula = String(emp.documento || '-');
-    const sede = String(emp.sedeNombre || emp.sedeCodigo || 'sin sede');
+    const sede = await resolveSedeNameByCode(emp.sedeCodigo, emp.sedeNombre);
     const supernumerario = await findActiveSupernumerarioByDocument(cedula);
     const isSupernumerario = Boolean(supernumerario);
     const prompt = buildMainPrompt({ nombre, cedula, sede, isSupernumerario });
@@ -691,6 +695,28 @@ async function processIncomingMessage(docRef, data) {
 
     const dailyOption = parseDailyOption(normalizedText);
     if (dailyOption === 'trabajando') {
+      const incapacidadActiva = await findActiveIncapacidadByEmployee(String(session.employeeId), todayInBogota());
+      if (incapacidadActiva) {
+        await sendWhatsAppText(fromDigits, 'Te encuentras incapacitado, muchas gracias por el registro.', row.phoneNumberId);
+        await sessionRef.set(
+          {
+            stage: 'completed',
+            pendingAttendance: admin.firestore.FieldValue.delete(),
+            trasladoCandidates: admin.firestore.FieldValue.delete(),
+            superSedeCandidates: admin.firestore.FieldValue.delete(),
+            selectedNovedad: admin.firestore.FieldValue.delete(),
+            incapacidadDays: admin.firestore.FieldValue.delete(),
+            incapacidadStartDate: admin.firestore.FieldValue.delete(),
+            incapacidadEndDate: admin.firestore.FieldValue.delete(),
+            updatedAt: admin.firestore.FieldValue.serverTimestamp()
+          },
+          { merge: true }
+        );
+        await setIncomingProcess(docRef, 'processed', 'employee_in_incapacidad_active', {
+          incapacidadId: incapacidadActiva.id
+        });
+        return;
+      }
       const novelty = await resolveNovedadByCode('1');
       await finalizeAttendanceNow({
         sessionRef,
@@ -877,7 +903,7 @@ async function processIncomingMessage(docRef, data) {
 
     await sendWhatsAppText(
       fromDigits,
-      'Datos actualizados, si no te haz registrado por favor escribe nuevamente Hola y realiza el registro.',
+      'Informacion actualizada correctamente, si no haz realizado el registro por favor escribe nuevamente "Hola".',
       row.phoneNumberId
     );
     await sessionRef.set(
@@ -888,6 +914,8 @@ async function processIncomingMessage(docRef, data) {
         superSedeCandidates: admin.firestore.FieldValue.delete(),
         selectedNovedad: admin.firestore.FieldValue.delete(),
         incapacidadDays: admin.firestore.FieldValue.delete(),
+        incapacidadStartDate: admin.firestore.FieldValue.delete(),
+        incapacidadEndDate: admin.firestore.FieldValue.delete(),
         employeePhone: candidatePhone,
         updatedAt: admin.firestore.FieldValue.serverTimestamp()
       },
@@ -1095,7 +1123,7 @@ async function processIncomingMessage(docRef, data) {
       .set(
         {
           sedeCodigo: selectedSede.codigo || null,
-          sedeNombre: selectedSede.nombre || null,
+          sedeNombre: admin.firestore.FieldValue.delete(),
           lastModifiedAt: admin.firestore.FieldValue.serverTimestamp()
         },
         { merge: true }
@@ -1104,7 +1132,7 @@ async function processIncomingMessage(docRef, data) {
 
     await sendWhatsAppText(
       fromDigits,
-      'Datos actualizados, si no te haz registrado por favor escribe nuevamente Hola y realiza el registro.',
+      'Informacion actualizada correctamente, si no haz realizado el registro por favor escribe nuevamente "Hola".',
       row.phoneNumberId
     );
     await sessionRef.set(
@@ -1115,6 +1143,8 @@ async function processIncomingMessage(docRef, data) {
         pendingAttendance: admin.firestore.FieldValue.delete(),
         selectedNovedad: admin.firestore.FieldValue.delete(),
         incapacidadDays: admin.firestore.FieldValue.delete(),
+        incapacidadStartDate: admin.firestore.FieldValue.delete(),
+        incapacidadEndDate: admin.firestore.FieldValue.delete(),
         employeeSede: String(selectedSede.nombre || selectedSede.codigo || '').trim() || null,
         updatedAt: admin.firestore.FieldValue.serverTimestamp()
       },
@@ -1138,17 +1168,23 @@ async function processIncomingMessage(docRef, data) {
       return;
     }
 
-    if (parsedNovedad === 'ENFERMEDAD GENERAL' || parsedNovedad === 'ACCIDENTE LABORAL') {
-      await sendWhatsAppText(fromDigits, '¿Cuantos dias te incapacitaron? Escribe un numero entero.', row.phoneNumberId);
+    if (requiresIncapacidadDateRange(parsedNovedad)) {
+      await sendWhatsAppText(
+        fromDigits,
+        'Selecciona las fechas de incapacidad.\nFecha de inicio (YYYY-MM-DD):',
+        row.phoneNumberId
+      );
       await sessionRef.set(
         {
-          stage: 'awaiting_incapacidad_days',
+          stage: 'awaiting_incapacidad_start_date',
           selectedNovedad: parsedNovedad,
+          incapacidadStartDate: admin.firestore.FieldValue.delete(),
+          incapacidadEndDate: admin.firestore.FieldValue.delete(),
           updatedAt: admin.firestore.FieldValue.serverTimestamp()
         },
         { merge: true }
       );
-      await setIncomingProcess(docRef, 'processed', 'awaiting_incapacidad_days');
+      await setIncomingProcess(docRef, 'processed', 'awaiting_incapacidad_start_date');
       return;
     }
 
@@ -1160,16 +1196,64 @@ async function processIncomingMessage(docRef, data) {
       row,
       docRef,
       novedadType: parsedNovedad,
-      incapacidadDays: null
+      incapacidadStartDate: null,
+      incapacidadEndDate: null
     });
     if (prepared) return;
   }
 
-  if (session.stage === 'awaiting_incapacidad_days' && session.employeeId) {
-    const days = parsePositiveInt(text);
-    if (!days) {
-      await sendWhatsAppText(fromDigits, 'Respuesta no valida. Escribe solo el numero de dias, por ejemplo: 3.', row.phoneNumberId);
-      await setIncomingProcess(docRef, 'ignored', 'invalid_incapacidad_days');
+  if (session.stage === 'awaiting_incapacidad_start_date' && session.employeeId) {
+    const startDate = normalizeDate(text);
+    if (!startDate) {
+      await sendWhatsAppText(fromDigits, 'Fecha no valida. Escribe la fecha de inicio en formato YYYY-MM-DD.', row.phoneNumberId);
+      await setIncomingProcess(docRef, 'ignored', 'invalid_incapacidad_start_date');
+      return;
+    }
+    await sendWhatsAppText(fromDigits, 'Fecha de terminacion de incapacidad (YYYY-MM-DD):', row.phoneNumberId);
+    await sessionRef.set(
+      {
+        stage: 'awaiting_incapacidad_end_date',
+        incapacidadStartDate: startDate,
+        updatedAt: admin.firestore.FieldValue.serverTimestamp()
+      },
+      { merge: true }
+    );
+    await setIncomingProcess(docRef, 'processed', 'awaiting_incapacidad_end_date', { incapacidadStartDate: startDate });
+    return;
+  }
+
+  if (session.stage === 'awaiting_incapacidad_end_date' && session.employeeId) {
+    const endDate = normalizeDate(text);
+    const startDate = normalizeDate(session.incapacidadStartDate);
+    if (!endDate) {
+      await sendWhatsAppText(fromDigits, 'Fecha no valida. Escribe la fecha de terminacion en formato YYYY-MM-DD.', row.phoneNumberId);
+      await setIncomingProcess(docRef, 'ignored', 'invalid_incapacidad_end_date');
+      return;
+    }
+    if (!startDate) {
+      await sendWhatsAppText(fromDigits, 'No encontramos la fecha de inicio. Empecemos de nuevo: escribe la fecha de inicio (YYYY-MM-DD).', row.phoneNumberId);
+      await sessionRef.set(
+        {
+          stage: 'awaiting_incapacidad_start_date',
+          incapacidadStartDate: admin.firestore.FieldValue.delete(),
+          incapacidadEndDate: admin.firestore.FieldValue.delete(),
+          updatedAt: admin.firestore.FieldValue.serverTimestamp()
+        },
+        { merge: true }
+      );
+      await setIncomingProcess(docRef, 'ignored', 'missing_incapacidad_start_date');
+      return;
+    }
+    if (endDate < startDate) {
+      await sendWhatsAppText(
+        fromDigits,
+        'La fecha de terminacion no puede ser menor a la fecha de inicio. Escribe nuevamente la fecha de terminacion (YYYY-MM-DD).',
+        row.phoneNumberId
+      );
+      await setIncomingProcess(docRef, 'ignored', 'invalid_incapacidad_date_range', {
+        incapacidadStartDate: startDate,
+        incapacidadEndDate: endDate
+      });
       return;
     }
 
@@ -1182,7 +1266,8 @@ async function processIncomingMessage(docRef, data) {
       row,
       docRef,
       novedadType: selectedNovedad,
-      incapacidadDays: days
+      incapacidadStartDate: startDate,
+      incapacidadEndDate: endDate
     });
     if (prepared) return;
   }
@@ -1244,7 +1329,8 @@ async function prepareNovedadFlow({
   row,
   docRef,
   novedadType,
-  incapacidadDays = null
+  incapacidadStartDate = null,
+  incapacidadEndDate = null
 }) {
   const empEntry = await findEmployeeByIdCached(String(empId));
   if (!empEntry) {
@@ -1264,10 +1350,20 @@ async function prepareNovedadFlow({
   const emp = empEntry.data || {};
   const superByDoc = await findActiveSupernumerarioByDocument(String(emp.documento || '').trim());
   const isSupernumerario = Boolean(superByDoc);
-  const novedadLabel =
-    incapacidadDays && ['ENFERMEDAD GENERAL', 'ACCIDENTE LABORAL'].includes(String(novedadType || '').trim())
-      ? `${novelty.nombre} (${incapacidadDays} dias)`
-      : novelty.nombre;
+  const startDate = normalizeDate(incapacidadStartDate);
+  const endDate = normalizeDate(incapacidadEndDate);
+  const novedadLabel = startDate && endDate ? `${novelty.nombre} (${startDate} a ${endDate})` : novelty.nombre;
+  if (startDate && endDate) {
+    await upsertEmployeeIncapacidad({
+      employeeId: String(empId),
+      emp,
+      novedadCodigo: novelty.codigo,
+      novedadNombre: novelty.nombre,
+      startDate,
+      endDate,
+      sourceMessageId: row.messageId || docRef.id
+    });
+  }
   await finalizeAttendanceNow({
     sessionRef,
     employeeId: String(empId),
@@ -1279,7 +1375,9 @@ async function prepareNovedadFlow({
       novedadCodigo: novelty.codigo,
       novedadNombre: novelty.nombre,
       novedad: novedadLabel,
-      incapacidadDias: incapacidadDays || null,
+      incapacidadDias: null,
+      incapacidadInicio: startDate,
+      incapacidadFin: endDate,
       isSupernumerario,
       messageId: row.messageId || docRef.id,
       phone: fromDigits
@@ -1360,6 +1458,8 @@ async function finalizeAttendanceNow({
       superSedeCandidates: admin.firestore.FieldValue.delete(),
       selectedNovedad: admin.firestore.FieldValue.delete(),
       incapacidadDays: admin.firestore.FieldValue.delete(),
+      incapacidadStartDate: admin.firestore.FieldValue.delete(),
+      incapacidadEndDate: admin.firestore.FieldValue.delete(),
       lastDecision: lastDecision || admin.firestore.FieldValue.delete(),
       lastAttendanceId: saved.attendanceId,
       updatedAt: admin.firestore.FieldValue.serverTimestamp()
@@ -1415,6 +1515,10 @@ function parseNovedadType(text) {
   if (norm === '3' || norm === 'calamidad' || norm === 'nov_calamidad') return 'CALAMIDAD';
   if (norm === '4' || norm === 'licencia no remunerada' || norm === 'nov_licencia_no_remunerada') return 'LICENCIA NO REMUNERADA';
   return null;
+}
+
+function requiresIncapacidadDateRange(novedadType) {
+  return ['ENFERMEDAD GENERAL', 'ACCIDENTE LABORAL', 'CALAMIDAD'].includes(String(novedadType || '').trim());
 }
 
 function parseYesNo(normalizedText) {
@@ -1528,6 +1632,24 @@ async function findSedeCandidatesByName(text, max = 10) {
   }
   rows.sort((a, b) => String(a.nombre || '').localeCompare(String(b.nombre || '')));
   return rows.slice(0, max);
+}
+
+async function resolveSedeNameByCode(sedeCodigo, fallbackName = null) {
+  const code = String(sedeCodigo || '').trim();
+  const fallback = String(fallbackName || '').trim();
+  if (!code) return fallback || 'sin sede';
+  const rows = await getCachedRows(
+    'sedesRows',
+    async () => {
+      const snap = await admin.firestore().collection('sedes').get();
+      return snap.docs.map((d) => ({ id: d.id, ...(d.data() || {}) }));
+    },
+    SEDES_LOOKUP_CACHE_TTL_MS
+  );
+  const found = rows.find((r) => String(r?.codigo || '').trim() === code);
+  const name = String(found?.nombre || '').trim();
+  if (name) return name;
+  return fallback || code;
 }
 
 async function resolveSelectedSede(rawText, storedCandidates = []) {
@@ -1837,26 +1959,125 @@ async function findActiveSupernumerarioByDocument(documento) {
   if (!docNum) return null;
   const cached = getLookupCached(lookupCache.superByDocument, docNum);
   if (cached.hit) return cached.value;
-  const snap = await admin
-    .firestore()
-    .collection('supernumerarios')
-    .where('documento', '==', docNum)
-    .where('estado', '==', 'activo')
-    .limit(1)
-    .get();
-  if (snap.empty) {
+  const employee = await findEmployeeByDocument(docNum);
+  if (!employee) {
     setLookupCached(lookupCache.superByDocument, docNum, null);
     return null;
   }
-  const doc = snap.docs[0];
-  const data = doc.data() || {};
+  const data = employee.data || {};
+  if (!(await isEmployeeSupernumerarioByCargo(data))) {
+    setLookupCached(lookupCache.superByDocument, docNum, null);
+    return null;
+  }
   if (!isEmployeeEligibleForRegistration(data, todayInBogota())) {
     setLookupCached(lookupCache.superByDocument, docNum, null);
     return null;
   }
-  const out = { id: doc.id, data };
+  const out = { id: employee.id, data };
   setLookupCached(lookupCache.superByDocument, docNum, out);
   return out;
+}
+
+function normalizeCargoCrudAlignment(value) {
+  const raw = String(value || '').trim().toLowerCase();
+  if (raw === 'supervisor') return 'supervisor';
+  if (raw === 'supernumerario') return 'supernumerario';
+  return 'empleado';
+}
+
+function inferCargoAlignmentByName(name) {
+  const txt = normalizeUserText(name);
+  if (!txt) return 'empleado';
+  if (txt.includes('supernumer')) return 'supernumerario';
+  if (txt.includes('supervisor')) return 'supervisor';
+  return 'empleado';
+}
+
+function resolveEmployeeCargoAlignment(emp, cargoMap = new Map()) {
+  const code = String(emp?.cargoCodigo || '').trim();
+  if (!code) return inferCargoAlignmentByName(emp?.cargoNombre || '');
+  const cargo = cargoMap.get(code) || null;
+  const direct = normalizeCargoCrudAlignment(cargo?.alineacionCrud || '');
+  if (direct !== 'empleado') return direct;
+  return inferCargoAlignmentByName(cargo?.nombre || emp?.cargoNombre || '');
+}
+
+async function getCargoRowsCached() {
+  return getCachedRows('cargosRows', async () => {
+    const snap = await admin.firestore().collection('cargos').get();
+    return snap.docs.map((d) => ({ id: d.id, ...(d.data() || {}) }));
+  });
+}
+
+async function buildCargoMapCached() {
+  const rows = await getCargoRowsCached();
+  return new Map(
+    rows
+      .map((row) => [String(row?.codigo || '').trim(), row])
+      .filter(([code]) => Boolean(code))
+  );
+}
+
+async function isEmployeeSupernumerarioByCargo(emp) {
+  const cargoMap = await buildCargoMapCached();
+  return resolveEmployeeCargoAlignment(emp, cargoMap) === 'supernumerario';
+}
+
+async function listActiveSupernumerarioRowsForDay(day) {
+  const targetDay = String(day || '').trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(targetDay)) return [];
+  const [employeesRows, cargoMap] = await Promise.all([
+    getCachedRows('employeesRows', async () => {
+      const snap = await admin.firestore().collection('employees').get();
+      return snap.docs.map((d) => ({ id: d.id, ...(d.data() || {}) }));
+    }),
+    buildCargoMapCached()
+  ]);
+  return employeesRows.filter((row) => {
+    if (!isEmployeeActiveOnDate(row, targetDay)) return false;
+    if (!isEmployeeEligibleForRegistration(row, targetDay)) return false;
+    return resolveEmployeeCargoAlignment(row, cargoMap) === 'supernumerario';
+  });
+}
+
+async function findActiveIncapacidadByEmployee(employeeId, targetDay = todayInBogota()) {
+  const id = String(employeeId || '').trim();
+  const day = normalizeDate(targetDay);
+  if (!id || !day) return null;
+  const snap = await admin.firestore().collection(INCAPACITADOS_COL).where('empleadoId', '==', id).limit(50).get();
+  if (snap.empty) return null;
+  for (const doc of snap.docs) {
+    const row = doc.data() || {};
+    const start = normalizeDate(row.fechaInicio);
+    const end = normalizeDate(row.fechaFin);
+    if (!start || !end) continue;
+    if (day >= start && day <= end) return { id: doc.id, data: row };
+  }
+  return null;
+}
+
+async function upsertEmployeeIncapacidad({ employeeId, emp, novedadCodigo, novedadNombre, startDate, endDate, sourceMessageId = null }) {
+  const id = String(employeeId || '').trim();
+  const start = normalizeDate(startDate);
+  const end = normalizeDate(endDate);
+  if (!id || !start || !end) return null;
+  const docId = `${id}_${start}_${end}_${String(novedadCodigo || '').trim() || 'NA'}`.replace(/[^\w.-]/g, '_');
+  const payload = {
+    empleadoId: id,
+    documento: String(emp?.documento || '').trim() || null,
+    nombre: String(emp?.nombre || '').trim() || null,
+    telefono: String(emp?.telefono || '').trim() || null,
+    novedadCodigo: String(novedadCodigo || '').trim() || null,
+    novedadNombre: String(novedadNombre || '').trim() || null,
+    fechaInicio: start,
+    fechaFin: end,
+    source: 'whatsapp_cloud_api',
+    whatsappMessageId: String(sourceMessageId || '').trim() || null,
+    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    createdAt: admin.firestore.FieldValue.serverTimestamp()
+  };
+  await admin.firestore().collection(INCAPACITADOS_COL).doc(docId).set(payload, { merge: true });
+  return docId;
 }
 
 async function registerAttendanceFromEmployeeDoc(empDoc, opts = {}) {
@@ -1869,12 +2090,17 @@ async function registerAttendanceFromEmployeeDoc(empDoc, opts = {}) {
   const novedadCodigo = opts.novedadCodigo == null ? null : String(opts.novedadCodigo).trim() || null;
   const novedadNombre = opts.novedadNombre == null ? novedad : String(opts.novedadNombre).trim() || null;
   const incapacidadDias = Number.isInteger(Number(opts.incapacidadDias)) ? Number(opts.incapacidadDias) : null;
+  const incapacidadInicio = normalizeDate(opts.incapacidadInicio);
+  const incapacidadFin = normalizeDate(opts.incapacidadFin);
   const isSupernumerario = opts.isSupernumerario === true;
   const attendanceId = `${fecha}_${empDoc.id}`;
   const messageId = String(opts.messageId || '').trim() || null;
   const telefono = String(opts.phone || emp.telefono || '').trim() || null;
   const sedeCodigo = opts.sedeCodigo == null ? emp.sedeCodigo || null : opts.sedeCodigo;
-  const sedeNombre = opts.sedeNombre == null ? emp.sedeNombre || null : opts.sedeNombre;
+  const sedeNombre =
+    opts.sedeNombre == null
+      ? await resolveSedeNameByCode(sedeCodigo, emp.sedeNombre || null)
+      : String(opts.sedeNombre || '').trim() || null;
 
   const batch = admin.firestore().batch();
   const attendanceRef = admin.firestore().collection('attendance').doc(attendanceId);
@@ -1894,6 +2120,8 @@ async function registerAttendanceFromEmployeeDoc(empDoc, opts = {}) {
       novedadCodigo,
       novedadNombre,
       incapacidadDias,
+      incapacidadInicio,
+      incapacidadFin,
       isSupernumerario,
       source: 'whatsapp_cloud_api',
       whatsappMessageId: messageId,
@@ -1920,6 +2148,8 @@ async function registerAttendanceFromEmployeeDoc(empDoc, opts = {}) {
         novedadCodigo,
         novedadNombre,
         incapacidadDias,
+        incapacidadInicio,
+        incapacidadFin,
         isSupernumerario,
         source: 'whatsapp_cloud_api',
         whatsappMessageId: messageId,
@@ -2093,10 +2323,7 @@ async function computeOperationClosureSummary(fecha) {
       const snap = await db.collection('novedades').get();
       return snap.docs.map((d) => d.data() || {});
     }),
-    getCachedRows('supernumerariosActivosRows', async () => {
-      const snap = await db.collection('supernumerarios').where('estado', '==', 'activo').get();
-      return snap.docs.map((d) => d.data() || {});
-    })
+    listActiveSupernumerarioRowsForDay(day)
   ]);
 
   const planeados = sedesRows.reduce((acc, row) => acc + (Number(row?.numeroOperarios || 0) || 0), 0);
@@ -2231,18 +2458,16 @@ async function ensureAutoAttendanceWithNovedad8(fecha) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) return 0;
 
   const db = admin.firestore();
-  const [employeesSnap, attendanceSnap, superSnap] = await Promise.all([
+  const [employeesSnap, attendanceSnap, superRows] = await Promise.all([
     db.collection('employees').get(),
     db.collection('attendance').where('fecha', '==', day).get(),
-    db.collection('supernumerarios').where('estado', '==', 'activo').get()
+    listActiveSupernumerarioRowsForDay(day)
   ]);
 
   const novelty = await resolveNovedadByCode('8');
   const existing = new Set(attendanceSnap.docs.map((d) => String(d.id || '').trim()));
   const superDocs = new Set();
-  for (const d of superSnap.docs) {
-    const row = d.data() || {};
-    if (!isEmployeeActiveOnDate(row, day)) continue;
+  for (const row of superRows) {
     const docNum = String(row.documento || '').trim();
     if (docNum) superDocs.add(docNum);
   }
@@ -2583,10 +2808,7 @@ async function refreshDailyMetricsForDate(fecha, opts = {}) {
         const snap = await db.collection('employees').get();
         return snap.docs.map((d) => d.data() || {});
       }),
-      getCachedRows('supernumerariosActivosRows', async () => {
-        const snap = await db.collection('supernumerarios').where('estado', '==', 'activo').get();
-        return snap.docs.map((d) => d.data() || {});
-      }),
+      listActiveSupernumerarioRowsForDay(day),
       getCachedRows('novedadesRows', async () => {
         const snap = await db.collection('novedades').get();
         return snap.docs.map((d) => d.data() || {});

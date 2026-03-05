@@ -27,24 +27,24 @@ export const Sidebar = () => {
   if (user && userProfile) {
     const govLinks = [];
     if (isSuperAdmin()) govLinks.push(navLink('Centro de Permisos', '/permissions'));
-    if (can(PERMS.MANAGE_USERS)) govLinks.push(navLink('Usuarios', '/users'));
+    if (can(PERMS.VIEW_USERS)) govLinks.push(navLink('Usuarios', '/users'));
     if (govLinks.length) sections.push(section('Gobierno', govLinks, 'gobierno'));
 
     const adminLinks = [];
-    if (can(PERMS.MANAGE_ZONES)) adminLinks.push(navLink('Zonas', '/zones'));
-    if (can(PERMS.MANAGE_DEPENDENCIES)) adminLinks.push(navLink('Dependencias', '/dependencies'));
-    if (can(PERMS.MANAGE_SEDES)) adminLinks.push(navLink('Sedes', '/sedes'));
-    if (can(PERMS.MANAGE_EMPLOYEES)) adminLinks.push(navLink('Cargos', '/cargos'));
-    if (can(PERMS.MANAGE_EMPLOYEES)) adminLinks.push(navLink('Novedades', '/novedades'));
-    if (can(PERMS.MANAGE_EMPLOYEES)) adminLinks.push(navLink('Empleados', '/employees'));
-    if (can(PERMS.MANAGE_SUPERVISORS)) adminLinks.push(navLink('Supervisores', '/supervisors'));
-    if (can(PERMS.MANAGE_EMPLOYEES)) adminLinks.push(navLink('Supernumerarios', '/supernumerarios'));
+    if (can(PERMS.VIEW_ZONES)) adminLinks.push(navLink('Zonas', '/zones'));
+    if (can(PERMS.VIEW_DEPENDENCIES)) adminLinks.push(navLink('Dependencias', '/dependencies'));
+    if (can(PERMS.VIEW_SEDES)) adminLinks.push(navLink('Sedes', '/sedes'));
+    if (can(PERMS.VIEW_CARGOS)) adminLinks.push(navLink('Cargos', '/cargos'));
+    if (can(PERMS.VIEW_NOVEDADES)) adminLinks.push(navLink('Novedades', '/novedades'));
+    if (can(PERMS.VIEW_EMPLOYEES)) adminLinks.push(navLink('Empleados', '/employees'));
+    if (can(PERMS.VIEW_SUPERVISORS)) adminLinks.push(navLink('Supervisores', '/supervisors'));
+    if (can(PERMS.VIEW_SUPERNUMERARIOS)) adminLinks.push(navLink('Supernumerarios', '/supernumerarios'));
     if (adminLinks.length) sections.push(section('Administracion', adminLinks, 'administracion'));
 
     const bulkLinks = [];
-    if (can(PERMS.MANAGE_SEDES)) bulkLinks.push(navLink('Cargue sedes', '/bulk-upload-sedes'));
-    if (can(PERMS.MANAGE_EMPLOYEES)) bulkLinks.push(navLink('Cargue empleados', '/bulk-upload'));
-    if (can(PERMS.MANAGE_EMPLOYEES)) bulkLinks.push(navLink('Cargue supernumerarios', '/bulk-upload-supernumerarios'));
+    if (can(PERMS.EDIT_SEDES)) bulkLinks.push(navLink('Cargue sedes', '/bulk-upload-sedes'));
+    if (can(PERMS.EDIT_EMPLOYEES)) bulkLinks.push(navLink('Cargue empleados', '/bulk-upload'));
+    if (can(PERMS.EDIT_SUPERNUMERARIOS)) bulkLinks.push(navLink('Cargue supernumerarios', '/bulk-upload-supernumerarios'));
     if (bulkLinks.length) sections.push(section('Cargue masivo', bulkLinks, 'cargue_masivo'));
 
     const opLinks = [];

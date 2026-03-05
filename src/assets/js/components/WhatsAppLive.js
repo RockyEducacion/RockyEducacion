@@ -354,6 +354,15 @@ export const WhatsAppLive = (mount, deps = {}) => {
     });
   }
 
+  function sedeNameByCode(code, fallback = '') {
+    const sedeCodigo = String(code || '').trim();
+    if (!sedeCodigo) return String(fallback || '').trim() || '-';
+    const sede = (sedes || []).find((s) => String(s?.codigo || '').trim() === sedeCodigo) || null;
+    const byCatalog = String(sede?.nombre || '').trim();
+    if (byCatalog) return byCatalog;
+    return String(fallback || '').trim() || sedeCodigo;
+  }
+
   function employeeInfoSnapshot(row) {
     const empleadoId = String(row?.empleadoId || '').trim();
     const documento = String(row?.documento || '').trim();
@@ -363,7 +372,7 @@ export const WhatsAppLive = (mount, deps = {}) => {
       return false;
     }) || null;
     const sedeCodigo = String(row?.sedeCodigo || emp?.sedeCodigo || '').trim();
-    const sedeNombre = String(row?.sedeNombre || emp?.sedeNombre || sedeCodigo || '-').trim() || '-';
+    const sedeNombre = sedeNameByCode(sedeCodigo, row?.sedeNombre || emp?.sedeNombre || '');
     const sede = (sedes || []).find((s) => String(s?.codigo || '').trim() === sedeCodigo) || null;
     return {
       documento: documento || String(emp?.documento || '-').trim() || '-',
@@ -436,7 +445,7 @@ export const WhatsAppLive = (mount, deps = {}) => {
       documento: row.documento || null,
       nombre: row.nombre || null,
       sedeCodigo: row.sedeCodigo || null,
-      sedeNombre: row.sedeNombre || null,
+      sedeNombre: sedeNameByCode(row.sedeCodigo, row.sedeNombre || null),
       novedadCodigo: row.novedadCodigo || null,
       novedadNombre: row.novedadNombre || row.novedad || null,
       decision: selected ? 'reemplazo' : 'ausentismo',
@@ -498,7 +507,7 @@ export const WhatsAppLive = (mount, deps = {}) => {
         const novedadStyle = novedadTextStyleByClass(rowClass);
 
         if (isSuperRow) {
-          const sedeTxt = String(r.sedeNombre || r.sedeCodigo || '').trim() || '-';
+          const sedeTxt = sedeNameByCode(r.sedeCodigo, r.sedeNombre || '');
           return el('tr', { style: rowStyleByClass(rowClass) }, [
             el('td', {}, [r.fecha || '-']),
             el('td', {}, [r.hora || '-']),

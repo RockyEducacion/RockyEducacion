@@ -47,6 +47,11 @@ headerMount.replaceChildren(Header());
 footerMount.replaceChildren(Footer());
 
 let unsubRoleMatrix=null; let unsubUserOverrides=null; let unsubAudit=null;
+const guardWrite=(perm,fn)=> async (...args)=>{
+  if(typeof fn!=='function') return undefined;
+  if(!can(perm)) throw new Error('No tienes permiso de edicion para esta seccion.');
+  return fn(...args);
+};
 
 (function init(){
   if(USE_FIREBASE){
@@ -61,26 +66,26 @@ let unsubRoleMatrix=null; let unsubUserOverrides=null; let unsubAudit=null;
           getUserOverrides:fb.getUserOverrides, setUserOverrides:fb.setUserOverrides, clearUserOverrides:fb.clearUserOverrides,
           addAuditLog:fb.addAuditLog, streamAuditLogs:(cb)=>{ if(unsubAudit)unsubAudit(); unsubAudit=fb.streamAuditLogs(cb); return unsubAudit; },
           // users
-          streamUsers:fb.streamUsers, setUserRole:fb.setUserRole, setUserStatus:fb.setUserStatus, softDeleteUser:fb.softDeleteUser, findUserByEmail:fb.findUserByEmail,
+          streamUsers:fb.streamUsers, setUserRole:guardWrite(PERMS.EDIT_USERS,fb.setUserRole), setUserStatus:guardWrite(PERMS.EDIT_USERS,fb.setUserStatus), softDeleteUser:guardWrite(PERMS.EDIT_USERS,fb.softDeleteUser), findUserByEmail:fb.findUserByEmail,
           // zonas
-          streamZones:fb.streamZones, createZone:fb.createZone, updateZone:fb.updateZone, setZoneStatus:fb.setZoneStatus, findZoneByCode:fb.findZoneByCode, getNextZoneCode:fb.getNextZoneCode,
+          streamZones:fb.streamZones, createZone:guardWrite(PERMS.EDIT_ZONES,fb.createZone), updateZone:guardWrite(PERMS.EDIT_ZONES,fb.updateZone), setZoneStatus:guardWrite(PERMS.EDIT_ZONES,fb.setZoneStatus), findZoneByCode:fb.findZoneByCode, getNextZoneCode:fb.getNextZoneCode,
           // dependencias
-          streamDependencies:fb.streamDependencies, createDependency:fb.createDependency, updateDependency:fb.updateDependency, setDependencyStatus:fb.setDependencyStatus, findDependencyByCode:fb.findDependencyByCode, getNextDependencyCode:fb.getNextDependencyCode,
+          streamDependencies:fb.streamDependencies, createDependency:guardWrite(PERMS.EDIT_DEPENDENCIES,fb.createDependency), updateDependency:guardWrite(PERMS.EDIT_DEPENDENCIES,fb.updateDependency), setDependencyStatus:guardWrite(PERMS.EDIT_DEPENDENCIES,fb.setDependencyStatus), findDependencyByCode:fb.findDependencyByCode, getNextDependencyCode:fb.getNextDependencyCode,
           // sedes
-          streamSedes:fb.streamSedes, createSede:fb.createSede, updateSede:fb.updateSede, setSedeStatus:fb.setSedeStatus, findSedeByCode:fb.findSedeByCode, getNextSedeCode:fb.getNextSedeCode,
-          createSedesBulk:fb.createSedesBulk,
+          streamSedes:fb.streamSedes, createSede:guardWrite(PERMS.EDIT_SEDES,fb.createSede), updateSede:guardWrite(PERMS.EDIT_SEDES,fb.updateSede), setSedeStatus:guardWrite(PERMS.EDIT_SEDES,fb.setSedeStatus), findSedeByCode:fb.findSedeByCode, getNextSedeCode:fb.getNextSedeCode,
+          createSedesBulk:guardWrite(PERMS.EDIT_SEDES,fb.createSedesBulk),
           // empleados
-          streamEmployees:fb.streamEmployees, createEmployee:fb.createEmployee, updateEmployee:fb.updateEmployee, setEmployeeStatus:fb.setEmployeeStatus, findEmployeeByCode:fb.findEmployeeByCode, findEmployeeByDocument:fb.findEmployeeByDocument, getNextEmployeeCode:fb.getNextEmployeeCode,
+          streamEmployees:fb.streamEmployees, createEmployee:guardWrite(PERMS.EDIT_EMPLOYEES,fb.createEmployee), updateEmployee:guardWrite(PERMS.EDIT_EMPLOYEES,fb.updateEmployee), setEmployeeStatus:guardWrite(PERMS.EDIT_EMPLOYEES,fb.setEmployeeStatus), findEmployeeByCode:fb.findEmployeeByCode, findEmployeeByDocument:fb.findEmployeeByDocument, getNextEmployeeCode:fb.getNextEmployeeCode,
           streamEmployeeCargoHistory:fb.streamEmployeeCargoHistory,
-          createEmployeesBulk:fb.createEmployeesBulk,
+          createEmployeesBulk:guardWrite(PERMS.EDIT_EMPLOYEES,fb.createEmployeesBulk),
           // supernumerarios
-          streamSupernumerarios:fb.streamSupernumerarios, createSupernumerario:fb.createSupernumerario, updateSupernumerario:fb.updateSupernumerario, setSupernumerarioStatus:fb.setSupernumerarioStatus, findSupernumerarioByCode:fb.findSupernumerarioByCode, findSupernumerarioByDocument:fb.findSupernumerarioByDocument, getNextSupernumerarioCode:fb.getNextSupernumerarioCode, createSupernumerariosBulk:fb.createSupernumerariosBulk,
+          streamSupernumerarios:fb.streamSupernumerarios, createSupernumerario:guardWrite(PERMS.EDIT_SUPERNUMERARIOS,fb.createSupernumerario), updateSupernumerario:guardWrite(PERMS.EDIT_SUPERNUMERARIOS,fb.updateSupernumerario), setSupernumerarioStatus:guardWrite(PERMS.EDIT_SUPERNUMERARIOS,fb.setSupernumerarioStatus), findSupernumerarioByCode:fb.findSupernumerarioByCode, findSupernumerarioByDocument:fb.findSupernumerarioByDocument, getNextSupernumerarioCode:fb.getNextSupernumerarioCode, createSupernumerariosBulk:guardWrite(PERMS.EDIT_SUPERNUMERARIOS,fb.createSupernumerariosBulk),
           // cargos
-          streamCargos:fb.streamCargos, createCargo:fb.createCargo, updateCargo:fb.updateCargo, setCargoStatus:fb.setCargoStatus, findCargoByCode:fb.findCargoByCode, getNextCargoCode:fb.getNextCargoCode,
+          streamCargos:fb.streamCargos, createCargo:guardWrite(PERMS.EDIT_CARGOS,fb.createCargo), updateCargo:guardWrite(PERMS.EDIT_CARGOS,fb.updateCargo), setCargoStatus:guardWrite(PERMS.EDIT_CARGOS,fb.setCargoStatus), findCargoByCode:fb.findCargoByCode, getNextCargoCode:fb.getNextCargoCode,
           // novedades
-          streamNovedades:fb.streamNovedades, createNovedad:fb.createNovedad, updateNovedad:fb.updateNovedad, setNovedadStatus:fb.setNovedadStatus, findNovedadByCode:fb.findNovedadByCode, findNovedadByCodigoNovedad:fb.findNovedadByCodigoNovedad, getNextNovedadCode:fb.getNextNovedadCode,
+          streamNovedades:fb.streamNovedades, createNovedad:guardWrite(PERMS.EDIT_NOVEDADES,fb.createNovedad), updateNovedad:guardWrite(PERMS.EDIT_NOVEDADES,fb.updateNovedad), setNovedadStatus:guardWrite(PERMS.EDIT_NOVEDADES,fb.setNovedadStatus), findNovedadByCode:fb.findNovedadByCode, findNovedadByCodigoNovedad:fb.findNovedadByCodigoNovedad, getNextNovedadCode:fb.getNextNovedadCode,
           // supervisores
-          streamSupervisors:fb.streamSupervisors, createSupervisor:fb.createSupervisor, updateSupervisor:fb.updateSupervisor, setSupervisorStatus:fb.setSupervisorStatus, findSupervisorByCode:fb.findSupervisorByCode, findSupervisorByDocument:fb.findSupervisorByDocument, getNextSupervisorCode:fb.getNextSupervisorCode,
+          streamSupervisors:fb.streamSupervisors, createSupervisor:guardWrite(PERMS.EDIT_SUPERVISORS,fb.createSupervisor), updateSupervisor:guardWrite(PERMS.EDIT_SUPERVISORS,fb.updateSupervisor), setSupervisorStatus:guardWrite(PERMS.EDIT_SUPERVISORS,fb.setSupervisorStatus), findSupervisorByCode:fb.findSupervisorByCode, findSupervisorByDocument:fb.findSupervisorByDocument, getNextSupervisorCode:fb.getNextSupervisorCode,
           // operacion
           confirmImportOperation:fb.confirmImportOperation, saveImportReplacements:fb.saveImportReplacements,
           closeOperationDayManual:fb.closeOperationDayManual,
@@ -132,18 +137,18 @@ let unsubRoleMatrix=null; let unsubUserOverrides=null; let unsubAudit=null;
   addRoute('/permissions', ()=> requireAuth(()=> { if(!isSuperAdmin()) return block('Solo SuperAdmin puede ver esto.'); return PermissionsCenter(root, deps); }));
 
   // Administración
-  addRoute('/users', ()=> requireAuth(()=> guard(PERMS.MANAGE_USERS, ()=> UsersAdmin(root, deps))));
-  addRoute('/zones', ()=> requireAuth(()=> guard(PERMS.MANAGE_ZONES, ()=> ZonesAdmin(root, deps))));
-  addRoute('/dependencies', ()=> requireAuth(()=> guard(PERMS.MANAGE_DEPENDENCIES, ()=> DependenciesAdmin(root, deps))));
-  addRoute('/sedes', ()=> requireAuth(()=> guard(PERMS.MANAGE_SEDES, ()=> SedesAdmin(root, deps))));
-  addRoute('/bulk-upload-sedes', ()=> requireAuth(()=> guard(PERMS.MANAGE_SEDES, ()=> CargueMasivoSedesAdmin(root, deps))));
-  addRoute('/employees', ()=> requireAuth(()=> guard(PERMS.MANAGE_EMPLOYEES, ()=> EmployeesAdmin(root, deps))));
-  addRoute('/supernumerarios', ()=> requireAuth(()=> guard(PERMS.MANAGE_EMPLOYEES, ()=> SupernumerariosAdmin(root, deps))));
-  addRoute('/bulk-upload-supernumerarios', ()=> requireAuth(()=> guard(PERMS.MANAGE_EMPLOYEES, ()=> CargueMasivoSupernumerariosAdmin(root, deps))));
-  addRoute('/bulk-upload', ()=> requireAuth(()=> guard(PERMS.MANAGE_EMPLOYEES, ()=> CargueMasivoAdmin(root, deps))));
-  addRoute('/cargos', ()=> requireAuth(()=> guard(PERMS.MANAGE_EMPLOYEES, ()=> CargosAdmin(root, deps))));
-  addRoute('/novedades', ()=> requireAuth(()=> guard(PERMS.MANAGE_EMPLOYEES, ()=> NovedadesAdmin(root, deps))));
-  addRoute('/supervisors', ()=> requireAuth(()=> guard(PERMS.MANAGE_SUPERVISORS, ()=> SupervisorsAdmin(root, deps))));
+  addRoute('/users', ()=> requireAuth(()=> guard(PERMS.VIEW_USERS, ()=> UsersAdmin(root, deps))));
+  addRoute('/zones', ()=> requireAuth(()=> guard(PERMS.VIEW_ZONES, ()=> ZonesAdmin(root, deps))));
+  addRoute('/dependencies', ()=> requireAuth(()=> guard(PERMS.VIEW_DEPENDENCIES, ()=> DependenciesAdmin(root, deps))));
+  addRoute('/sedes', ()=> requireAuth(()=> guard(PERMS.VIEW_SEDES, ()=> SedesAdmin(root, deps))));
+  addRoute('/bulk-upload-sedes', ()=> requireAuth(()=> guard(PERMS.EDIT_SEDES, ()=> CargueMasivoSedesAdmin(root, deps))));
+  addRoute('/employees', ()=> requireAuth(()=> guard(PERMS.VIEW_EMPLOYEES, ()=> EmployeesAdmin(root, deps))));
+  addRoute('/supernumerarios', ()=> requireAuth(()=> guard(PERMS.VIEW_SUPERNUMERARIOS, ()=> SupernumerariosAdmin(root, deps))));
+  addRoute('/bulk-upload-supernumerarios', ()=> requireAuth(()=> guard(PERMS.EDIT_SUPERNUMERARIOS, ()=> CargueMasivoSupernumerariosAdmin(root, deps))));
+  addRoute('/bulk-upload', ()=> requireAuth(()=> guard(PERMS.EDIT_EMPLOYEES, ()=> CargueMasivoAdmin(root, deps))));
+  addRoute('/cargos', ()=> requireAuth(()=> guard(PERMS.VIEW_CARGOS, ()=> CargosAdmin(root, deps))));
+  addRoute('/novedades', ()=> requireAuth(()=> guard(PERMS.VIEW_NOVEDADES, ()=> NovedadesAdmin(root, deps))));
+  addRoute('/supervisors', ()=> requireAuth(()=> guard(PERMS.VIEW_SUPERVISORS, ()=> SupervisorsAdmin(root, deps))));
 
   // Operación
   addRoute('/imports', ()=> { navigate('/registros-vivo'); return null; });

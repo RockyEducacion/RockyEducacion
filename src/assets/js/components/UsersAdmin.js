@@ -8,14 +8,15 @@ const ROLES = ['superadmin', 'admin', 'editor', 'consultor', 'supervisor', 'empl
 const STATUS = ['activo', 'inactivo', 'eliminado'];
 
 export const UsersAdmin = (mount, deps = {}) => {
-  if (!can(PERMS.MANAGE_USERS)) {
+  if (!can(PERMS.VIEW_USERS)) {
     return mount.replaceChildren(
       el('section', { className: 'main-card' }, [
         el('h2', {}, ['Usuarios']),
-        el('p', {}, ['No tienes permiso para gestionar usuarios.'])
+        el('p', {}, ['No tienes permiso para consultar usuarios.'])
       ])
     );
   }
+  const canEditUsers = can(PERMS.EDIT_USERS);
 
   const ui = el('section', { className: 'main-card' }, [
     el('h2', {}, ['Gestion de usuarios']),
@@ -23,7 +24,7 @@ export const UsersAdmin = (mount, deps = {}) => {
       el('div', {}, [el('label', { className: 'label' }, ['Buscar']), el('input', { id: 'search', className: 'input', placeholder: 'Correo, nombre o documento...' })]),
       el('div', {}, [el('label', { className: 'label' }, ['Rol']), el('select', { id: 'roleFilter', className: 'select' }, [])]),
       el('div', {}, [el('label', { className: 'label' }, ['Estado']), el('select', { id: 'statusFilter', className: 'select' }, [])]),
-      el('span', { className: 'right text-muted' }, ['Administra rol y estado de acceso.'])
+      el('span', { className: 'right text-muted' }, [canEditUsers ? 'Administra rol y estado de acceso.' : 'Modo consulta: sin permisos de edicion.'])
     ]),
     el('div', { className: 'mt-2 table-wrap' }, [
       el('table', { className: 'table', id: 'tbl' }, [
@@ -149,7 +150,7 @@ export const UsersAdmin = (mount, deps = {}) => {
     const isSelf = String(currentUid || '') === String(u.uid || '');
     const st = statusOf(u);
 
-    if (st !== 'eliminado') {
+    if (st !== 'eliminado' && canEditUsers) {
       const btnToggle = el(
         'button',
         { className: `btn btn--icon ${st === 'activo' ? 'btn--danger' : ''}`, title: st === 'activo' ? 'Desactivar' : 'Activar', 'aria-label': st === 'activo' ? 'Desactivar' : 'Activar' },
@@ -167,14 +168,16 @@ export const UsersAdmin = (mount, deps = {}) => {
     }
 
     const btnDelete = el('button', { className: 'btn btn--icon btn--danger', title: 'Eliminar', 'aria-label': 'Eliminar' }, ['\u2716']);
-    btnDelete.disabled = isSelf || st === 'eliminado';
-    btnDelete.addEventListener('click', async () => {
-      try {
-        await deleteUser(u);
-      } catch (e) {
-        setMsg(`Error al eliminar usuario: ${e?.message || e}`);
-      }
-    });
+    btnDelete.disabled = isSelf || st === 'eliminado' || !canEditUsers;
+    if (canEditUsers) {
+      btnDelete.addEventListener('click', async () => {
+        try {
+          await deleteUser(u);
+        } catch (e) {
+          setMsg(`Error al eliminar usuario: ${e?.message || e}`);
+        }
+      });
+    }
     box.append(btnDelete);
 
     const btnInfo = el('button', { className: 'btn btn--icon', title: 'Ver informacion', 'aria-label': 'Ver informacion' }, ['\u24D8']);
@@ -189,10 +192,10 @@ export const UsersAdmin = (mount, deps = {}) => {
     const currentRole = u.role || 'empleado';
     const sel = el(
       'select',
-      { className: 'select', disabled: st === 'eliminado' },
+      { className: 'select', disabled: st === 'eliminado' || !canEditUsers },
       ROLES.map((r) => el('option', { value: r, selected: currentRole === r }, [r]))
     );
-    sel.addEventListener('change', () => handleRoleChange(u, sel));
+    if (canEditUsers) sel.addEventListener('change', () => handleRoleChange(u, sel));
     return sel;
   }
 
