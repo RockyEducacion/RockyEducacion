@@ -35,8 +35,9 @@ export function getEffectivePermissions() {
   if (!s.user || !s.userProfile?.role) return {};
   if (isSuperAdmin()) return Object.fromEntries(Object.values(PERMS).map((k) => [k, true]));
   const role = s.userProfile.role;
+  if (role === ROLES.SUPERVISOR && s.userProfile?.supervisorEligible !== true) return {};
   const matrix = s.roleMatrix?.[role];
-  const base = matrix ? matrix : permsForRole(role);
+  const base = { ...permsForRole(role), ...(matrix || {}) };
   const overrides = s.userOverrides || {};
   return { ...base, ...overrides };
 }

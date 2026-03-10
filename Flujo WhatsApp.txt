@@ -1,0 +1,210 @@
+Borra todo el flujo de WhatsApp pero deja las credenciales de la CloudAPI de WhatsApp y reescribamos el flujo para que guarde la información necesaria en Registro Diario según las siguientes condiciones:
+
+Para realizar la menor cantidad posible de consultas y escrituras en base de datos, utilizaremos firebase dashboard docs para las consultas en estos flujos; adicionalmente debemos buscar la mejor forma de guardar en base de datos para que disminuya las escrituras.
+
+
+1. Primero cuando ingresa el primer mensaje debe validar el número de teléfono desde el que llega el mensaje contra employees, verifica la cédula y verifica si el cargo es supernumerario, 
+
+1.1. Si no es supernumerario responde:
+
+Hola, soy Rocky
+
+Eres: (NOMBRE)
+Cédula: (DOCUMENTO)
+Estás en: (SEDE)
+
+Elige una opción: (selección)
+
+Soy Yo
+No Soy Yo
+Actualizar Datos
+
+1.1.1. Si selecciona (Soy Yo), verifica en tabla incapacitados y en caso de estar incapacitado en esta fecha, Responde.
+
+Te encuentras incapacitado, Muchas Gracia por el registro. (No se realiza registro, pues ya debe estar el registro programado desde el día que se registró incapacitado por primera vez).
+
+Si no está incapacitado, Realiza la siguiente pregunta.
+
+Elige una opción:
+
+Trabajando
+Compensatorio
+Novedad
+
+1.1.2. Si elige opción (Trabajando) Guarda: Novedad=1
+
+1.1.3. Si elige (Compensatorio) Guarda: Novedad=7
+
+1.1.4. Si elige (Novedad) devuelve la siguiente respuesta:
+
+Selecciona la novedad que presentas:
+
+Enfermedad General
+Accidente Laboral
+Calamidad
+Licencia No Remunerada
+
+1.1.4.1. Si elige la Opción (Enfermedad General), Guarda Novedad=3 y continúa con la siguiente pregunta:
+
+Selecciona las fechas de incapacidad:
+
+Fecha de inicio de incapacidad, por favor escribe DD/MM/AAAA: 
+
+Fecha de terminación de incapacidad, por favor escribe DD/MM/AAAA:
+
+(registra el documento y la fecha de inicio en tabla de incapacidades)
+
+1.1.4.2. Si elige la opción (Accidente Laboral) Guarda Novedad=2 y continúa con la siguiente pregunta:
+
+Selecciona las fechas de incapacidad:
+
+Fecha de inicio de incapacidad, por favor escribe DD/MM/AAAA:
+
+Fecha de terminación de incapacidad, por favor escribe DD/MM/AAAA:
+
+(registra el documento y la fecha de inicio en tabla de incapacidades)
+
+1.1.4.3. Si elige opción (Calamidad) Guarda Novedad=4 y continúa con la siguiente pregunta:
+
+Selecciona las fechas de incapacidad:
+
+Fecha de inicio de incapacidad, por favor escribe DD/MM/AAAA:
+
+Fecha de terminación de incapacidad, por favor escribe DD/MM/AAAA:
+
+(registra el documento y la fecha de inicio en tabla de incapacidades)
+
+1.1.4.4. Si elige opción (Licencia No Remunerada) Guarda Novedad=5
+
+1.1.2. Si elige (No Soy Yo) realiza la siguiente pregunta:
+
+Por favor escribe tu número de cédula sin puntos:
+
+Se consulta la cédula en la base de datos y si se encuentra y no es supernumerario, se inicia con el flujo principal (1.1.) según el número de cédula.
+
+Si no se encuentra, informa: No estás registrado en nuestra base de datos, por favor comunícate con tu supervisor.
+
+1.1.3. Si elige opción (Actualizar Datos) continúa con la siguiente pregunta:
+
+Traslado de Sede
+Cambio de Teléfono
+
+1.1.3.1. Si selecciona (Traslado de Sede), realiza la siguiente pregunta:
+
+Escribe una palabra clave del nombre de la sede a la que te trasladaron: 
+
+Se hace una consulta por nombres similar de la sede y se devuelve el listado de sedes que contengan la palabra para seleccionar la correcta. (Por selección)
+
+Selecciona la sede y actualiza en empleados y responde:
+
+Información actualizada correctamente, si no haz realizado el registro por favor escribe nuevamente "Hola".
+
+1.1.3.2. Si selecciona (Cambio de teléfono) , realiza la siguiente pregunta:
+
+Diligencia el número de celular nuevo:
+
+Actualiza el número de teléfono en Empleados (verificando que tenga 57 por delante o se lo agrega) y responde:
+
+Información actualizada correctamente, si no haz realizado el registro por favor escribe nuevamente "Hola".
+
+
+1.2. Si la cédula identificada corresponde a un empleado con el cargo supernumerario responde:
+
+Hola, soy Rocky
+
+Eres: (NOMBRE)
+Cédula: (DOCUMENTO)
+Estas como SUPERNUMERARIO
+
+Elige una opción:
+
+Trabajando
+Novedad
+Actualizar Datos
+
+1.2.1. Si selecciona (Trabajando), devuelve la siguiente pregunta:
+
+Escribe una palabra clave del nombre de la sede en la que te encuentras:
+
+Se hace una consulta por nombres similar de la sede y se devuelve el listado de sedes que contengan la palabra para seleccionar la correcta. (Por selección)
+
+Selecciona la sede y realiza el registro en la sede seleccionada con la novedad=1:
+
+1.2.2. Si elige la opción (Novedad), devuelve la siguiente pregunta:
+
+Selecciona la novedad que presentas:
+
+Enfermedad General
+Accidente Laboral
+Calamidad
+Licencia No Remunerada
+
+1.2.2.1. Si elige la Opción (Enfermedad General), Guarda Novedad=3 y continúa con la siguiente pregunta:
+
+Selecciona las fechas de incapacidad:
+
+Fecha de inicio de incapacidad, por favor escribe DD/MM/AAAA:
+
+Fecha de terminación de incapacidad, por favor escribe DD/MM/AAAA:
+
+(registra el documento y la fecha de inicio en tabla de incapacidades)
+
+1.2.2.2. Si elige la opción (Accidente Laboral) Guarda Novedad=2 y continúa con la siguiente pregunta:
+
+Selecciona las fechas de incapacidad:
+
+Fecha de inicio de incapacidad, por favor escribe DD/MM/AAAA:
+
+Fecha de terminación de incapacidad, por favor escribe DD/MM/AAAA:
+
+(registra el documento y la fecha de inicio en tabla de incapacidades)
+
+1.2.2.3. Si elige opción (Calamidad) Guarda Novedad=4 y continúa con la siguiente pregunta:
+
+Selecciona las fechas de incapacidad:
+
+Fecha de inicio de incapacidad, por favor escribe DD/MM/AAAA:
+
+Fecha de terminación de incapacidad, por favor escribe DD/MM/AAAA:
+
+(registra el documento y la fecha de inicio en tabla de incapacidades)
+
+1.2.2.4. Si elige opción (Licencia No Remunerada) Guarda Novedad=5
+
+
+1.2.3. Si elige opción (Actualizar Datos) continúa con la siguiente pregunta:
+
+Traslado de Sede
+Cambio de Teléfono
+
+1.2.3.1. Si selecciona (Traslado de Sede), realiza la siguiente pregunta:
+
+Escribe una palabra clave del nombre de la sede a la que te trasladaron:
+
+Se hace una consulta por nombres similar de la sede y se devuelve el listado de sedes que contengan la palabra para seleccionar la correcta. (Por selección)
+
+Selecciona la sede y actualiza en empleados y responde:
+
+Información actualizada correctamente, si no haz realizado el registro por favor escribe nuevamente "Hola".
+
+1.2.3.2. Si selecciona (Cambio de teléfono) , realiza la siguiente pregunta:
+
+Diligencia el número de celular nuevo:
+
+Actualiza el número de teléfono en Empleados (verificando que tenga 57 por delante o se lo agrega) y responde:
+
+Información actualizada correctamente, si no haz realizado el registro por favor escribe nuevamente "Hola".
+
+
+2. Si el número de teléfono no se reconoce, responde.
+
+Hola, no encontramos tu número registrado en la base de datos, por favor escribe tu cédula sin puntos.
+
+2.1. Se consulta la cédula en la base de datos y si se encuentra y no es supernumerario, se inicia con el flujo principal (1.1.) según el número de cédula.
+
+2.2. Si se encuentra la cédula y es un empleado con cargo supernumerario, se inicia con el flujo supernumerario (1.2.) según el número de cédula.
+
+2.3. Si no se encuentra, informa: No estás registrado en nuestra base de datos, por favor comunícate con tu supervisor.
+
+
+3. Cuando se terminan los flujos con registro novedad informa: Registro confirmado. Fecha: (FECHA), Hora: (HORA), Novedad: (NOVEDAD), Muchas Gracias.

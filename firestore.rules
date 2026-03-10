@@ -14,13 +14,25 @@ service cloud.firestore {
     match /counters/{name} { allow read, write: if isAdminLike(); }
 
     // Colecciones
-    match /zones/{id} { allow read: if request.auth != null; allow create, update: if isAdminLike(); }
+    match /zones/{id} {
+      allow read: if request.auth != null && (isAdminLike() || !isSupervisor() || (isSupervisorEligible() && resource.data.codigo is string && supervisorZones().hasAny([resource.data.codigo])));
+      allow create, update: if isAdminLike();
+    }
     match /dependencies/{id} { allow read: if request.auth != null; allow create, update: if isAdminLike(); }
-    match /sedes/{id} { allow read: if request.auth != null; allow create, update: if isAdminLike(); }
-    match /employees/{id} { allow read: if request.auth != null; allow create, update: if isAdminLike(); }
+    match /sedes/{id} {
+      allow read: if request.auth != null && (isAdminLike() || !isSupervisor() || (isSupervisorEligible() && inSupervisorZone(resource.data)));
+      allow create, update: if isAdminLike() || (isSupervisorEligible() && inSupervisorZone(request.resource.data));
+    }
+    match /employees/{id} {
+      allow read: if request.auth != null && (isAdminLike() || !isSupervisor() || (isSupervisorEligible() && inSupervisorZone(resource.data)) || isOwnEmployee(resource.data));
+      allow create, update: if isAdminLike() || (isSupervisorEligible() && inSupervisorZone(request.resource.data));
+    }
     match /employee_cargo_history/{id} { allow read: if request.auth != null; allow create, update: if isAdminLike(); }
     match /supernumerario_profile/{id} { allow read: if request.auth != null; allow create, update: if isAdminLike(); }
-    match /supervisor_profile/{id} { allow read: if request.auth != null; allow create, update: if isAdminLike(); }
+    match /supervisor_profile/{id} {
+      allow read: if request.auth != null && (isAdminLike() || !isSupervisor() || (isSupervisorEligible() && inSupervisorZone(resource.data)) || isOwnSupervisorProfile(resource.data));
+      allow create, update: if isAdminLike() || (isSupervisorEligible() && inSupervisorZone(request.resource.data));
+    }
     match /cargos/{id} { allow read: if request.auth != null; allow create, update: if isAdminLike(); }
     match /novedades/{id} { allow read: if request.auth != null; allow create, update: if isAdminLike(); }
     match /import_history/{id} { allow read: if request.auth != null; allow create, update: if isAdminLike(); }
@@ -40,6 +52,32 @@ service cloud.firestore {
       return request.auth != null && (
         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['superadmin','admin']
       );
+    }
+    function isSupervisor(){
+      return request.auth != null && (
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'supervisor'
+      );
+    }
+    function isSupervisorEligible(){
+      let user = get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+      return request.auth != null && user.role == 'supervisor' && user.supervisorEligible == true;
+    }
+    function supervisorZones(){
+      let user = get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+      return (user.zonasPermitidas is list)
+        ? user.zonasPermitidas
+        : ((user.zonaCodigo is string && user.zonaCodigo != '') ? [user.zonaCodigo] : []);
+    }
+    function inSupervisorZone(data){
+      return data.zonaCodigo is string && data.zonaCodigo != '' && supervisorZones().hasAny([data.zonaCodigo]);
+    }
+    function isOwnSupervisorProfile(data){
+      let user = get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+      return data.documento is string && user.documento is string && data.documento == user.documento;
+    }
+    function isOwnEmployee(data){
+      let user = get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+      return data.documento is string && user.documento is string && data.documento == user.documento;
     }
     function isSuperAdmin(){
       return request.auth != null && (

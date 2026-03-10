@@ -218,14 +218,14 @@ export const RegistroSede = (mount, deps = {}) => {
       const statusBySede = new Map((sedeStatus || []).map((s) => [String(s.sedeCodigo || ''), s]));
       const superDocs = new Set(
         (supernumerarios || [])
-          .filter((s) => isEmployeeExpectedForDate(s, date))
+          .filter((s) => isEmployeeExpectedForDate(s, date, sedes))
           .map((s) => String(s.documento || '').trim())
           .filter(Boolean)
       );
       const contratadosBySede = new Map();
       const contractedMapBySede = new Map();
       (employees || []).forEach((e) => {
-        if (!isEmployeeExpectedForDate(e, date)) return;
+        if (!isEmployeeExpectedForDate(e, date, sedes)) return;
         const doc = String(e.documento || '').trim();
         if (doc && superDocs.has(doc)) return;
         const sedeCode = String(e.sedeCodigo || '').trim();
@@ -620,7 +620,7 @@ function parseOperatorCount(value) {
   return Number.isFinite(n) ? n : 0;
 }
 
-function isEmployeeExpectedForDate(emp, selectedDate) {
+function isEmployeeExpectedForDate(emp, selectedDate, sedeRows = []) {
   if (!selectedDate) return false;
   const ingreso = toISODate(emp?.fechaIngreso);
   if (!ingreso || ingreso > selectedDate) return false;
@@ -628,7 +628,22 @@ function isEmployeeExpectedForDate(emp, selectedDate) {
   const estado = String(emp?.estado || '').trim().toLowerCase();
   if (estado === 'inactivo') return Boolean(retiro && retiro >= selectedDate);
   if (retiro && retiro < selectedDate) return false;
+  const sedeCodigo = String(emp?.sedeCodigo || '').trim();
+  if (!sedeCodigo) return false;
+  const sede = (sedeRows || []).find((row) => String(row?.codigo || '').trim() === sedeCodigo) || null;
+  if (!isSedeScheduledForDate(sede, selectedDate)) return false;
   return true;
+}
+
+function isSedeScheduledForDate(sede, selectedDate) {
+  const iso = toISODate(selectedDate);
+  if (!iso) return false;
+  const [year, month, day] = iso.split('-').map((n) => Number(n));
+  const weekday = new Date(Date.UTC(year, (month || 1) - 1, day || 1)).getUTCDay();
+  const jornada = String(sede?.jornada || 'lun_vie').trim().toLowerCase();
+  if (jornada === 'lun_dom') return true;
+  if (jornada === 'lun_sab') return weekday >= 1 && weekday <= 6;
+  return weekday >= 1 && weekday <= 5;
 }
 
 function toISODate(value) {

@@ -113,10 +113,15 @@ export const WhatsAppLive = (mount, deps = {}) => {
   let dailyMetrics = null;
   let cardFilter = 'all';
 
+  function replacementRowKey(r = {}) {
+    const empId = String(r.empleadoId || r.employeeId || '').trim();
+    return `${String(r.fecha || '').trim()}_${empId}`;
+  }
+
   function replacementMap() {
     const map = new Map();
     (replacements || []).forEach((r) => {
-      const key = `${r.fecha || ''}_${r.empleadoId || ''}`;
+      const key = replacementRowKey(r);
       map.set(key, r);
     });
     return map;
@@ -288,7 +293,8 @@ export const WhatsAppLive = (mount, deps = {}) => {
     (replacements || []).forEach((r) => {
       if (String(r.fecha || '').trim() !== String(fecha || '').trim()) return;
       if (String(r.decision || '').trim() !== 'reemplazo') return;
-      if (currentEmployeeId && String(r.empleadoId || '').trim() === String(currentEmployeeId).trim()) return;
+      const rid = String(r.empleadoId || r.employeeId || '').trim();
+      if (currentEmployeeId && rid === String(currentEmployeeId).trim()) return;
       const doc = String(r.supernumerarioDocumento || '').trim();
       if (doc) set.add(doc);
     });
@@ -298,11 +304,11 @@ export const WhatsAppLive = (mount, deps = {}) => {
   function mergeReplacements(baseRows = [], newRows = []) {
     const map = new Map();
     (baseRows || []).forEach((r) => {
-      const k = `${r.fecha || ''}_${r.empleadoId || ''}`;
+      const k = replacementRowKey(r);
       map.set(k, r);
     });
     (newRows || []).forEach((r) => {
-      const k = `${r.fecha || ''}_${r.empleadoId || ''}`;
+      const k = replacementRowKey(r);
       map.set(k, r);
     });
     return Array.from(map.values());
@@ -347,7 +353,7 @@ export const WhatsAppLive = (mount, deps = {}) => {
     out = out.filter((r) => {
       if (cardFilter === 'all') return true;
       const isNovelty = canAssignReplacement(r);
-      const key = `${r.fecha || ''}_${r.empleadoId || ''}`;
+      const key = replacementRowKey(r);
       const repl = replMap.get(key) || null;
       const decision = String(repl?.decision || '').trim();
       const handled = decision === 'reemplazo' || decision === 'ausentismo';
@@ -359,7 +365,7 @@ export const WhatsAppLive = (mount, deps = {}) => {
 
     if (!term) return out;
     return out.filter((r) => {
-      const repl = replMap.get(`${r.fecha || ''}_${r.empleadoId || ''}`) || {};
+      const repl = replMap.get(replacementRowKey(r)) || {};
       const blob = [
         r.documento || '',
         r.nombre || '',
@@ -465,6 +471,7 @@ export const WhatsAppLive = (mount, deps = {}) => {
     const assignment = {
       fecha: row.fecha,
       empleadoId: row.empleadoId,
+      employeeId: row.empleadoId,
       documento: row.documento || null,
       nombre: row.nombre || null,
       sedeCodigo: row.sedeCodigo || null,
@@ -519,7 +526,7 @@ export const WhatsAppLive = (mount, deps = {}) => {
 
     tbody.replaceChildren(
       ...rows.map((r) => {
-        const key = `${r.fecha || ''}_${r.empleadoId || ''}`;
+        const key = replacementRowKey(r);
         const repl = replMap.get(key) || null;
         const rowClass = classifyRow(r);
         const canAssign = canAssignReplacement(r);
@@ -690,7 +697,7 @@ export const WhatsAppLive = (mount, deps = {}) => {
     if (key === 'novedad') return String(displayNovedad(row) || row.novedadNombre || row.novedad || '').toLowerCase();
     if (key === 'dias') return Number(incapacidadDaysForRow(row) || 0);
     if (key === 'reemplazo') {
-      const repl = replMap.get(`${row.fecha || ''}_${row.empleadoId || ''}`) || {};
+      const repl = replMap.get(replacementRowKey(row)) || {};
       return String(repl.supernumerarioNombre || repl.supernumerarioDocumento || repl.decision || '').toLowerCase();
     }
     return '';
@@ -707,15 +714,15 @@ export const WhatsAppLive = (mount, deps = {}) => {
 
   function calculateStats() {
     const dayRows = (statsAttendance || []).filter((r) => String(r.fecha || '').trim() === today);
-    const uniqueLocal = new Set(dayRows.map((r) => String(r.empleadoId || '').trim()).filter(Boolean)).size;
+    const uniqueLocal = new Set(dayRows.map((r) => String(r.empleadoId || r.employeeId || '').trim()).filter(Boolean)).size;
     const supernumerarioDocs = new Set(
       (supernumerarios || [])
-        .filter((s) => isEmployeeExpectedForDate(s, today))
+        .filter((s) => isEmployeeExpectedForDate(s, today, sedes))
         .map((s) => String(s?.documento || '').trim())
         .filter(Boolean)
     );
     const expectedLocal = (employees || []).filter((e) => {
-      if (!isEmployeeExpectedForDate(e, today)) return false;
+      if (!isEmployeeExpectedForDate(e, today, sedes)) return false;
       const doc = String(e?.documento || '').trim();
       if (!doc) return true;
       return !supernumerarioDocs.has(doc);
@@ -727,13 +734,13 @@ export const WhatsAppLive = (mount, deps = {}) => {
     const missingLocal = Math.max(0, expectedLocal - uniqueLocal);
     const replMap = new Map();
     (statsReplacements || []).forEach((r) => {
-      const key = `${r.fecha || ''}_${r.empleadoId || ''}`;
+      const key = replacementRowKey(r);
       replMap.set(key, r);
     });
     const noveltyTotal = dayRows.filter((r) => canAssignReplacement(r)).length;
     const noveltyHandled = dayRows.filter((r) => {
       if (!canAssignReplacement(r)) return false;
-      const key = `${r.fecha || ''}_${r.empleadoId || ''}`;
+      const key = replacementRowKey(r);
       const repl = replMap.get(key);
       if (!repl) return false;
       const decision = String(repl.decision || '').trim();
@@ -795,8 +802,8 @@ export const WhatsAppLive = (mount, deps = {}) => {
       unDashboardReplacements = deps.streamDashboardReplacementsByDate(
         today,
         (rows) => {
-          replacements = rows || [];
-          statsReplacements = replacements;
+          replacements = mergeReplacements(replacements, rows || []);
+          statsReplacements = mergeReplacements(statsReplacements, rows || []);
           render();
         },
         () => {}
@@ -939,7 +946,7 @@ function kpiItem(label, id, value) {
   ]);
 }
 
-function isEmployeeExpectedForDate(emp, selectedDate) {
+function isEmployeeExpectedForDate(emp, selectedDate, sedeRows = []) {
   if (!selectedDate) return false;
   const ingreso = toISODate(emp?.fechaIngreso);
   if (!ingreso || ingreso > selectedDate) return false;
@@ -950,7 +957,23 @@ function isEmployeeExpectedForDate(emp, selectedDate) {
   }
   if (retiro && retiro < selectedDate) return false;
 
+  const sedeCodigo = String(emp?.sedeCodigo || '').trim();
+  if (!sedeCodigo) return false;
+  const sede = (sedeRows || []).find((row) => String(row?.codigo || '').trim() === sedeCodigo) || null;
+  if (!isSedeScheduledForDate(sede, selectedDate)) return false;
+
   return true;
+}
+
+function isSedeScheduledForDate(sede, selectedDate) {
+  const iso = toISODate(selectedDate);
+  if (!iso) return false;
+  const [year, month, day] = iso.split('-').map((n) => Number(n));
+  const weekday = new Date(Date.UTC(year, (month || 1) - 1, day || 1)).getUTCDay();
+  const jornada = String(sede?.jornada || 'lun_vie').trim().toLowerCase();
+  if (jornada === 'lun_dom') return true;
+  if (jornada === 'lun_sab') return weekday >= 1 && weekday <= 6;
+  return weekday >= 1 && weekday <= 5;
 }
 
 function isEmployeeActiveTodayStrict(emp, selectedDate) {

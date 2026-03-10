@@ -82,6 +82,16 @@ export function permsForRole(role) {
         [PERMS.VIEW_REPORTS]: true
       };
     case ROLES.SUPERVISOR:
+      return {
+        ...none,
+        [PERMS.VIEW_SEDES]: true,
+        [PERMS.EDIT_SEDES]: true,
+        [PERMS.VIEW_EMPLOYEES]: true,
+        [PERMS.EDIT_EMPLOYEES]: true,
+        [PERMS.VIEW_SUPERVISORS]: true,
+        [PERMS.EDIT_SUPERVISORS]: true,
+        [PERMS.UPLOAD_DATA]: true
+      };
     case ROLES.EMPLEADO:
       return {
         ...none,

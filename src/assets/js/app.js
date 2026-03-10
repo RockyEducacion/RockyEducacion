@@ -30,6 +30,7 @@ import { CargarDatos } from './components/CargarDatos.js';
 import { PermissionsCenter } from './components/PermissionsCenter.js';
 import { WhatsAppLive } from './components/WhatsAppLive.js';
 import { RegistroSede } from './components/RegistroSede.js';
+import { RegistroDiarioSupervisor } from './components/RegistroDiarioSupervisor.js';
 
 import { addRoute, startRouter, navigate, refreshRoute } from './router.js';
 import { getState, setState } from './state.js';
@@ -153,7 +154,14 @@ const guardWrite=(perm,fn)=> async (...args)=>{
   // Operación
   addRoute('/imports', ()=> { navigate('/registros-vivo'); return null; });
   addRoute('/whatsapp-live', ()=> { navigate('/registros-vivo'); return null; });
-  addRoute('/registros-vivo', ()=> requireAuth(()=> guard(PERMS.IMPORT_DATA, ()=> WhatsAppLive(root, deps))));
+  addRoute('/registros-vivo', ()=> requireAuth(()=> {
+    const role=String(getState().userProfile?.role||'').trim().toLowerCase();
+    if(role==='supervisor'){
+      if(!can(PERMS.UPLOAD_DATA)) return block('No tienes permiso para acceder a esta sección.');
+      return RegistroDiarioSupervisor(root, deps);
+    }
+    return guard(PERMS.IMPORT_DATA, ()=> WhatsAppLive(root, deps));
+  }));
   addRoute('/registro-sede', ()=> requireAuth(()=> guard(PERMS.IMPORT_DATA, ()=> RegistroSede(root, deps))));
   addRoute('/imports-replacements', ()=> requireAuth(()=> guard(PERMS.IMPORT_DATA, ()=> ImportReplacements(root, deps))));
   addRoute('/import-history', ()=> requireAuth(()=> guard(PERMS.VIEW_IMPORT_HISTORY, ()=> ImportHistory(root, deps))));

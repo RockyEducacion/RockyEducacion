@@ -21,6 +21,10 @@ const INCAPACITADOS_COL = 'incapacitados';
 const DASHBOARD_DOCS_COL = 'dashboard_docs';
 const DASHBOARD_BUCKETS_ATTENDANCE_COL = 'attendance_buckets';
 const DASHBOARD_BUCKETS_REPLACEMENTS_COL = 'replacement_buckets';
+const WHATSAPP_LOOKUP_ROOT_DOC = 'whatsapp_lookup';
+const WHATSAPP_LOOKUP_PHONE_COL = 'employee_phone_buckets';
+const WHATSAPP_LOOKUP_DOCUMENT_COL = 'employee_document_buckets';
+const WHATSAPP_LOOKUP_SEDES_DOC = 'sedes_catalog';
 const DASHBOARD_BUCKET_COUNT = 32;
 const OPERATION_CACHE_TTL_MS = 5 * 1000;
 const LOOKUP_CACHE_TTL_MS = 10 * 60 * 1000;
@@ -337,6 +341,26 @@ exports.updateDailyMetricsOnReplacementsWrite = onDocumentWritten(
   }
 );
 
+exports.syncWhatsAppEmployeeLookup = onDocumentWritten(
+  {
+    region: 'us-central1',
+    document: 'employees/{docId}'
+  },
+  async (event) => {
+    await syncWhatsAppEmployeeLookupIndex(event);
+  }
+);
+
+exports.syncWhatsAppSedesLookup = onDocumentWritten(
+  {
+    region: 'us-central1',
+    document: 'sedes/{docId}'
+  },
+  async () => {
+    await refreshWhatsAppSedesLookupDoc();
+  }
+);
+
 exports.refreshTodayDailyMetrics = onSchedule(
   {
     region: 'us-central1',
@@ -374,7 +398,8 @@ exports.finalizeDailyAbsenteeism = onSchedule(
       ...summary,
       ...snapshotStats
     });
-    logger.info('finalizeDailyAbsenteeism completed', { day, ...summary, ...snapshotStats });
+    const nextDayPrefill = await ensureNextDayIncapacidadPrefillForClosure(day);
+    logger.info('finalizeDailyAbsenteeism completed', { day, ...summary, ...snapshotStats, ...nextDayPrefill });
   }
 );
 
@@ -406,6 +431,7 @@ exports.closeOperationDay = onRequest(
     }
 
     const body = req.body || {};
+    const dryRun = body.dryRun === true || String(body.dryRun || '').trim().toLowerCase() === 'true';
     const list = Array.isArray(body.dates) ? body.dates : [body.date];
     const days = list
       .map((d) => String(d || '').trim())
@@ -423,6 +449,22 @@ exports.closeOperationDay = onRequest(
           results.push({ day, status: 'already_closed' });
           continue;
         }
+        if (dryRun) {
+          const [summary, sameDayPreview, nextDayPreview] = await Promise.all([
+            computeOperationClosureSummary(day),
+            previewAutoAttendanceFromIncapacidades(day),
+            previewAutoAttendanceFromIncapacidades(shiftDateIso(day, 1))
+          ]);
+          results.push({
+            day,
+            status: 'dry_run',
+            wouldClose: true,
+            ...summary,
+            sameDayIncapacidadPreview: sameDayPreview,
+            nextDayIncapacidadPreview: nextDayPreview
+          });
+          continue;
+        }
         await ensureAutoAttendanceFromIncapacidades(day);
         await ensureAutoAttendanceWithNovedad8(day);
         await ensureAusentismoAssignmentsForDate(day);
@@ -437,14 +479,15 @@ exports.closeOperationDay = onRequest(
           ...summary,
           ...snapshotStats
         });
-        results.push({ day, status: 'closed', ...summary, ...snapshotStats });
+        const nextDayPrefill = await ensureNextDayIncapacidadPrefillForClosure(day);
+        results.push({ day, status: 'closed', ...summary, ...snapshotStats, ...nextDayPrefill });
       } catch (err) {
         logger.error('closeOperationDay error', { day, err: String(err?.message || err) });
         results.push({ day, status: 'error', error: String(err?.message || err) });
       }
     }
 
-    res.status(200).json({ ok: true, results });
+    res.status(200).json({ ok: true, dryRun, results });
   }
 );
 
@@ -494,7 +537,7 @@ async function processIncomingMessage(docRef, data) {
   if (session.stage === 'awaiting_document_lookup') {
     const documento = digitsOnly(text);
     if (!documento) {
-      await sendWhatsAppText(fromDigits, 'Por favor escribe solo tu numero de cedula (solo digitos).', row.phoneNumberId);
+      await sendWhatsAppText(fromDigits, 'Por favor escribe tu numero de cedula sin puntos.', row.phoneNumberId);
       await setIncomingProcess(docRef, 'ignored', 'invalid_document_input');
       return;
     }
@@ -502,7 +545,7 @@ async function processIncomingMessage(docRef, data) {
     if (!employee) {
       await sendWhatsAppText(
         fromDigits,
-        'No encontramos esa cedula en la base de datos. Verifica el numero o contacta a administracion.',
+        'No estas registrado en nuestra base de datos, por favor comunicate con tu supervisor.',
         row.phoneNumberId
       );
       await setIncomingProcess(docRef, 'error', 'document_not_registered', { documento });
@@ -559,7 +602,7 @@ async function processIncomingMessage(docRef, data) {
     if (!employee) {
       await sendWhatsAppText(
         fromDigits,
-        'Hola, no encontramos tu numero registrado en la base de datos, por favor escribe tu cedula.\n\nEscribelo sin puntos.',
+        'Hola, no encontramos tu numero registrado en la base de datos, por favor escribe tu cedula sin puntos.',
         row.phoneNumberId
       );
       await sessionRef.set(
@@ -620,9 +663,31 @@ async function processIncomingMessage(docRef, data) {
   if (session.stage === 'awaiting_identity_option' && session.employeeId) {
     const identityOption = parseIdentityOption(normalizedText);
     if (identityOption === 'soy_yo') {
+      const incapacidadActiva = await findActiveIncapacidadByEmployee(String(session.employeeId), todayInBogota());
+      if (incapacidadActiva) {
+        await sendWhatsAppText(fromDigits, 'Te encuentras incapacitado, Muchas Gracias por el registro.', row.phoneNumberId);
+        await sessionRef.set(
+          {
+            stage: 'completed',
+            pendingAttendance: admin.firestore.FieldValue.delete(),
+            trasladoCandidates: admin.firestore.FieldValue.delete(),
+            superSedeCandidates: admin.firestore.FieldValue.delete(),
+            selectedNovedad: admin.firestore.FieldValue.delete(),
+            incapacidadDays: admin.firestore.FieldValue.delete(),
+            incapacidadStartDate: admin.firestore.FieldValue.delete(),
+            incapacidadEndDate: admin.firestore.FieldValue.delete(),
+            updatedAt: admin.firestore.FieldValue.serverTimestamp()
+          },
+          { merge: true }
+        );
+        await setIncomingProcess(docRef, 'processed', 'employee_in_incapacidad_active', {
+          incapacidadId: incapacidadActiva.id
+        });
+        return;
+      }
       await sendWhatsAppDailyOptions(
         fromDigits,
-        'Muy bien, ahora elige una opcion:',
+        'Elige una opcion:',
         row.phoneNumberId
       );
       await sessionRef.set(
@@ -639,7 +704,7 @@ async function processIncomingMessage(docRef, data) {
     if (identityOption === 'no_soy_yo') {
       await sendWhatsAppText(
         fromDigits,
-        'Hola, no encontramos tu numero registrado en la base de datos, por favor escribe tu cedula.\n\nEscribelo sin puntos.',
+        'Por favor escribe tu numero de cedula sin puntos:',
         row.phoneNumberId
       );
       await sessionRef.set(
@@ -697,28 +762,6 @@ async function processIncomingMessage(docRef, data) {
 
     const dailyOption = parseDailyOption(normalizedText);
     if (dailyOption === 'trabajando') {
-      const incapacidadActiva = await findActiveIncapacidadByEmployee(String(session.employeeId), todayInBogota());
-      if (incapacidadActiva) {
-        await sendWhatsAppText(fromDigits, 'Te encuentras incapacitado, muchas gracias por el registro.', row.phoneNumberId);
-        await sessionRef.set(
-          {
-            stage: 'completed',
-            pendingAttendance: admin.firestore.FieldValue.delete(),
-            trasladoCandidates: admin.firestore.FieldValue.delete(),
-            superSedeCandidates: admin.firestore.FieldValue.delete(),
-            selectedNovedad: admin.firestore.FieldValue.delete(),
-            incapacidadDays: admin.firestore.FieldValue.delete(),
-            incapacidadStartDate: admin.firestore.FieldValue.delete(),
-            incapacidadEndDate: admin.firestore.FieldValue.delete(),
-            updatedAt: admin.firestore.FieldValue.serverTimestamp()
-          },
-          { merge: true }
-        );
-        await setIncomingProcess(docRef, 'processed', 'employee_in_incapacidad_active', {
-          incapacidadId: incapacidadActiva.id
-        });
-        return;
-      }
       const novelty = await resolveNovedadByCode('1');
       await finalizeAttendanceNow({
         sessionRef,
@@ -765,7 +808,7 @@ async function processIncomingMessage(docRef, data) {
     if (dailyOption === 'novedad') {
       await sendWhatsAppNovedadList(
         fromDigits,
-        'Selecciona el tipo de novedad a registrar.',
+        'Selecciona la novedad que presentas:',
         row.phoneNumberId
       );
       await sessionRef.set(
@@ -803,7 +846,7 @@ async function processIncomingMessage(docRef, data) {
     }
     const superOption = parseSuperMainOption(normalizedText);
     if (superOption === 'trabajando') {
-      await sendWhatsAppText(fromDigits, 'Escribe la sede en la que te encuentras.', row.phoneNumberId);
+      await sendWhatsAppText(fromDigits, 'Escribe una palabra clave del nombre de la sede en la que te encuentras:', row.phoneNumberId);
       await sessionRef.set(
         {
           stage: 'awaiting_super_sede_search',
@@ -816,7 +859,7 @@ async function processIncomingMessage(docRef, data) {
       return;
     }
     if (superOption === 'novedad') {
-      await sendWhatsAppNovedadList(fromDigits, 'Selecciona el tipo de novedad a registrar.', row.phoneNumberId);
+      await sendWhatsAppNovedadList(fromDigits, 'Selecciona la novedad que presentas:', row.phoneNumberId);
       await sessionRef.set(
         {
           stage: 'awaiting_novedad_type',
@@ -851,7 +894,7 @@ async function processIncomingMessage(docRef, data) {
     if (updateOption === 'traslado') {
       await sendWhatsAppText(
         fromDigits,
-        'Escribe una palabra clave de la SEDE a la que te trasladaron y luego seleccionada del listado:',
+        'Escribe una palabra clave del nombre de la sede a la que te trasladaron:',
         row.phoneNumberId
       );
       await sessionRef.set(
@@ -1173,7 +1216,7 @@ async function processIncomingMessage(docRef, data) {
     if (requiresIncapacidadDateRange(parsedNovedad)) {
       await sendWhatsAppText(
         fromDigits,
-        'Selecciona las fechas de incapacidad.\nFecha de inicio (YYYY-MM-DD):',
+        'Selecciona las fechas de incapacidad:\n\nFecha de inicio de incapacidad, por favor escribe DD/MM/AAAA:',
         row.phoneNumberId
       );
       await sessionRef.set(
@@ -1207,11 +1250,11 @@ async function processIncomingMessage(docRef, data) {
   if (session.stage === 'awaiting_incapacidad_start_date' && session.employeeId) {
     const startDate = normalizeDate(text);
     if (!startDate) {
-      await sendWhatsAppText(fromDigits, 'Fecha no valida. Escribe la fecha de inicio en formato YYYY-MM-DD.', row.phoneNumberId);
+      await sendWhatsAppText(fromDigits, 'Fecha no valida. Escribe la fecha de inicio en formato DD/MM/AAAA.', row.phoneNumberId);
       await setIncomingProcess(docRef, 'ignored', 'invalid_incapacidad_start_date');
       return;
     }
-    await sendWhatsAppText(fromDigits, 'Fecha de terminacion de incapacidad (YYYY-MM-DD):', row.phoneNumberId);
+    await sendWhatsAppText(fromDigits, 'Fecha de terminacion de incapacidad, por favor escribe DD/MM/AAAA:', row.phoneNumberId);
     await sessionRef.set(
       {
         stage: 'awaiting_incapacidad_end_date',
@@ -1228,12 +1271,12 @@ async function processIncomingMessage(docRef, data) {
     const endDate = normalizeDate(text);
     const startDate = normalizeDate(session.incapacidadStartDate);
     if (!endDate) {
-      await sendWhatsAppText(fromDigits, 'Fecha no valida. Escribe la fecha de terminacion en formato YYYY-MM-DD.', row.phoneNumberId);
+      await sendWhatsAppText(fromDigits, 'Fecha no valida. Escribe la fecha de terminacion en formato DD/MM/AAAA.', row.phoneNumberId);
       await setIncomingProcess(docRef, 'ignored', 'invalid_incapacidad_end_date');
       return;
     }
     if (!startDate) {
-      await sendWhatsAppText(fromDigits, 'No encontramos la fecha de inicio. Empecemos de nuevo: escribe la fecha de inicio (YYYY-MM-DD).', row.phoneNumberId);
+      await sendWhatsAppText(fromDigits, 'No encontramos la fecha de inicio. Empecemos de nuevo: escribe la fecha de inicio en formato DD/MM/AAAA.', row.phoneNumberId);
       await sessionRef.set(
         {
           stage: 'awaiting_incapacidad_start_date',
@@ -1249,7 +1292,7 @@ async function processIncomingMessage(docRef, data) {
     if (endDate < startDate) {
       await sendWhatsAppText(
         fromDigits,
-        'La fecha de terminacion no puede ser menor a la fecha de inicio. Escribe nuevamente la fecha de terminacion (YYYY-MM-DD).',
+        'La fecha de terminacion no puede ser menor a la fecha de inicio. Escribe nuevamente la fecha de terminacion en formato DD/MM/AAAA.',
         row.phoneNumberId
       );
       await setIncomingProcess(docRef, 'ignored', 'invalid_incapacidad_date_range', {
@@ -1287,41 +1330,8 @@ async function processIncomingMessage(docRef, data) {
     });
     return;
   }
-
-  const parsed = parseWhatsAppAttendanceText(text, row);
-  if (!parsed.ok) {
-    await setIncomingProcess(docRef, 'ignored', parsed.reason || 'unsupported_message_format');
-    return;
-  }
-
-  const empEntry = await findEmployeeByDocument(parsed.documento);
-  if (!empEntry) {
-    await setIncomingProcess(docRef, 'error', 'employee_not_found', { parsed });
-    return;
-  }
-
-  const saved = await registerAttendanceFromEmployeeDoc(
-    {
-      id: empEntry.id,
-      data: () => empEntry.data || {}
-    },
-    {
-      asistio: parsed.asistio,
-      novedad: parsed.novedad || null,
-      fecha: parsed.fecha || todayInBogota(),
-      messageId: row.messageId || docRef.id
-    }
-  );
-  await setIncomingProcess(docRef, 'processed', 'attendance_registered_direct', {
-    attendanceId: saved.attendanceId,
-    parsed: {
-      fecha: saved.fecha,
-      documento: parsed.documento,
-      asistio: parsed.asistio,
-      novedad: parsed.novedad || null,
-      empleadoId: saved.employeeId
-    }
-  });
+  await sendWhatsAppText(fromDigits, 'No entendi tu mensaje. Si deseas iniciar el registro, por favor escribe "Hola".', row.phoneNumberId);
+  await setIncomingProcess(docRef, 'ignored', 'unsupported_whatsapp_flow_message');
 }
 
 async function prepareNovedadFlow({
@@ -1448,10 +1458,10 @@ async function finalizeAttendanceNow({
   }
 
   const novedadNombre = String(pendingAttendance?.novedadNombre || pendingAttendance?.novedad || '').trim();
-  const novTxt = novedadNombre ? ` Novedad: ${novedadNombre}.` : '';
+  const novTxt = novedadNombre || 'SIN NOVEDAD';
   await sendWhatsAppText(
     fromDigits,
-    `Gracias, registro confirmado. Fecha: ${saved.fecha}, hora: ${saved.hora}.${novTxt}`,
+    `Registro confirmado. Fecha: ${formatIsoDateToHuman(saved.fecha)}, Hora: ${saved.hora}, Novedad: ${novTxt}, Muchas Gracias.`,
     row.phoneNumberId
   );
   await sessionRef.set(
@@ -1616,21 +1626,29 @@ async function findSedeCandidatesByName(text, max = 10) {
       }
     } catch {}
   }
-  const sedesRows = await getCachedRows(
-    'sedesRows',
-    async () => {
-      const snap = await admin.firestore().collection('sedes').get();
-      return snap.docs.map((d) => ({ id: d.id, ...(d.data() || {}) }));
-    },
-    SEDES_LOOKUP_CACHE_TTL_MS
-  );
+  let sedesRows = null;
+  try {
+    sedesRows = await getWhatsAppSedesLookupRows();
+  } catch (err) {
+    logger.warn('findSedeCandidatesByName dashboard lookup failed', { err: String(err?.message || err) });
+  }
+  if (!Array.isArray(sedesRows) || !sedesRows.length) {
+    sedesRows = await getCachedRows(
+      'sedesRows',
+      async () => {
+        const snap = await admin.firestore().collection('sedes').get();
+        return snap.docs.map((d) => ({ id: d.id, ...(d.data() || {}) }));
+      },
+      SEDES_LOOKUP_CACHE_TTL_MS
+    );
+  }
   const rows = [];
   for (const item of sedesRows) {
     const row = item || {};
     const codigo = String(row.codigo || '').trim();
     const nombre = String(row.nombre || '').trim();
     if (!codigo && !nombre) continue;
-    const blob = `${normalizeUserText(nombre)} ${normalizeUserText(codigo)}`;
+    const blob = String(row.search || `${normalizeUserText(nombre)} ${normalizeUserText(codigo)}`);
     if (!blob.includes(normNeedle)) continue;
     rows.push({ id: row.id, codigo: codigo || null, nombre: nombre || codigo || null });
   }
@@ -1642,14 +1660,22 @@ async function resolveSedeNameByCode(sedeCodigo, fallbackName = null) {
   const code = String(sedeCodigo || '').trim();
   const fallback = String(fallbackName || '').trim();
   if (!code) return fallback || 'sin sede';
-  const rows = await getCachedRows(
-    'sedesRows',
-    async () => {
-      const snap = await admin.firestore().collection('sedes').get();
-      return snap.docs.map((d) => ({ id: d.id, ...(d.data() || {}) }));
-    },
-    SEDES_LOOKUP_CACHE_TTL_MS
-  );
+  let rows = null;
+  try {
+    rows = await getWhatsAppSedesLookupRows();
+  } catch (err) {
+    logger.warn('resolveSedeNameByCode dashboard lookup failed', { err: String(err?.message || err) });
+  }
+  if (!Array.isArray(rows) || !rows.length) {
+    rows = await getCachedRows(
+      'sedesRows',
+      async () => {
+        const snap = await admin.firestore().collection('sedes').get();
+        return snap.docs.map((d) => ({ id: d.id, ...(d.data() || {}) }));
+      },
+      SEDES_LOOKUP_CACHE_TTL_MS
+    );
+  }
   const found = rows.find((r) => String(r?.codigo || '').trim() === code);
   const name = String(found?.nombre || '').trim();
   if (name) return name;
@@ -1823,7 +1849,32 @@ function normalizeDate(value) {
   const v = String(value || '').trim();
   if (!v) return null;
   if (/^\d{4}-\d{2}-\d{2}$/.test(v)) return v;
+  const human = parseHumanDateToIso(v);
+  if (human) return human;
   return null;
+}
+
+function parseHumanDateToIso(value) {
+  const v = String(value || '').trim();
+  if (!/^\d{2}\/\d{2}\/\d{4}$/.test(v)) return null;
+  const [dd, mm, yyyy] = v.split('/').map((n) => Number(n));
+  if (!yyyy || !mm || !dd) return null;
+  const dt = new Date(Date.UTC(yyyy, mm - 1, dd));
+  if (
+    dt.getUTCFullYear() !== yyyy ||
+    dt.getUTCMonth() !== mm - 1 ||
+    dt.getUTCDate() !== dd
+  ) {
+    return null;
+  }
+  return `${yyyy}-${String(mm).padStart(2, '0')}-${String(dd).padStart(2, '0')}`;
+}
+
+function formatIsoDateToHuman(value) {
+  const iso = normalizeDate(value);
+  if (!iso) return String(value || '').trim() || null;
+  const [yyyy, mm, dd] = iso.split('-');
+  return `${dd}/${mm}/${yyyy}`;
 }
 
 function todayInBogota() {
@@ -1904,12 +1955,152 @@ function phoneCandidates(phoneDigits) {
   return Array.from(set).filter(Boolean).slice(0, 10);
 }
 
+function whatsappLookupRootRef() {
+  return admin.firestore().collection(DASHBOARD_DOCS_COL).doc(WHATSAPP_LOOKUP_ROOT_DOC);
+}
+
+function normalizeEmployeeLookupRow(docId, row = {}, isSupernumerario = false) {
+  return {
+    id: String(docId || '').trim(),
+    documento: digitsOnly(row.documento) || null,
+    telefono: normalizePhoneForStorage(row.telefono),
+    nombre: String(row.nombre || '').trim() || null,
+    sedeCodigo: String(row.sedeCodigo || '').trim() || null,
+    sedeNombre: String(row.sedeNombre || '').trim() || null,
+    cargoCodigo: String(row.cargoCodigo || '').trim() || null,
+    cargoNombre: String(row.cargoNombre || '').trim() || null,
+    estado: String(row.estado || '').trim() || null,
+    fechaIngreso: normalizeDateOnly(row.fechaIngreso),
+    fechaRetiro: normalizeDateOnly(row.fechaRetiro),
+    isSupernumerario: isSupernumerario === true
+  };
+}
+
+function normalizeLookupBucketValue(raw = {}) {
+  const id = String(raw.id || '').trim();
+  if (!id) return null;
+  const data = { ...raw };
+  delete data.id;
+  return { id, data };
+}
+
+async function readWhatsAppLookupBucket(subcollection, lookupKey) {
+  const key = String(lookupKey || '').trim();
+  if (!key) return null;
+  const bucket = getDashboardBucketId(key);
+  const snap = await whatsappLookupRootRef().collection(subcollection).doc(bucket).get();
+  if (!snap.exists) return null;
+  const data = snap.data() || {};
+  return normalizeLookupBucketValue(data?.items?.[toDashboardItemKey(key)] || null);
+}
+
+async function upsertWhatsAppLookupEntry(subcollection, lookupKey, value) {
+  const key = String(lookupKey || '').trim();
+  if (!key) return;
+  const bucket = getDashboardBucketId(key);
+  await whatsappLookupRootRef()
+    .collection(subcollection)
+    .doc(bucket)
+    .set(
+      {
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        [`items.${toDashboardItemKey(key)}`]: value
+      },
+      { merge: true }
+    );
+}
+
+async function deleteWhatsAppLookupEntry(subcollection, lookupKey) {
+  const key = String(lookupKey || '').trim();
+  if (!key) return;
+  const bucket = getDashboardBucketId(key);
+  await whatsappLookupRootRef()
+    .collection(subcollection)
+    .doc(bucket)
+    .set(
+      {
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        [`items.${toDashboardItemKey(key)}`]: admin.firestore.FieldValue.delete()
+      },
+      { merge: true }
+    );
+}
+
+async function syncWhatsAppEmployeeLookupIndex(event) {
+  const beforeSnap = event.data?.before;
+  const afterSnap = event.data?.after;
+  const docId = String(afterSnap?.id || beforeSnap?.id || event.params?.docId || '').trim();
+  const before = beforeSnap?.exists ? beforeSnap.data() || {} : null;
+  const after = afterSnap?.exists ? afterSnap.data() || {} : null;
+
+  if (before) {
+    const oldPhone = normalizePhoneForStorage(before.telefono);
+    const oldDocument = digitsOnly(before.documento);
+    if (oldPhone) await deleteWhatsAppLookupEntry(WHATSAPP_LOOKUP_PHONE_COL, oldPhone);
+    if (oldDocument) await deleteWhatsAppLookupEntry(WHATSAPP_LOOKUP_DOCUMENT_COL, oldDocument);
+  }
+
+  if (!after || !docId) {
+    clearEmployeeLookupCaches();
+    return;
+  }
+
+  const isSupernumerario = await isEmployeeSupernumerarioByCargo(after);
+  const value = normalizeEmployeeLookupRow(docId, after, isSupernumerario);
+  if (value.telefono) await upsertWhatsAppLookupEntry(WHATSAPP_LOOKUP_PHONE_COL, value.telefono, value);
+  if (value.documento) await upsertWhatsAppLookupEntry(WHATSAPP_LOOKUP_DOCUMENT_COL, value.documento, value);
+  clearEmployeeLookupCaches();
+}
+
+async function refreshWhatsAppSedesLookupDoc() {
+  const snap = await admin.firestore().collection('sedes').get();
+  const rows = snap.docs
+    .map((d) => {
+      const row = d.data() || {};
+      return {
+        id: d.id,
+        codigo: String(row.codigo || '').trim() || null,
+        nombre: String(row.nombre || '').trim() || null,
+        search: normalizeUserText(`${row.nombre || ''} ${row.codigo || ''}`)
+      };
+    })
+    .filter((row) => row.codigo || row.nombre);
+  await whatsappLookupRootRef().collection('catalogs').doc(WHATSAPP_LOOKUP_SEDES_DOC).set(
+    {
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      rows
+    },
+    { merge: true }
+  );
+}
+
+async function getWhatsAppSedesLookupRows() {
+  const snap = await whatsappLookupRootRef().collection('catalogs').doc(WHATSAPP_LOOKUP_SEDES_DOC).get();
+  if (!snap.exists) return null;
+  const rows = Array.isArray(snap.data()?.rows) ? snap.data().rows : [];
+  return rows.filter(Boolean);
+}
+
 async function findEmployeeByPhone(phoneDigits) {
   const candidates = phoneCandidates(phoneDigits);
   if (!candidates.length) return null;
   const cacheKey = candidates.join('|');
   const cached = getLookupCached(lookupCache.employeeByPhone, cacheKey);
   if (cached.hit) return cached.value;
+  for (const candidate of candidates) {
+    try {
+      const lookedUp = await readWhatsAppLookupBucket(WHATSAPP_LOOKUP_PHONE_COL, candidate);
+      if (lookedUp) {
+        setLookupCached(lookupCache.employeeByPhone, cacheKey, lookedUp);
+        setLookupCached(lookupCache.employeeById, String(lookedUp.id).trim(), lookedUp);
+        const docNum = digitsOnly(lookedUp?.data?.documento);
+        if (docNum) setLookupCached(lookupCache.employeeByDocument, docNum, lookedUp);
+        return lookedUp;
+      }
+    } catch (err) {
+      logger.warn('findEmployeeByPhone dashboard lookup failed', { err: String(err?.message || err) });
+    }
+  }
   const snap = await admin.firestore().collection('employees').where('telefono', 'in', candidates).limit(1).get();
   if (snap.empty) {
     setLookupCached(lookupCache.employeeByPhone, cacheKey, null);
@@ -1929,6 +2120,18 @@ async function findEmployeeByDocument(documento) {
   if (!docNum) return null;
   const cached = getLookupCached(lookupCache.employeeByDocument, docNum);
   if (cached.hit) return cached.value;
+  try {
+    const lookedUp = await readWhatsAppLookupBucket(WHATSAPP_LOOKUP_DOCUMENT_COL, docNum);
+    if (lookedUp) {
+      setLookupCached(lookupCache.employeeByDocument, docNum, lookedUp);
+      setLookupCached(lookupCache.employeeById, String(lookedUp.id).trim(), lookedUp);
+      const phone = normalizePhoneForStorage(lookedUp?.data?.telefono);
+      if (phone) setLookupCached(lookupCache.employeeByPhone, phoneCandidates(phone).join('|'), lookedUp);
+      return lookedUp;
+    }
+  } catch (err) {
+    logger.warn('findEmployeeByDocument dashboard lookup failed', { err: String(err?.message || err) });
+  }
   const snap = await admin.firestore().collection('employees').where('documento', '==', docNum).limit(1).get();
   if (snap.empty) {
     setLookupCached(lookupCache.employeeByDocument, docNum, null);
@@ -2111,6 +2314,11 @@ async function ensureAutoAttendanceFromIncapacidades(fecha) {
   if (incapacidadesSnap.empty) return 0;
 
   const existing = new Set(attendanceSnap.docs.map((d) => String(d.id || '').trim()));
+  const sedesRows = await getCachedRows('sedesRows', async () => {
+    const snap = await db.collection('sedes').get();
+    return snap.docs.map((doc) => ({ id: doc.id, ...(doc.data() || {}) }));
+  });
+  const sedeMap = buildSedeMapByCode(sedesRows);
   let pendingBatch = db.batch();
   let batchOps = 0;
   let created = 0;
@@ -2132,7 +2340,7 @@ async function ensureAutoAttendanceFromIncapacidades(fecha) {
     const empEntry = await findEmployeeByIdCached(employeeId);
     if (!empEntry) continue;
     const emp = empEntry.data || {};
-    if (!isEmployeeEligibleForRegistration(emp, day)) continue;
+    if (!isEmployeeScheduledForDate(emp, day, sedeMap)) continue;
 
     const attendanceId = `${day}_${employeeId}`;
     if (existing.has(attendanceId)) continue;
@@ -2224,6 +2432,67 @@ async function ensureAutoAttendanceFromIncapacidades(fecha) {
 
   await commitBatch();
   return created;
+}
+
+async function previewAutoAttendanceFromIncapacidades(fecha) {
+  const day = String(fecha || '').trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) return { day, wouldCreate: 0, matchingIncapacidades: 0 };
+
+  const db = admin.firestore();
+  const [incapacidadesSnap, attendanceSnap] = await Promise.all([
+    db.collection(INCAPACITADOS_COL).get(),
+    db.collection('attendance').where('fecha', '==', day).get()
+  ]);
+  if (incapacidadesSnap.empty) return { day, wouldCreate: 0, matchingIncapacidades: 0 };
+
+  const existing = new Set(attendanceSnap.docs.map((d) => String(d.id || '').trim()));
+  const sedesRows = await getCachedRows('sedesRows', async () => {
+    const snap = await db.collection('sedes').get();
+    return snap.docs.map((doc) => ({ id: doc.id, ...(doc.data() || {}) }));
+  });
+  const sedeMap = buildSedeMapByCode(sedesRows);
+  let wouldCreate = 0;
+  let matchingIncapacidades = 0;
+
+  for (const d of incapacidadesSnap.docs) {
+    const incap = d.data() || {};
+    const employeeId = String(incap.empleadoId || '').trim();
+    const start = normalizeDate(incap.fechaInicio);
+    const end = normalizeDate(incap.fechaFin);
+    if (!employeeId || !start || !end) continue;
+    if (day < start || day > end) continue;
+    matchingIncapacidades += 1;
+
+    const empEntry = await findEmployeeByIdCached(employeeId);
+    if (!empEntry) continue;
+    const emp = empEntry.data || {};
+    if (!isEmployeeScheduledForDate(emp, day, sedeMap)) continue;
+
+    const attendanceId = `${day}_${employeeId}`;
+    if (existing.has(attendanceId)) continue;
+    const sedeCodigo = String(emp.sedeCodigo || '').trim() || null;
+    if (!sedeCodigo) continue;
+    wouldCreate += 1;
+  }
+
+  return { day, wouldCreate, matchingIncapacidades };
+}
+
+async function ensureNextDayIncapacidadPrefillForClosure(closingDay) {
+  const day = String(closingDay || '').trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) {
+    return { nextDay: null, nextDayIncapacidadCreated: 0 };
+  }
+  const nextDay = shiftDateIso(day, 1);
+  const created = await ensureAutoAttendanceFromIncapacidades(nextDay);
+  if (created > 0) {
+    await rebuildSedeStatusForDate(nextDay, { force: true });
+    await refreshDailyMetricsForDate(nextDay, { source: 'incapacidad_prefill_after_daily_close' });
+  }
+  return {
+    nextDay,
+    nextDayIncapacidadCreated: created
+  };
 }
 
 async function registerAttendanceFromEmployeeDoc(empDoc, opts = {}) {
@@ -2338,11 +2607,13 @@ async function rebuildSedeStatusForDate(fecha, opts = {}) {
     })
   ]);
 
+  const sedeMap = buildSedeMapByCode(sedesRows);
   const sedeNameByCode = new Map();
   const plannedBySede = new Map();
   for (const row of sedesRows) {
     const code = String(row.codigo || '').trim();
     if (!code) continue;
+    if (!isSedeScheduledOnDate(row, day)) continue;
     sedeNameByCode.set(code, String(row.nombre || '').trim() || code);
     const planned = Number(row.numeroOperarios || 0);
     plannedBySede.set(code, Number.isFinite(planned) && planned > 0 ? planned : 0);
@@ -2352,7 +2623,7 @@ async function rebuildSedeStatusForDate(fecha, opts = {}) {
   for (const emp of employeesRows) {
     const sedeCodigo = String(emp.sedeCodigo || '').trim();
     if (!sedeCodigo) continue;
-    if (!isEmployeeEligibleForRegistration(emp, day)) continue;
+    if (!isEmployeeScheduledForDate(emp, day, sedeMap)) continue;
     contractedBySede.set(sedeCodigo, Number(contractedBySede.get(sedeCodigo) || 0) + 1);
   }
 
@@ -2373,6 +2644,8 @@ async function rebuildSedeStatusForDate(fecha, opts = {}) {
     const a = d.data() || {};
     const sedeCodigo = String(a.sedeCodigo || '').trim();
     if (!sedeCodigo) continue;
+    const sedeRow = sedeMap.get(sedeCodigo) || null;
+    if (sedeRow && !isSedeScheduledOnDate(sedeRow, day)) continue;
     registeredBySede.set(sedeCodigo, Number(registeredBySede.get(sedeCodigo) || 0) + 1);
     if (!sedeNameByCode.has(sedeCodigo)) {
       const sedeNombre = String(a.sedeNombre || '').trim() || sedeCodigo;
@@ -2474,7 +2747,11 @@ async function computeOperationClosureSummary(fecha) {
     listActiveSupernumerarioRowsForDay(day)
   ]);
 
-  const planeados = sedesRows.reduce((acc, row) => acc + (Number(row?.numeroOperarios || 0) || 0), 0);
+  const sedeMap = buildSedeMapByCode(sedesRows);
+  const planeados = sedesRows.reduce((acc, row) => {
+    if (!isSedeScheduledOnDate(row, day)) return acc;
+    return acc + (Number(row?.numeroOperarios || 0) || 0);
+  }, 0);
   const superDocs = new Set(
     superRows
       .filter((row) => isEmployeeActiveOnDate(row, day))
@@ -2483,12 +2760,19 @@ async function computeOperationClosureSummary(fecha) {
   );
   let contratados = 0;
   for (const emp of employeesRows) {
-    if (!isEmployeeEligibleForRegistration(emp, day)) continue;
+    if (!isEmployeeScheduledForDate(emp, day, sedeMap)) continue;
     const docNum = String(emp.documento || '').trim();
     if (docNum && superDocs.has(docNum)) continue;
     contratados += 1;
   }
-  const registrados = attendanceSnap.size;
+  let registrados = 0;
+  for (const d of attendanceSnap.docs) {
+    const row = d.data() || {};
+    const sedeCodigo = String(row.sedeCodigo || '').trim();
+    const sedeRow = sedeMap.get(sedeCodigo) || null;
+    if (sedeRow && !isSedeScheduledOnDate(sedeRow, day)) continue;
+    registrados += 1;
+  }
   const replacedAttendanceKey = new Set();
   for (const d of replacementsSnap.docs) {
     const repl = d.data() || {};
@@ -2501,6 +2785,9 @@ async function computeOperationClosureSummary(fecha) {
   let ausentismos = 0;
   for (const d of attendanceSnap.docs) {
     const row = d.data() || {};
+    const sedeCodigo = String(row.sedeCodigo || '').trim();
+    const sedeRow = sedeMap.get(sedeCodigo) || null;
+    if (sedeRow && !isSedeScheduledOnDate(sedeRow, day)) continue;
     if (attendanceCountsAsAusentismo(row, String(d.id || '').trim(), replacedAttendanceKey, novedadRules)) ausentismos += 1;
   }
   return {
@@ -2615,6 +2902,11 @@ async function ensureAutoAttendanceWithNovedad8(fecha) {
   const novelty = await resolveNovedadByCode('8');
   const existing = new Set(attendanceSnap.docs.map((d) => String(d.id || '').trim()));
   const superDocs = new Set();
+  const sedesRows = await getCachedRows('sedesRows', async () => {
+    const snap = await db.collection('sedes').get();
+    return snap.docs.map((doc) => ({ id: doc.id, ...(doc.data() || {}) }));
+  });
+  const sedeMap = buildSedeMapByCode(sedesRows);
   for (const row of superRows) {
     const docNum = String(row.documento || '').trim();
     if (docNum) superDocs.add(docNum);
@@ -2632,7 +2924,7 @@ async function ensureAutoAttendanceWithNovedad8(fecha) {
 
   for (const d of employeesSnap.docs) {
     const emp = d.data() || {};
-    if (!isEmployeeEligibleForRegistration(emp, day)) continue;
+    if (!isEmployeeScheduledForDate(emp, day, sedeMap)) continue;
     const sedeCodigo = String(emp.sedeCodigo || '').trim();
     if (!sedeCodigo) continue;
 
@@ -2964,7 +3256,9 @@ async function refreshDailyMetricsForDate(fecha, opts = {}) {
       isDayClosed(day)
     ]);
 
+    const sedeMap = buildSedeMapByCode(sedesRows);
     const planned = sedesRows.reduce((acc, row) => {
+      if (!isSedeScheduledOnDate(row, day)) return acc;
       const n = Number(row?.numeroOperarios || 0);
       return acc + (Number.isFinite(n) && n > 0 ? Math.trunc(n) : 0);
     }, 0);
@@ -2978,13 +3272,20 @@ async function refreshDailyMetricsForDate(fecha, opts = {}) {
 
     let expected = 0;
     for (const emp of employeesRows) {
-      if (!isEmployeeEligibleForRegistration(emp, day)) continue;
+      if (!isEmployeeScheduledForDate(emp, day, sedeMap)) continue;
       const docNum = String(emp.documento || '').trim();
       if (docNum && superDocs.has(docNum)) continue;
       expected += 1;
     }
 
-    const dayRows = attendanceSnap.docs.map((d) => ({ id: d.id, ...(d.data() || {}) }));
+    const dayRows = attendanceSnap.docs
+      .map((d) => ({ id: d.id, ...(d.data() || {}) }))
+      .filter((row) => {
+        const sedeCodigo = String(row.sedeCodigo || '').trim();
+        const sedeRow = sedeMap.get(sedeCodigo) || null;
+        if (sedeRow && !isSedeScheduledOnDate(sedeRow, day)) return false;
+        return true;
+      });
     const unique = new Set(dayRows.map((r) => String(r.empleadoId || '').trim()).filter(Boolean)).size;
     const missing = Math.max(0, expected - unique);
 
@@ -3147,6 +3448,46 @@ function isEmployeeEligibleForRegistration(emp, day) {
   }
   if (retiro && retiro < fecha) return false;
   return true;
+}
+
+function getIsoWeekday(day) {
+  const date = String(day || '').trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return null;
+  const [year, month, dayNum] = date.split('-').map((n) => Number(n));
+  const dt = new Date(Date.UTC(year, (month || 1) - 1, dayNum || 1));
+  return dt.getUTCDay();
+}
+
+function normalizeSedeJornada(value) {
+  const raw = normalizeUserText(value).replace(/\s+/g, '_');
+  if (raw === 'lun_dom' || raw === 'lunes_a_domingo' || raw === 'lunes_domingo') return 'lun_dom';
+  if (raw === 'lun_sab' || raw === 'lunes_a_sabado' || raw === 'lunes_sabado') return 'lun_sab';
+  return 'lun_vie';
+}
+
+function isSedeScheduledOnDate(sedeRow, day) {
+  const weekday = getIsoWeekday(day);
+  if (weekday == null) return false;
+  const jornada = normalizeSedeJornada(sedeRow?.jornada);
+  if (jornada === 'lun_dom') return true;
+  if (jornada === 'lun_sab') return weekday >= 1 && weekday <= 6;
+  return weekday >= 1 && weekday <= 5;
+}
+
+function buildSedeMapByCode(rows = []) {
+  return new Map(
+    (Array.isArray(rows) ? rows : [])
+      .map((row) => [String(row?.codigo || '').trim(), row || {}])
+      .filter(([code]) => Boolean(code))
+  );
+}
+
+function isEmployeeScheduledForDate(emp, day, sedeMap = new Map()) {
+  if (!isEmployeeEligibleForRegistration(emp, day)) return false;
+  const sedeCodigo = String(emp?.sedeCodigo || '').trim();
+  if (!sedeCodigo) return false;
+  const sedeRow = sedeMap.get(sedeCodigo) || { codigo: sedeCodigo, jornada: 'lun_vie' };
+  return isSedeScheduledOnDate(sedeRow, day);
 }
 
 async function sendWhatsAppText(to, bodyText, phoneNumberIdHint = null) {

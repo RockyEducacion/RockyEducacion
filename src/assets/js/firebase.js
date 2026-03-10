@@ -43,7 +43,193 @@ export async function ensureUserProfile(user){
     await setDoc(ref, replaceUndefined({ email: (user.email||'').toLowerCase(), displayName: user.displayName || null, estado:'activo', createdAt: serverTimestamp() }));
   }
 }
-export async function loadUserProfile(uid){ const ref=doc(db,'users',uid); const snap=await getDoc(ref); return snap.exists()? snap.data(): null; }
+const USER_SCOPE_CACHE_TTL_MS=30*1000;
+let userScopeCache={ uid:null, ts:0, value:null };
+
+function normalizeZoneCodeList(value){
+  const arr=Array.isArray(value)? value : [];
+  const out=[];
+  const seen=new Set();
+  for(const item of arr){
+    const code=String(item||'').trim();
+    if(!code || seen.has(code)) continue;
+    seen.add(code);
+    out.push(code);
+  }
+  return out;
+}
+
+async function deriveSupervisorZonesByDocumento(documento){
+  const docNum=String(documento||'').trim();
+  if(!docNum) return [];
+  const qy=query(collection(db,SUPERVISOR_PROFILE_COL), where('documento','==', docNum));
+  const snap=await getDocs(qy);
+  const zones=[];
+  const seen=new Set();
+  snap.docs.forEach((d)=>{
+    const row=d.data()||{};
+    const code=String(row.zonaCodigo||'').trim();
+    if(!code || seen.has(code)) return;
+    seen.add(code);
+    zones.push(code);
+  });
+  return zones;
+}
+
+async function isSupervisorCargoEligibleByDocumento(documento){
+  const docNum=String(documento||'').trim();
+  if(!docNum) return false;
+  const qy=query(collection(db,EMPLOYEES_COL), where('documento','==', docNum), limit(5));
+  const snap=await getDocs(qy);
+  if(snap.empty) return false;
+  for(const d of snap.docs){
+    const row=d.data()||{};
+    const estado=String(row.estado||'activo').trim().toLowerCase();
+    if(estado==='inactivo' || estado==='eliminado') continue;
+    const aligned=await getCargoCrudAlignmentByCode(row.cargoCodigo||null,row.cargoNombre||null);
+    if(aligned==='supervisor') return true;
+  }
+  return false;
+}
+
+async function enrichSupervisorUserProfile(uid,profile){
+  const data=profile||{};
+  const role=String(data.role||'').trim().toLowerCase();
+  if(role!=='supervisor') return data;
+  const eligible=await isSupervisorCargoEligibleByDocumento(data.documento||null);
+  if(!eligible){
+    try{
+      await updateDoc(doc(db,'users',uid), replaceUndefined({
+        supervisorEligible:false,
+        zonasPermitidas:[],
+        zonaCodigo:null,
+        lastModifiedAt: serverTimestamp()
+      }));
+    }catch(err){
+      console.warn('No se pudo marcar supervisor no elegible en users:', err);
+    }
+    return { ...data, supervisorEligible:false, zonasPermitidas:[], zonaCodigo:null };
+  }
+  const existingZones=normalizeZoneCodeList(data.zonasPermitidas);
+  const singleZone=String(data.zonaCodigo||'').trim();
+  const currentZones=existingZones.length ? existingZones : (singleZone ? [singleZone] : []);
+  if(currentZones.length){
+    try{
+      if(data.supervisorEligible!==true){
+        await updateDoc(doc(db,'users',uid), replaceUndefined({
+          supervisorEligible:true,
+          lastModifiedAt: serverTimestamp()
+        }));
+      }
+    }catch{}
+    return { ...data, supervisorEligible:true, zonasPermitidas: currentZones, zonaCodigo: currentZones[0]||null };
+  }
+
+  let derivedZones=[];
+  try{
+    derivedZones=await deriveSupervisorZonesByDocumento(data.documento||null);
+  }catch(err){
+    console.warn('No se pudieron derivar zonas del supervisor desde supervisor_profile:', err);
+    derivedZones=[];
+  }
+  if(!derivedZones.length) return data;
+  try{
+    await updateDoc(doc(db,'users',uid), replaceUndefined({
+      supervisorEligible:true,
+      zonasPermitidas: derivedZones,
+      zonaCodigo: derivedZones[0]||null,
+      lastModifiedAt: serverTimestamp()
+    }));
+  }catch(err){
+    console.warn('No se pudo sincronizar zonasPermitidas del supervisor en users:', err);
+  }
+  return { ...data, supervisorEligible:true, zonasPermitidas: derivedZones, zonaCodigo: derivedZones[0]||null };
+}
+
+async function getCurrentUserZoneScope({ force=false }={}){
+  const uid=String(auth.currentUser?.uid||'').trim();
+  if(!uid) return { isSupervisor:false, zones:[] };
+  const now=Date.now();
+  if(!force && userScopeCache.uid===uid && now-Number(userScopeCache.ts||0)<=USER_SCOPE_CACHE_TTL_MS){
+    return userScopeCache.value||{ isSupervisor:false, zones:[] };
+  }
+  const snap=await getDoc(doc(db,'users',uid));
+  const profile=snap.exists()? (snap.data()||{}) : {};
+  const role=String(profile.role||'').trim().toLowerCase();
+  if(role!=='supervisor'){
+    const value={ isSupervisor:false, zones:[] };
+    userScopeCache={ uid, ts:now, value };
+    return value;
+  }
+  if(profile.supervisorEligible!==true){
+    let repairedZones=[];
+    try{
+      repairedZones=await deriveSupervisorZonesByDocumento(profile.documento||null);
+      repairedZones=normalizeZoneCodeList(repairedZones);
+      if(repairedZones.length){
+        await updateDoc(doc(db,'users',uid), replaceUndefined({
+          supervisorEligible:true,
+          zonasPermitidas:repairedZones,
+          zonaCodigo:repairedZones[0]||null,
+          lastModifiedAt: serverTimestamp()
+        }));
+        const value={ isSupervisor:true, zones:repairedZones };
+        userScopeCache={ uid, ts:now, value };
+        return value;
+      }
+    }catch(err){
+      console.warn('No se pudo reparar supervisorEligible/zonasPermitidas para supervisor:', err);
+    }
+    const value={ isSupervisor:true, zones:[] };
+    userScopeCache={ uid, ts:now, value };
+    return value;
+  }
+  const zones=normalizeZoneCodeList(profile.zonasPermitidas);
+  const single=String(profile.zonaCodigo||'').trim();
+  const currentZones=zones.length? zones : (single ? [single] : []);
+  if(currentZones.length){
+    const value={ isSupervisor:true, zones: currentZones };
+    userScopeCache={ uid, ts:now, value };
+    return value;
+  }
+  try{
+    const repairedZones=normalizeZoneCodeList(await deriveSupervisorZonesByDocumento(profile.documento||null));
+    if(repairedZones.length){
+      await updateDoc(doc(db,'users',uid), replaceUndefined({
+        zonasPermitidas:repairedZones,
+        zonaCodigo:repairedZones[0]||null,
+        lastModifiedAt: serverTimestamp()
+      }));
+      const value={ isSupervisor:true, zones: repairedZones };
+      userScopeCache={ uid, ts:now, value };
+      return value;
+    }
+  }catch(err){
+    console.warn('No se pudo reparar zonasPermitidas vacias para supervisor:', err);
+  }
+  const value={ isSupervisor:true, zones: [] };
+  userScopeCache={ uid, ts:now, value };
+  return value;
+}
+
+async function assertSupervisorZoneAllowed(zoneCode,operation='esta operacion'){
+  const scope=await getCurrentUserZoneScope();
+  if(!scope.isSupervisor) return;
+  const code=String(zoneCode||'').trim();
+  if(!code) throw new Error(`No se pudo determinar la zona para ${operation}.`);
+  if(!scope.zones.includes(code)) throw new Error(`No tienes permiso para ${operation} fuera de tu zona.`);
+}
+
+export async function loadUserProfile(uid){
+  const ref=doc(db,'users',uid);
+  const snap=await getDoc(ref);
+  if(!snap.exists()) return null;
+  const profile=snap.data()||{};
+  const enriched=await enrichSupervisorUserProfile(uid,profile);
+  const authUid=String(auth.currentUser?.uid||'').trim();
+  if(authUid && authUid===String(uid||'').trim()) userScopeCache={ uid:authUid, ts:Date.now(), value:null };
+  return enriched;
+}
 
 // ===== Notas (demo) =====
 export const addNote = async (uid, text) => { const ref=collection(db,'users',uid,'notes'); await addDoc(ref,replaceUndefined({ text, createdAt: serverTimestamp() })); };
@@ -107,7 +293,29 @@ export function streamAuditLogs(onData,max=50){ const ref=collection(db,'audit_l
 
 // ===== Users (admin) =====
 export function streamUsers(onData){ const ref=collection(db,'users'); return onSnapshot(ref,(snap)=> onData(snap.docs.map(d=>({ uid:d.id, ...d.data() }))) ); }
-export async function setUserRole(uid, role){ const ref=doc(db,'users',uid); await updateDoc(ref,replaceUndefined({ role })); }
+export async function setUserRole(uid, role){
+  const ref=doc(db,'users',uid);
+  const normalizedRole=String(role||'').trim().toLowerCase();
+  await updateDoc(ref,replaceUndefined({
+    role,
+    supervisorEligible: normalizedRole==='supervisor' ? false : null
+  }));
+  if(normalizedRole!=='supervisor') return;
+  try{
+    const snap=await getDoc(ref);
+    if(!snap.exists()) return;
+    const row=snap.data()||{};
+    const zones=await deriveSupervisorZonesByDocumento(row.documento||null);
+    if(!zones.length) return;
+    await updateDoc(ref,replaceUndefined({
+      zonasPermitidas:zones,
+      zonaCodigo:zones[0]||null,
+      lastModifiedAt:serverTimestamp()
+    }));
+  }catch(err){
+    console.warn('No se pudieron sincronizar zonas del usuario supervisor al asignar rol:', err);
+  }
+}
 export async function setUserStatus(uid, estado){
   const ref=doc(db,'users',uid);
   await updateDoc(ref,replaceUndefined({
@@ -149,7 +357,30 @@ export async function getNextZoneCode(prefix='ZON', width=4){
   return `${prefix}-${num}`; // p.ej. ZON-0001
 }
 
-export function streamZones(onData){ const ref=collection(db,ZONES_COL); const qy=query(ref,orderBy('createdAt','desc')); return onSnapshot(qy,(snap)=> onData(snap.docs.map(d=>({ id:d.id, ...d.data() })))); }
+export function streamZones(onData,onError){
+  let unsub=()=>{};
+  let canceled=false;
+  (async()=>{
+    try{
+      const scope=await getCurrentUserZoneScope();
+      if(canceled) return;
+      const ref=collection(db,ZONES_COL);
+      const scopedZones=scope.isSupervisor ? scope.zones.slice(0,10) : [];
+      const qy=scope.isSupervisor
+        ? (scopedZones.length ? query(ref, where('codigo','in', scopedZones)) : query(ref, where('codigo','==','__NO_ZONE__')))
+        : query(ref,orderBy('createdAt','desc'));
+      unsub=onSnapshot(
+        qy,
+        (snap)=> onData(snap.docs.map((d)=>({ id:d.id, ...d.data() }))),
+        (err)=> onError?.(err)
+      );
+    }catch(err){
+      onError?.(err);
+      onData?.([]);
+    }
+  })();
+  return ()=>{ canceled=true; unsub?.(); };
+}
 export async function createZone({ codigo, nombre }){
   const ref=collection(db,ZONES_COL);
   const docRef=await addDoc(ref,replaceUndefined({
@@ -180,8 +411,39 @@ export async function findDependencyByCode(codigo){ if(!codigo) return null; con
 // ===== Sedes =====
 const SEDES_COL='sedes';
 export async function getNextSedeCode(prefix='SED',width=4){ const ref=doc(db,COUNTERS_COL,'sedes'); const next=await runTransaction(db, async (tx)=>{ const snap=await tx.get(ref); let last=0; if(snap.exists()) last=Number(snap.data().last||0); const val=last+1; tx.set(ref,{ last:val },{ merge:true }); return val; }); const num=String(next).padStart(width,'0'); return `${prefix}-${num}`; }
-export function streamSedes(onData){ const ref=collection(db,SEDES_COL); const qy=query(ref,orderBy('createdAt','desc')); return onSnapshot(qy,(snap)=> onData(snap.docs.map(d=>({ id:d.id, ...d.data() })))); }
+export function streamSedes(onData,onError){
+  let unsub=()=>{};
+  let canceled=false;
+  (async()=>{
+    try{
+      const scope=await getCurrentUserZoneScope();
+      if(canceled) return;
+      const ref=collection(db,SEDES_COL);
+      const scopedZones=scope.isSupervisor ? scope.zones.slice(0,10) : [];
+      const qy=scope.isSupervisor
+        ? (scopedZones.length ? query(ref, where('zonaCodigo','in', scopedZones)) : query(ref, where('zonaCodigo','==','__NO_ZONE__')))
+        : query(ref,orderBy('createdAt','desc'));
+      unsub=onSnapshot(
+        qy,
+        (snap)=>{
+          let rows=snap.docs.map((d)=>({ id:d.id, ...d.data() }));
+          if(scope.isSupervisor && scope.zones.length){
+            const allowed=new Set(scope.zones);
+            rows=rows.filter((r)=> allowed.has(String(r?.zonaCodigo||'').trim()));
+          }
+          onData(rows);
+        },
+        (err)=> onError?.(err)
+      );
+    }catch(err){
+      onError?.(err);
+      onData?.([]);
+    }
+  })();
+  return ()=>{ canceled=true; unsub?.(); };
+}
 export async function createSede({ codigo, nombre, dependenciaCodigo, dependenciaNombre, zonaCodigo, zonaNombre, numeroOperarios, jornada }) {
+  await assertSupervisorZoneAllowed(zonaCodigo,'crear sedes');
   const ref=collection(db,SEDES_COL);
   const docRef=await addDoc(ref,replaceUndefined({
     codigo:codigo||null,
@@ -201,11 +463,18 @@ export async function createSede({ codigo, nombre, dependenciaCodigo, dependenci
 }
 export async function updateSede(id,{ codigo, nombre, dependenciaCodigo, dependenciaNombre, zonaCodigo, zonaNombre, numeroOperarios, jornada }){
   const ref=doc(db,SEDES_COL,id); const patch={};
+  const currentSnap=await getDoc(ref);
+  const current=currentSnap.exists()? (currentSnap.data()||{}) : {};
+  const currentZone=String(current.zonaCodigo||'').trim();
+  if(currentZone) await assertSupervisorZoneAllowed(currentZone,'editar sedes');
   if(typeof codigo==='string') patch.codigo=codigo;
   if(typeof nombre==='string') patch.nombre=nombre;
   if(typeof dependenciaCodigo==='string') patch.dependenciaCodigo=dependenciaCodigo;
   if(typeof dependenciaNombre==='string') patch.dependenciaNombre=dependenciaNombre;
-  if(typeof zonaCodigo==='string') patch.zonaCodigo=zonaCodigo;
+  if(typeof zonaCodigo==='string'){
+    await assertSupervisorZoneAllowed(zonaCodigo,'cambiar zona de sedes');
+    patch.zonaCodigo=zonaCodigo;
+  }
   if(typeof zonaNombre==='string') patch.zonaNombre=zonaNombre;
   if(typeof numeroOperarios==='number') patch.numeroOperarios=numeroOperarios;
   if(typeof jornada==='string') patch.jornada=jornada;
@@ -251,7 +520,37 @@ export async function createSedesBulk(rows=[]){
 // ===== Empleados =====
 const EMPLOYEES_COL='employees';
 export async function getNextEmployeeCode(prefix='EMP',width=4){ const ref=doc(db,COUNTERS_COL,'employees'); const next=await runTransaction(db, async (tx)=>{ const snap=await tx.get(ref); let last=0; if(snap.exists()) last=Number(snap.data().last||0); const val=last+1; tx.set(ref,{ last:val },{ merge:true }); return val; }); const num=String(next).padStart(width,'0'); return `${prefix}-${num}`; }
-export function streamEmployees(onData){ const ref=collection(db,EMPLOYEES_COL); const qy=query(ref,orderBy('createdAt','desc')); return onSnapshot(qy,(snap)=> onData(snap.docs.map(d=>({ id:d.id, ...d.data() })))); }
+export function streamEmployees(onData,onError){
+  let unsub=()=>{};
+  let canceled=false;
+  (async()=>{
+    try{
+      const scope=await getCurrentUserZoneScope();
+      if(canceled) return;
+      const ref=collection(db,EMPLOYEES_COL);
+      const scopedZones=scope.isSupervisor ? scope.zones.slice(0,10) : [];
+      const qy=scope.isSupervisor
+        ? (scopedZones.length ? query(ref, where('zonaCodigo','in', scopedZones)) : query(ref, where('zonaCodigo','==','__NO_ZONE__')))
+        : query(ref,orderBy('createdAt','desc'));
+      unsub=onSnapshot(
+        qy,
+        (snap)=>{
+          let rows=snap.docs.map((d)=>({ id:d.id, ...d.data() }));
+          if(scope.isSupervisor && scope.zones.length){
+            const allowed=new Set(scope.zones);
+            rows=rows.filter((r)=> allowed.has(String(r?.zonaCodigo||'').trim()));
+          }
+          onData(rows);
+        },
+        (err)=> onError?.(err)
+      );
+    }catch(err){
+      onError?.(err);
+      onData?.([]);
+    }
+  })();
+  return ()=>{ canceled=true; unsub?.(); };
+}
 async function getCargoCrudAlignmentByCode(cargoCodigo,cargoNombre=null){
   const code=String(cargoCodigo||'').trim();
   const inferByName=(name)=>{
@@ -452,6 +751,8 @@ async function autoLinkEmployeeByCargo({ employeeId=null, employeeCodigo=null, e
   });
 }
 export async function createEmployee({ codigo, documento, nombre, telefono, cargoCodigo, cargoNombre, sedeCodigo, sedeNombre, fechaIngreso }){
+  const zone=await resolveZoneBySedeCode(sedeCodigo);
+  await assertSupervisorZoneAllowed(zone.zonaCodigo,'crear empleados');
   const ref=collection(db,EMPLOYEES_COL);
   const docRef=await addDoc(ref,replaceUndefined({
     codigo:codigo||null,
@@ -461,6 +762,8 @@ export async function createEmployee({ codigo, documento, nombre, telefono, carg
     cargoCodigo:cargoCodigo||null,
     cargoNombre:cargoNombre||null,
     sedeCodigo:sedeCodigo||null,
+    zonaCodigo:zone.zonaCodigo||null,
+    zonaNombre:zone.zonaNombre||null,
     fechaIngreso: fechaIngreso || null,
     fechaRetiro: null,
     estado:'activo',
@@ -509,6 +812,8 @@ export async function updateEmployee(id,data={}){
   const ref=doc(db,EMPLOYEES_COL,id); const patch={};
   const currentSnap=await getDoc(ref);
   const current=currentSnap.exists()? currentSnap.data(): {};
+  const currentZone=String(current.zonaCodigo||'').trim() || String((await resolveZoneBySedeCode(current.sedeCodigo||null)).zonaCodigo||'').trim();
+  if(currentZone) await assertSupervisorZoneAllowed(currentZone,'editar empleados');
   const previousDocumento=String(current.documento||'').trim();
   const previousCargoCodigo=String(current.cargoCodigo||'').trim();
   const previousCargoNombre=current.cargoNombre||null;
@@ -521,8 +826,12 @@ export async function updateEmployee(id,data={}){
   if(typeof cargoCodigo==='string') patch.cargoCodigo=cargoCodigo;
   if(typeof cargoNombre==='string') patch.cargoNombre=cargoNombre;
   if(typeof sedeCodigo==='string'){
+    const zone=await resolveZoneBySedeCode(sedeCodigo);
+    await assertSupervisorZoneAllowed(zone.zonaCodigo,'mover empleados a otra zona');
     patch.sedeCodigo=sedeCodigo;
     patch.sedeNombre=deleteField();
+    patch.zonaCodigo=zone.zonaCodigo||null;
+    patch.zonaNombre=zone.zonaNombre||null;
   }
   if(fechaIngreso) patch.fechaIngreso=fechaIngreso;
   if(Object.prototype.hasOwnProperty.call(data,'fechaRetiro')) patch.fechaRetiro=fechaRetiro||null;
@@ -638,6 +947,8 @@ export async function setEmployeeStatus(id,estado,fechaRetiro=null){
   const ref=doc(db,EMPLOYEES_COL,id);
   const snap=await getDoc(ref);
   const current=snap.exists()? snap.data(): {};
+  const currentZone=String(current.zonaCodigo||'').trim() || String((await resolveZoneBySedeCode(current.sedeCodigo||null)).zonaCodigo||'').trim();
+  if(currentZone) await assertSupervisorZoneAllowed(currentZone,'cambiar estado de empleados');
   const docNum=String(current.documento||'').trim();
   const alignment=await getCargoCrudAlignmentByCode(current.cargoCodigo||'', current.cargoNombre||'');
   const retiroValue=estado==='inactivo' ? (fechaRetiro||serverTimestamp()) : null;
@@ -727,8 +1038,11 @@ export async function createEmployeesBulk(rows=[]){
   });
   const batch=writeBatch(db);
   const createdRows=[];
-  data.forEach((row,idx)=>{
+  for(let idx=0; idx<data.length; idx+=1){
+    const row=data[idx]||{};
     const code=`EMP-${String(start+idx).padStart(4,'0')}`;
+    const zone=await resolveZoneBySedeCode(row.sedeCodigo||null);
+    await assertSupervisorZoneAllowed(zone.zonaCodigo,'crear empleados por cargue masivo');
     const ref=doc(collection(db,EMPLOYEES_COL));
     createdRows.push({ employeeId:ref.id, code, row });
     batch.set(ref, replaceUndefined({
@@ -739,6 +1053,8 @@ export async function createEmployeesBulk(rows=[]){
       cargoCodigo:row.cargoCodigo||null,
       cargoNombre:row.cargoNombre||null,
       sedeCodigo:row.sedeCodigo||null,
+      zonaCodigo:zone.zonaCodigo||null,
+      zonaNombre:zone.zonaNombre||null,
       fechaIngreso:row.fechaIngreso||null,
       fechaRetiro:null,
       estado:'activo',
@@ -749,7 +1065,7 @@ export async function createEmployeesBulk(rows=[]){
       lastModifiedByEmail:(auth.currentUser?.email||'').toLowerCase()||null,
       lastModifiedAt: serverTimestamp()
     }));
-  });
+  }
   await batch.commit();
   for(const item of createdRows){
     const row=item.row||{};
@@ -884,6 +1200,8 @@ async function resolveSupernumerarioCargo({ cargoCodigo=null, cargoNombre=null }
 }
 export function streamSupernumerarios(onData){
   let employees=[]; let cargos=[]; let emitted=false;
+  let unsubEmp=()=>{}; let unsubCargo=()=>{};
+  let canceled=false;
   const emit=()=>{
     if(!emitted) return;
     const cargoMap=new Map((cargos||[]).map((c)=>[String(c?.codigo||''),c]));
@@ -919,9 +1237,29 @@ export function streamSupernumerarios(onData){
     });
     onData(rows);
   };
-  const unEmp=onSnapshot(query(collection(db,EMPLOYEES_COL),orderBy('createdAt','desc')),(snap)=>{ employees=snap.docs.map((d)=>({ id:d.id, ...d.data() })); emitted=true; emit(); });
-  const unCargo=onSnapshot(collection(db,CARGOS_COL),(snap)=>{ cargos=snap.docs.map((d)=>({ id:d.id, ...d.data() })); emitted=true; emit(); });
-  return ()=>{ unEmp?.(); unCargo?.(); };
+  (async()=>{
+    try{
+      const scope=await getCurrentUserZoneScope();
+      if(canceled) return;
+      const scopedZones=scope.isSupervisor ? scope.zones.slice(0,10) : [];
+      const empQuery=scope.isSupervisor
+        ? (scopedZones.length ? query(collection(db,EMPLOYEES_COL), where('zonaCodigo','in', scopedZones)) : query(collection(db,EMPLOYEES_COL), where('zonaCodigo','==','__NO_ZONE__')))
+        : query(collection(db,EMPLOYEES_COL),orderBy('createdAt','desc'));
+      unsubEmp=onSnapshot(empQuery,(snap)=>{
+        employees=snap.docs.map((d)=>({ id:d.id, ...d.data() }));
+        if(scope.isSupervisor && scope.zones.length){
+          const allowed=new Set(scope.zones);
+          employees=employees.filter((r)=> allowed.has(String(r?.zonaCodigo||'').trim()));
+        }
+        emitted=true;
+        emit();
+      });
+      unsubCargo=onSnapshot(collection(db,CARGOS_COL),(snap)=>{ cargos=snap.docs.map((d)=>({ id:d.id, ...d.data() })); emitted=true; emit(); });
+    }catch{
+      onData([]);
+    }
+  })();
+  return ()=>{ canceled=true; unsubEmp?.(); unsubCargo?.(); };
 }
 export async function createSupernumerario({ codigo, documento, nombre, telefono, cargoCodigo, cargoNombre, sedeCodigo, sedeNombre, fechaIngreso }){
   void codigo;
@@ -1044,6 +1382,8 @@ function mapByDocument(rows=[]){
 }
 export function streamSupervisors(onData){
   let employees=[]; let profiles=[]; let cargos=[]; let emitted=false;
+  let unsubEmp=()=>{}; let unsubProfile=()=>{}; let unsubCargo=()=>{};
+  let canceled=false;
   const emit=()=>{
     if(!emitted) return;
     const cargoMap=new Map((cargos||[]).map((c)=>[String(c?.codigo||''),c]));
@@ -1084,10 +1424,43 @@ export function streamSupervisors(onData){
     });
     onData(rows);
   };
-  const unEmp=onSnapshot(query(collection(db,EMPLOYEES_COL),orderBy('createdAt','desc')),(snap)=>{ employees=snap.docs.map((d)=>({ id:d.id, ...d.data() })); emitted=true; emit(); });
-  const unProfile=onSnapshot(collection(db,SUPERVISOR_PROFILE_COL),(snap)=>{ profiles=snap.docs.map((d)=>({ id:d.id, ...d.data() })); emitted=true; emit(); });
-  const unCargo=onSnapshot(collection(db,CARGOS_COL),(snap)=>{ cargos=snap.docs.map((d)=>({ id:d.id, ...d.data() })); emitted=true; emit(); });
-  return ()=>{ unEmp?.(); unProfile?.(); unCargo?.(); };
+  (async()=>{
+    try{
+      const scope=await getCurrentUserZoneScope();
+      if(canceled) return;
+      const scopedZones=scope.isSupervisor ? scope.zones.slice(0,10) : [];
+      const isScoped=scope.isSupervisor && scopedZones.length>0;
+      const empQuery=isScoped
+        ? query(collection(db,EMPLOYEES_COL), where('zonaCodigo','in', scopedZones))
+        : (scope.isSupervisor ? query(collection(db,EMPLOYEES_COL), where('zonaCodigo','==','__NO_ZONE__')) : query(collection(db,EMPLOYEES_COL),orderBy('createdAt','desc')));
+      const profileQuery=isScoped
+        ? query(collection(db,SUPERVISOR_PROFILE_COL), where('zonaCodigo','in', scopedZones))
+        : (scope.isSupervisor ? query(collection(db,SUPERVISOR_PROFILE_COL), where('zonaCodigo','==','__NO_ZONE__')) : collection(db,SUPERVISOR_PROFILE_COL));
+
+      unsubEmp=onSnapshot(empQuery,(snap)=>{
+        employees=snap.docs.map((d)=>({ id:d.id, ...d.data() }));
+        if(scope.isSupervisor && scope.zones.length){
+          const allowed=new Set(scope.zones);
+          employees=employees.filter((r)=> allowed.has(String(r?.zonaCodigo||'').trim()));
+        }
+        emitted=true;
+        emit();
+      });
+      unsubProfile=onSnapshot(profileQuery,(snap)=>{
+        profiles=snap.docs.map((d)=>({ id:d.id, ...d.data() }));
+        if(scope.isSupervisor && scope.zones.length){
+          const allowed=new Set(scope.zones);
+          profiles=profiles.filter((r)=> allowed.has(String(r?.zonaCodigo||'').trim()));
+        }
+        emitted=true;
+        emit();
+      });
+      unsubCargo=onSnapshot(collection(db,CARGOS_COL),(snap)=>{ cargos=snap.docs.map((d)=>({ id:d.id, ...d.data() })); emitted=true; emit(); });
+    }catch{
+      onData([]);
+    }
+  })();
+  return ()=>{ canceled=true; unsubEmp?.(); unsubProfile?.(); unsubCargo?.(); };
 }
 export async function createSupervisor({ codigo, documento, nombre, zonaCodigo, zonaNombre, fechaIngreso }){
   void codigo;
@@ -1099,6 +1472,7 @@ export async function createSupervisor({ codigo, documento, nombre, zonaCodigo, 
   const emp=empSnap.docs[0];
   const empData=emp.data()||{};
   const zone=zonaCodigo ? { zonaCodigo:zonaCodigo||null, zonaNombre:zonaNombre||null } : await resolveZoneBySedeCode(empData.sedeCodigo||null);
+  await assertSupervisorZoneAllowed(zone.zonaCodigo,'crear supervisores');
   const profileId=await upsertSupervisorByEmployee({
     employeeId:emp.id,
     employeeCodigo:empData.codigo||null,
@@ -1127,6 +1501,8 @@ export async function updateSupervisor(id,data={}){
   const empSnap=await getDoc(empRef);
   if(!empSnap.exists()) throw new Error('Empleado no encontrado.');
   const emp=empSnap.data()||{};
+  const currentZone=String(emp.zonaCodigo||'').trim() || String((await resolveZoneBySedeCode(emp.sedeCodigo||null)).zonaCodigo||'').trim();
+  if(currentZone) await assertSupervisorZoneAllowed(currentZone,'editar supervisores');
   const docNum=String(emp.documento||'').trim();
   if(!docNum) throw new Error('El empleado no tiene documento.');
   const profileId=await upsertSupervisorByEmployee({
@@ -1144,6 +1520,7 @@ export async function updateSupervisor(id,data={}){
     const finalZone=typeof zonaCodigo==='string'
       ? { zonaCodigo:zonaCodigo||null, zonaNombre:typeof zonaNombre==='string' ? (zonaNombre||null) : null }
       : await resolveZoneBySedeCode(emp.sedeCodigo||null);
+    await assertSupervisorZoneAllowed(finalZone.zonaCodigo,'cambiar zona de supervisores');
     await updateDoc(doc(db,SUPERVISOR_PROFILE_COL,profileId), replaceUndefined({
       zonaCodigo:finalZone.zonaCodigo,
       zonaNombre:typeof zonaNombre==='string' ? (zonaNombre||null) : finalZone.zonaNombre,
@@ -1159,6 +1536,8 @@ export async function setSupervisorStatus(id,estado,fechaRetiro=null,opts={}){
   const empSnap=await getDoc(empRef);
   if(!empSnap.exists()) throw new Error('Empleado no encontrado.');
   const emp=empSnap.data()||{};
+  const currentZone=String(emp.zonaCodigo||'').trim() || String((await resolveZoneBySedeCode(emp.sedeCodigo||null)).zonaCodigo||'').trim();
+  if(currentZone) await assertSupervisorZoneAllowed(currentZone,'cambiar estado de supervisores');
   const docNum=String(emp.documento||'').trim();
   if(syncEmployee){
     await setEmployeeStatus(id,estado,fechaRetiro);
