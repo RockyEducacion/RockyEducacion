@@ -843,14 +843,26 @@ function extractMessageText(payload) {
 function mapActionChoice(parsed, isSupernumerario, hasMainMenu) {
   const normalizedId = normalizeKey(parsed.id);
   const normalizedValue = normalizeKey(parsed.value);
+  const isWorkingAction =
+    normalizedId === normalizeKey(MENU_IDS.ACTION_WORKING) ||
+    normalizedId === 'dailytrabajando' ||
+    normalizedValue === 'trabajando';
+  const isCompensatoryAction =
+    normalizedId === normalizeKey(MENU_IDS.ACTION_COMPENSATORY) ||
+    normalizedId === 'dailycompensatorio' ||
+    normalizedValue === 'compensatorio';
+  const isNoveltyAction =
+    normalizedId === normalizeKey(MENU_IDS.ACTION_NOVELTY) ||
+    normalizedId === 'dailynovedad' ||
+    normalizedValue === 'novedad';
   if (!isSupernumerario && !hasMainMenu) {
     if (normalizedId === normalizeKey(MENU_IDS.IDENTITY_YES) || normalizedValue === 'soyyo') return 'identity_yes';
     if (normalizedId === normalizeKey(MENU_IDS.IDENTITY_NO) || normalizedValue === 'nosoyyo') return 'identity_no';
   }
   if (normalizedId === normalizeKey(MENU_IDS.UPDATE_DATA) || normalizedValue === 'actualizardatos') return 'update_data';
-  if (normalizedId === normalizeKey(MENU_IDS.ACTION_WORKING) || normalizedValue === 'trabajando') return 'working';
-  if (normalizedId === normalizeKey(MENU_IDS.ACTION_COMPENSATORY) || normalizedValue === 'compensatorio') return 'compensatory';
-  if (normalizedId === normalizeKey(MENU_IDS.ACTION_NOVELTY) || normalizedValue === 'novedad') return 'novelty';
+  if (isWorkingAction) return 'working';
+  if (isCompensatoryAction) return 'compensatory';
+  if (isNoveltyAction) return 'novelty';
   return null;
 }
 

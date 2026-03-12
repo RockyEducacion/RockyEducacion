@@ -751,17 +751,12 @@ export const WhatsAppLive = (mount, deps = {}) => {
   function calculateStats() {
     const dayRows = (statsAttendance || []).filter((r) => String(r.fecha || '').trim() === today);
     const registeredLocal = dayRows.length;
-    const supernumerarioDocs = new Set(
-      (supernumerarios || [])
-        .filter((s) => isEmployeeExpectedForDate(s, today, sedes))
-        .map((s) => String(s?.documento || '').trim())
-        .filter(Boolean)
-    );
     const expectedLocal = (employees || []).filter((e) => {
-      if (!isEmployeeExpectedForDate(e, today, sedes)) return false;
-      const doc = String(e?.documento || '').trim();
-      if (!doc) return true;
-      return !supernumerarioDocs.has(doc);
+      if (String(e?.estado || '').trim().toLowerCase() !== 'activo') return false;
+      const sedeCodigo = String(e?.sedeCodigo || '').trim();
+      const sede = (sedes || []).find((row) => String(row?.codigo || '').trim() === sedeCodigo) || null;
+      if (!isSedeScheduledForDate(sede, today)) return false;
+      return !isSupernumerarioEmployee(e);
     }).length;
     const plannedLocal = (sedes || []).reduce((acc, s) => {
       const n = parseOperatorCount(s?.numeroOperarios);
@@ -783,12 +778,11 @@ export const WhatsAppLive = (mount, deps = {}) => {
       return decision === 'reemplazo' || decision === 'ausentismo';
     }).length;
     const noveltyPending = Math.max(0, noveltyTotal - noveltyHandled);
-    const useDailyMetrics = dailyMetrics && String(dailyMetrics.fecha || '').trim() === today;
     return {
-      planned: useDailyMetrics ? (Number(dailyMetrics.planned || 0) || 0) : plannedLocal,
-      expected: useDailyMetrics ? (Number(dailyMetrics.expected || 0) || 0) : expectedLocal,
-      unique: useDailyMetrics ? (Number(dailyMetrics.attendanceCount || 0) || 0) : registeredLocal,
-      missing: useDailyMetrics ? (Number(dailyMetrics.missing || 0) || 0) : missingLocal,
+      planned: plannedLocal,
+      expected: expectedLocal,
+      unique: registeredLocal,
+      missing: missingLocal,
       noveltyTotal,
       noveltyHandled,
       noveltyPending
@@ -1021,6 +1015,16 @@ function isSedeScheduledForDate(sede, selectedDate) {
 
 function isEmployeeActiveTodayStrict(emp, selectedDate) {
   return isPersonActiveForDate(emp, selectedDate);
+}
+
+function isSupernumerarioEmployee(emp) {
+  const doc = String(emp?.documento || '').trim();
+  if (doc) {
+    return (supernumerarios || []).some((s) => String(s?.documento || '').trim() === doc);
+  }
+  const id = String(emp?.id || '').trim();
+  if (!id) return false;
+  return (supernumerarios || []).some((s) => String(s?.id || '').trim() === id);
 }
 
 function isPersonActiveForDate(person, selectedDate) {

@@ -551,16 +551,11 @@ async function recomputeDailyMetrics(fecha) {
   const repRows = (replacements || []).map(mapImportReplacementRow);
   const sedes = (sedesRows || []).filter((s) => String(s?.estado || 'activo').trim().toLowerCase() !== 'inactivo');
   const cargoMap = new Map((cargosRows || []).map((row) => [String(row.codigo || '').trim(), row]));
-  const supernumerarioDocs = new Set(
-    (employeesRows || [])
-      .filter((emp) => isEmployeeExpectedForDate(emp, day, sedes) && isEmployeeSupernumerario(emp, cargoMap))
-      .map((emp) => String(emp.documento || '').trim())
-      .filter(Boolean)
-  );
   const expected = (employeesRows || []).filter((emp) => {
-    if (!isEmployeeExpectedForDate(emp, day, sedes)) return false;
-    const doc = String(emp.documento || '').trim();
-    if (doc && supernumerarioDocs.has(doc)) return false;
+    if (String(emp?.estado || '').trim().toLowerCase() !== 'activo') return false;
+    const sedeCodigo = String(emp?.sedeCodigo || emp?.sede_codigo || '').trim();
+    const sede = sedes.find((row) => String(row?.codigo || '').trim() === sedeCodigo) || null;
+    if (!isSedeScheduledForDate(sede, day)) return false;
     return !isEmployeeSupernumerario(emp, cargoMap);
   }).length;
   const planned = sedes.reduce((acc, sede) => {
