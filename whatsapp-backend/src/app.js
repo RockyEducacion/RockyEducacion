@@ -204,6 +204,7 @@ async function processIncomingMessage({ incomingId, from, textBody, phoneNumberI
       phone,
       text: normalized,
       role,
+      session,
       phoneNumberId
     });
     if (handled.ok) {
@@ -215,6 +216,19 @@ async function processIncomingMessage({ incomingId, from, textBody, phoneNumberI
         }
       });
       await markIncomingProcessed(incomingId, 'processed', handled.reason || 'identified_menu_handled');
+      return;
+    }
+  }
+
+  if (session?.session_state === 'awaiting_novedad') {
+    const handled = await handleAwaitingNovedad({
+      phone,
+      text: normalizeIncomingText(textBody),
+      session,
+      phoneNumberId
+    });
+    if (handled.ok) {
+      await markIncomingProcessed(incomingId, 'processed', handled.reason || 'awaiting_novedad_handled');
       return;
     }
   }
@@ -361,15 +375,40 @@ async function sendRoleWelcome(phone, employee, role, phoneNumberId) {
   );
 }
 
-async function handleIdentifiedMenu({ phone, text, role, phoneNumberId }) {
+async function handleIdentifiedMenu({ phone, text, role, session, phoneNumberId }) {
   if (role === 'supervisor') {
     if (text === 'trabajando') {
-      const sent = await sendWhatsAppText(phone, 'Recibido. Registro de supervisor en construccion. Siguiente fase.', phoneNumberId);
-      return sent.ok ? { ok: true, action: 'supervisor_trabajando', reason: 'menu_supervisor_trabajando' } : sent;
+      const saved = await saveAttendanceFromSession({
+        sessionPhone: phone,
+        asistio: true,
+        novedadCodigo: null,
+        novedadNombre: null
+      });
+      const sent = await sendWhatsAppText(phone, 'Registro exitoso: TRABAJANDO.', phoneNumberId);
+      if (!sent.ok) return sent;
+      await updateSession(phone, {
+        session_state: 'identified',
+        last_message_at: new Date().toISOString(),
+        session_data: {
+          ...sessionSafeData(session),
+          last_attendance_id: saved.attendanceId,
+          last_attendance_kind: 'trabajando'
+        }
+      });
+      return { ok: true, action: 'supervisor_trabajando', reason: 'menu_supervisor_trabajando' };
     }
     if (text === 'novedad') {
-      const sent = await sendWhatsAppText(phone, 'Recibido. Flujo de novedad para supervisor en construccion.', phoneNumberId);
-      return sent.ok ? { ok: true, action: 'supervisor_novedad', reason: 'menu_supervisor_novedad' } : sent;
+      const sent = await sendWhatsAppText(phone, 'Escribe tu novedad: ENFERMEDAD GENERAL, ACCIDENTE LABORAL, CALAMIDAD o LICENCIA NO REMUNERADA.', phoneNumberId);
+      if (!sent.ok) return sent;
+      await updateSession(phone, {
+        session_state: 'awaiting_novedad',
+        last_message_at: new Date().toISOString(),
+        session_data: {
+          ...sessionSafeData(session),
+          pending_flow: 'novedad'
+        }
+      });
+      return { ok: true, action: 'supervisor_novedad', reason: 'menu_supervisor_novedad_prompt' };
     }
     if (text === 'actualizar datos') {
       const sent = await sendWhatsAppText(phone, 'Recibido. Flujo de actualizacion de datos en construccion.', phoneNumberId);
@@ -379,19 +418,195 @@ async function handleIdentifiedMenu({ phone, text, role, phoneNumberId }) {
   }
 
   if (text === 'trabajando') {
-    const sent = await sendWhatsAppText(phone, 'Recibido. Registro TRABAJANDO en construccion. Siguiente fase.', phoneNumberId);
-    return sent.ok ? { ok: true, action: 'employee_trabajando', reason: 'menu_employee_trabajando' } : sent;
+    const saved = await saveAttendanceFromSession({
+      sessionPhone: phone,
+      asistio: true,
+      novedadCodigo: null,
+      novedadNombre: null
+    });
+    const sent = await sendWhatsAppText(phone, 'Registro exitoso: TRABAJANDO.', phoneNumberId);
+    if (!sent.ok) return sent;
+    await updateSession(phone, {
+        session_state: 'identified',
+        last_message_at: new Date().toISOString(),
+        session_data: {
+          ...sessionSafeData(session),
+          last_attendance_id: saved.attendanceId,
+          last_attendance_kind: 'trabajando'
+        }
+    });
+    return { ok: true, action: 'employee_trabajando', reason: 'menu_employee_trabajando' };
   }
   if (text === 'compensatorio') {
-    const sent = await sendWhatsAppText(phone, 'Recibido. Registro COMPENSATORIO en construccion. Siguiente fase.', phoneNumberId);
-    return sent.ok ? { ok: true, action: 'employee_compensatorio', reason: 'menu_employee_compensatorio' } : sent;
+    const saved = await saveAttendanceFromSession({
+      sessionPhone: phone,
+      asistio: true,
+      novedadCodigo: '7',
+      novedadNombre: 'COMPENSATORIO'
+    });
+    const sent = await sendWhatsAppText(phone, 'Registro exitoso: COMPENSATORIO.', phoneNumberId);
+    if (!sent.ok) return sent;
+    await updateSession(phone, {
+        session_state: 'identified',
+        last_message_at: new Date().toISOString(),
+        session_data: {
+          ...sessionSafeData(session),
+          last_attendance_id: saved.attendanceId,
+          last_attendance_kind: 'compensatorio'
+        }
+    });
+    return { ok: true, action: 'employee_compensatorio', reason: 'menu_employee_compensatorio' };
   }
   if (text === 'novedad') {
-    const sent = await sendWhatsAppText(phone, 'Recibido. Flujo de NOVEDAD en construccion. Siguiente fase.', phoneNumberId);
-    return sent.ok ? { ok: true, action: 'employee_novedad', reason: 'menu_employee_novedad' } : sent;
+    const sent = await sendWhatsAppText(phone, 'Escribe tu novedad: ENFERMEDAD GENERAL, ACCIDENTE LABORAL, CALAMIDAD o LICENCIA NO REMUNERADA.', phoneNumberId);
+    if (!sent.ok) return sent;
+    await updateSession(phone, {
+        session_state: 'awaiting_novedad',
+        last_message_at: new Date().toISOString(),
+        session_data: {
+          ...sessionSafeData(session),
+          pending_flow: 'novedad'
+        }
+    });
+    return { ok: true, action: 'employee_novedad', reason: 'menu_employee_novedad_prompt' };
   }
 
   return { ok: false };
+}
+
+async function handleAwaitingNovedad({ phone, text, session, phoneNumberId }) {
+  const novedad = mapNovedadInput(text);
+  if (!novedad) {
+    const sent = await sendWhatsAppText(phone, 'Novedad no valida. Escribe: ENFERMEDAD GENERAL, ACCIDENTE LABORAL, CALAMIDAD o LICENCIA NO REMUNERADA.', phoneNumberId);
+    if (!sent.ok) return sent;
+    return { ok: true, reason: 'invalid_novedad_prompt' };
+  }
+  const saved = await saveAttendanceFromSession({
+    sessionPhone: phone,
+    asistio: false,
+    novedadCodigo: novedad.codigo,
+    novedadNombre: novedad.nombre
+  });
+  const sent = await sendWhatsAppText(phone, `Registro exitoso de novedad: ${novedad.nombre}.`, phoneNumberId);
+  if (!sent.ok) return sent;
+  await updateSession(phone, {
+    session_state: 'identified',
+    last_message_at: new Date().toISOString(),
+    session_data: {
+      ...sessionSafeData(session),
+      pending_flow: null,
+      last_attendance_id: saved.attendanceId,
+      last_attendance_kind: 'novedad',
+      last_novedad_codigo: novedad.codigo
+    }
+  });
+  return { ok: true, reason: 'novedad_registered' };
+}
+
+function mapNovedadInput(text) {
+  const value = normalizeIncomingText(text);
+  const options = [
+    { codigo: '8', nombre: 'ENFERMEDAD GENERAL', aliases: ['enfermedad general', 'enfermedad'] },
+    { codigo: '9', nombre: 'ACCIDENTE LABORAL', aliases: ['accidente laboral', 'accidente'] },
+    { codigo: '10', nombre: 'CALAMIDAD', aliases: ['calamidad'] },
+    { codigo: '11', nombre: 'LICENCIA NO REMUNERADA', aliases: ['licencia no remunerada', 'licencia'] }
+  ];
+  return options.find((item) => item.aliases.includes(value)) || null;
+}
+
+function sessionSafeData(session) {
+  return session?.session_data && typeof session.session_data === 'object' ? session.session_data : {};
+}
+
+async function saveAttendanceFromSession({ sessionPhone, asistio, novedadCodigo, novedadNombre }) {
+  const session = await getOrCreateSession(sessionPhone);
+  const employeeId = session?.employee_id;
+  if (!employeeId) throw new Error('session_without_employee');
+  const { data: employee, error } = await supabaseAdmin
+    .from('employees')
+    .select('id, documento, nombre, sede_codigo, sede_nombre')
+    .eq('id', employeeId)
+    .single();
+  if (error) throw error;
+  const fecha = todayBogota();
+  const attendanceId = `${fecha}_${employee.id}`;
+  const attendancePayload = {
+    id: attendanceId,
+    fecha,
+    empleado_id: employee.id,
+    documento: employee.documento || null,
+    nombre: employee.nombre || null,
+    sede_codigo: employee.sede_codigo || null,
+    sede_nombre: employee.sede_nombre || null,
+    asistio: asistio === true,
+    novedad: novedadNombre || null
+  };
+  const { error: attendanceError } = await supabaseAdmin
+    .from('attendance')
+    .upsert(attendancePayload, { onConflict: 'id' });
+  if (attendanceError) throw attendanceError;
+
+  if (asistio === false) {
+    const { error: absError } = await supabaseAdmin
+      .from('absenteeism')
+      .upsert({
+        id: attendanceId,
+        fecha,
+        empleado_id: employee.id,
+        documento: employee.documento || null,
+        nombre: employee.nombre || null,
+        sede_codigo: employee.sede_codigo || null,
+        sede_nombre: employee.sede_nombre || null,
+        estado: 'pendiente'
+      }, { onConflict: 'id' });
+    if (absError) throw absError;
+  }
+
+  await recomputeDailyMetricsForDate(fecha);
+  return { attendanceId, fecha };
+}
+
+async function recomputeDailyMetricsForDate(fecha) {
+  const day = String(fecha || '').trim();
+  if (!day) return;
+  const [{ data: attendance }, { data: replacements }, { data: closures }] = await Promise.all([
+    supabaseAdmin.from('attendance').select('id, documento, empleado_id, asistio, novedad').eq('fecha', day),
+    supabaseAdmin.from('import_replacements').select('id, decision').eq('fecha', day),
+    supabaseAdmin.from('daily_closures').select('id, status, locked').eq('fecha', day).maybeSingle()
+  ]);
+  const attendanceRows = attendance || [];
+  const replacementRows = replacements || [];
+  const absenteeism = attendanceRows.filter((row) => row.asistio !== true).length;
+  const expected = attendanceRows.length;
+  const planned = expected;
+  const paidServices = attendanceRows.filter((row) => row.asistio === true || normalizeIncomingText(row.novedad) === 'compensatorio').length + replacementRows.filter((r) => r.decision === 'reemplazo').length;
+  const noContracted = Math.max(0, planned - expected);
+  const uniqueCount = new Set(attendanceRows.map((row) => String(row.documento || row.empleado_id || '')).filter(Boolean)).size;
+  const { error } = await supabaseAdmin
+    .from('daily_metrics')
+    .upsert({
+      id: day,
+      fecha: day,
+      planned,
+      expected,
+      unique_count: uniqueCount,
+      missing: 0,
+      attendance_count: attendanceRows.length,
+      absenteeism,
+      paid_services: paidServices,
+      no_contracted: noContracted,
+      closed: closures?.locked === true || String(closures?.status || '').trim() === 'closed'
+    }, { onConflict: 'id' });
+  if (error) throw error;
+}
+
+function todayBogota() {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/Bogota',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit'
+  }).format(new Date());
 }
 
 async function sendWhatsAppText(toDigits, bodyText, phoneNumberIdHint = null) {
