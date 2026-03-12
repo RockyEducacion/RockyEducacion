@@ -233,6 +233,45 @@ async function processIncomingMessage({ incomingId, from, textBody, phoneNumberI
     }
   }
 
+  if (session?.session_state === 'awaiting_update_choice') {
+    const handled = await handleUpdateChoice({
+      phone,
+      text: normalizeIncomingText(textBody),
+      session,
+      phoneNumberId
+    });
+    if (handled.ok) {
+      await markIncomingProcessed(incomingId, 'processed', handled.reason || 'awaiting_update_choice_handled');
+      return;
+    }
+  }
+
+  if (session?.session_state === 'awaiting_new_phone') {
+    const handled = await handleNewPhone({
+      phone,
+      textBody,
+      session,
+      phoneNumberId
+    });
+    if (handled.ok) {
+      await markIncomingProcessed(incomingId, 'processed', handled.reason || 'awaiting_new_phone_handled');
+      return;
+    }
+  }
+
+  if (session?.session_state === 'awaiting_new_sede') {
+    const handled = await handleNewSede({
+      phone,
+      textBody,
+      session,
+      phoneNumberId
+    });
+    if (handled.ok) {
+      await markIncomingProcessed(incomingId, 'processed', handled.reason || 'awaiting_new_sede_handled');
+      return;
+    }
+  }
+
   const sent = await sendWhatsAppText(phone, 'No entendi tu mensaje. Si deseas iniciar el registro, por favor escribe "Hola".', phoneNumberId);
   if (!sent.ok) {
     await markIncomingProcessed(incomingId, 'failed', sent.error || 'send_failed');
@@ -411,8 +450,17 @@ async function handleIdentifiedMenu({ phone, text, role, session, phoneNumberId 
       return { ok: true, action: 'supervisor_novedad', reason: 'menu_supervisor_novedad_prompt' };
     }
     if (text === 'actualizar datos') {
-      const sent = await sendWhatsAppText(phone, 'Recibido. Flujo de actualizacion de datos en construccion.', phoneNumberId);
-      return sent.ok ? { ok: true, action: 'supervisor_actualizar_datos', reason: 'menu_supervisor_actualizar_datos' } : sent;
+      const sent = await sendWhatsAppText(phone, 'Opciones de actualizacion:\n- TRASLADO DE SEDE\n- CAMBIO DE TELEFONO', phoneNumberId);
+      if (!sent.ok) return sent;
+      await updateSession(phone, {
+        session_state: 'awaiting_update_choice',
+        last_message_at: new Date().toISOString(),
+        session_data: {
+          ...sessionSafeData(session),
+          pending_flow: 'update_data'
+        }
+      });
+      return { ok: true, action: 'supervisor_actualizar_datos', reason: 'menu_supervisor_actualizar_datos_prompt' };
     }
     return { ok: false };
   }
@@ -472,6 +520,122 @@ async function handleIdentifiedMenu({ phone, text, role, session, phoneNumberId 
   }
 
   return { ok: false };
+}
+
+async function handleUpdateChoice({ phone, text, session, phoneNumberId }) {
+  if (text === 'cambio de telefono') {
+    const sent = await sendWhatsAppText(phone, 'Escribe el nuevo numero de celular.', phoneNumberId);
+    if (!sent.ok) return sent;
+    await updateSession(phone, {
+      session_state: 'awaiting_new_phone',
+      last_message_at: new Date().toISOString(),
+      session_data: {
+        ...sessionSafeData(session),
+        pending_flow: 'update_phone'
+      }
+    });
+    return { ok: true, reason: 'prompt_new_phone' };
+  }
+  if (text === 'traslado de sede') {
+    const sent = await sendWhatsAppText(phone, 'Escribe el codigo exacto de la nueva sede.', phoneNumberId);
+    if (!sent.ok) return sent;
+    await updateSession(phone, {
+      session_state: 'awaiting_new_sede',
+      last_message_at: new Date().toISOString(),
+      session_data: {
+        ...sessionSafeData(session),
+        pending_flow: 'update_sede'
+      }
+    });
+    return { ok: true, reason: 'prompt_new_sede' };
+  }
+  const sent = await sendWhatsAppText(phone, 'Opcion no valida. Responde: TRASLADO DE SEDE o CAMBIO DE TELEFONO.', phoneNumberId);
+  if (!sent.ok) return sent;
+  return { ok: true, reason: 'invalid_update_choice_prompt' };
+}
+
+async function handleNewPhone({ phone, textBody, session, phoneNumberId }) {
+  const newPhone = normalizeColombianPhone(textBody);
+  if (!newPhone) {
+    const sent = await sendWhatsAppText(phone, 'Numero no valido. Escribe un celular valido de Colombia.', phoneNumberId);
+    if (!sent.ok) return sent;
+    return { ok: true, reason: 'invalid_new_phone_prompt' };
+  }
+  const employeeId = session?.employee_id;
+  if (!employeeId) {
+    const sent = await sendWhatsAppText(phone, 'No se encontro la sesion del empleado. Escribe HOLA para reiniciar.', phoneNumberId);
+    if (!sent.ok) return sent;
+    return { ok: true, reason: 'missing_employee_for_phone_update' };
+  }
+  const { error } = await supabaseAdmin
+    .from('employees')
+    .update({
+      telefono: newPhone,
+      last_modified_at: new Date().toISOString()
+    })
+    .eq('id', employeeId);
+  if (error) throw error;
+  const sent = await sendWhatsAppText(phone, `Telefono actualizado correctamente a ${newPhone}.`, phoneNumberId);
+  if (!sent.ok) return sent;
+  await updateSession(phone, {
+    session_state: 'identified',
+    last_message_at: new Date().toISOString(),
+    session_data: {
+      ...sessionSafeData(session),
+      pending_flow: null,
+      last_phone_update: newPhone
+    }
+  });
+  return { ok: true, reason: 'phone_updated' };
+}
+
+async function handleNewSede({ phone, textBody, session, phoneNumberId }) {
+  const sedeCode = String(textBody || '').trim().toUpperCase();
+  if (!sedeCode) {
+    const sent = await sendWhatsAppText(phone, 'Codigo de sede no valido. Escribe el codigo exacto de la sede.', phoneNumberId);
+    if (!sent.ok) return sent;
+    return { ok: true, reason: 'invalid_sede_prompt' };
+  }
+  const { data: sede, error: sedeError } = await supabaseAdmin
+    .from('sedes')
+    .select('codigo, nombre, zona_codigo, zona_nombre')
+    .eq('codigo', sedeCode)
+    .maybeSingle();
+  if (sedeError) throw sedeError;
+  if (!sede) {
+    const sent = await sendWhatsAppText(phone, 'No encontramos esa sede. Verifica el codigo e intenta nuevamente.', phoneNumberId);
+    if (!sent.ok) return sent;
+    return { ok: true, reason: 'sede_not_found_prompt' };
+  }
+  const employeeId = session?.employee_id;
+  if (!employeeId) {
+    const sent = await sendWhatsAppText(phone, 'No se encontro la sesion del empleado. Escribe HOLA para reiniciar.', phoneNumberId);
+    if (!sent.ok) return sent;
+    return { ok: true, reason: 'missing_employee_for_sede_update' };
+  }
+  const { error } = await supabaseAdmin
+    .from('employees')
+    .update({
+      sede_codigo: sede.codigo,
+      sede_nombre: sede.nombre || null,
+      zona_codigo: sede.zona_codigo || null,
+      zona_nombre: sede.zona_nombre || null,
+      last_modified_at: new Date().toISOString()
+    })
+    .eq('id', employeeId);
+  if (error) throw error;
+  const sent = await sendWhatsAppText(phone, `Sede actualizada correctamente a ${sede.nombre || sede.codigo}.`, phoneNumberId);
+  if (!sent.ok) return sent;
+  await updateSession(phone, {
+    session_state: 'identified',
+    last_message_at: new Date().toISOString(),
+    session_data: {
+      ...sessionSafeData(session),
+      pending_flow: null,
+      last_sede_update: sede.codigo
+    }
+  });
+  return { ok: true, reason: 'sede_updated' };
 }
 
 async function handleAwaitingNovedad({ phone, text, session, phoneNumberId }) {
@@ -607,6 +771,15 @@ function todayBogota() {
     month: '2-digit',
     day: '2-digit'
   }).format(new Date());
+}
+
+function normalizeColombianPhone(value) {
+  let digits = String(value || '').replace(/\D+/g, '').trim();
+  if (!digits) return '';
+  if (digits.startsWith('57') && digits.length === 12) digits = digits.slice(2);
+  if (digits.length !== 10) return '';
+  if (!digits.startsWith('3')) return '';
+  return digits;
 }
 
 async function sendWhatsAppText(toDigits, bodyText, phoneNumberIdHint = null) {
