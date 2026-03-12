@@ -424,6 +424,16 @@ async function appendEmployeeCargoHistory({
   await notifyTableReload('employee_cargo_history');
 }
 
+async function appendEmployeeCargoHistoryBulk(rows = [], notifyReload = true) {
+  const items = Array.isArray(rows) ? rows.filter((row) => row?.employee_id) : [];
+  if (!items.length) return;
+  const { error } = await supabase.from('employee_cargo_history').insert(items);
+  if (error) throw error;
+  if (notifyReload) {
+    await notifyTableReload('employee_cargo_history');
+  }
+}
+
 async function upsertSupervisorProfileFromEmployee(employee, override = {}) {
   const audit = await getCurrentAuditFields();
   const payload = {
@@ -1220,28 +1230,51 @@ export async function createEmployeesBulk(rows = []) {
       });
     });
   }
-  let created = 0;
-  for (const row of items) {
+  const timestamp = new Date().toISOString();
+  const payloads = items.map((row) => {
     const codigo = row.codigo || buildNextPrefixedCode('EMP', ++nextCodeNumber, 4);
-    await insertEmployeeRecord({
+    const zone = zoneBySedeCode.get(String(row.sedeCodigo || '').trim()) || { zonaCodigo: null, zonaNombre: null };
+    return {
       codigo,
-      documento: String(row.documento || '').trim(),
+      documento: String(row.documento || '').trim() || null,
       nombre: row.nombre || null,
       telefono: normalizeBulkPhone(row.telefono),
-      cargoCodigo: row.cargoCodigo || null,
-      cargoNombre: row.cargoNombre || null,
-      sedeCodigo: row.sedeCodigo || null,
-      sedeNombre: row.sedeNombre || null,
-      fechaIngreso: normalizeBulkDate(row.fechaIngreso),
-      audit,
-      zone: zoneBySedeCode.get(String(row.sedeCodigo || '').trim()) || { zonaCodigo: null, zonaNombre: null },
-      notifyEmployeesReload: false,
-      historySource: 'bulk_create_employee'
-    });
-    created += 1;
-  }
-  await notifyTableReload('employees');
-  return { created };
+      cargo_codigo: row.cargoCodigo || null,
+      cargo_nombre: row.cargoNombre || null,
+      sede_codigo: row.sedeCodigo || null,
+      sede_nombre: row.sedeNombre || null,
+      zona_codigo: zone.zonaCodigo || null,
+      zona_nombre: zone.zonaNombre || null,
+      fecha_ingreso: normalizeBulkDate(row.fechaIngreso),
+      fecha_retiro: null,
+      estado: 'activo',
+      created_by_uid: audit.created_by_uid,
+      created_by_email: audit.created_by_email,
+      last_modified_by_uid: audit.created_by_uid,
+      last_modified_by_email: audit.created_by_email,
+      last_modified_at: timestamp
+    };
+  });
+  const { data: insertedRows, error: insertError } = await supabase
+    .from('employees')
+    .insert(payloads)
+    .select('id, codigo, documento, cargo_codigo, cargo_nombre, fecha_ingreso');
+  if (insertError) throw insertError;
+  await appendEmployeeCargoHistoryBulk((insertedRows || []).map((row) => ({
+    employee_id: row.id,
+    employee_codigo: row.codigo || null,
+    documento: row.documento || null,
+    cargo_codigo: row.cargo_codigo || null,
+    cargo_nombre: row.cargo_nombre || null,
+    fecha_ingreso: row.fecha_ingreso || null,
+    fecha_retiro: null,
+    source: 'bulk_create_employee'
+  })), false);
+  await Promise.all([
+    notifyTableReload('employees'),
+    notifyTableReload('employee_cargo_history')
+  ]);
+  return { created: (insertedRows || []).length };
 }
 
 export async function updateEmployee(id, data = {}) {
