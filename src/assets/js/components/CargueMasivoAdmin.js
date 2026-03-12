@@ -3,6 +3,7 @@ import { el, qs } from '../utils/dom.js';
 export const CargueMasivoAdmin=(mount,deps={})=>{
   const ui=el('section',{className:'main-card'},[
     el('h2',{},['Cargue masivo de empleados']),
+    el('p',{className:'text-muted mt-2'},['Columnas esperadas: documento, nombre, telefono, cargo codigo, sede codigo, fecha ingreso. El código del empleado se genera automáticamente y el teléfono se guarda con prefijo 57.']),
     el('div',{className:'form-row mt-2'},[
       el('button',{id:'btnTemplate',className:'btn',type:'button'},['Descargar plantilla CSV']),
       el('input',{id:'fileInput',className:'input',type:'file',accept:'.csv,.xls,.xlsx'}),
@@ -92,8 +93,9 @@ export const CargueMasivoAdmin=(mount,deps={})=>{
 
   btnTemplate.addEventListener('click',()=>{
     const headers=['documento','nombre','telefono','cargo codigo','sede codigo','fecha ingreso'];
-    const sample=['10000001','Empleado ejemplo','3000000000','CAR-0001','SED-0001','2026-02-13'];
-    downloadCsv('plantilla_empleados.csv',[headers,sample]);
+    const sampleA=['10000001','Empleado ejemplo','573000000000','CAR-0001','SED-0001','2026-02-13'];
+    const sampleB=['10000002','Empleado ejemplo 2','3000000001','CAR-0002','SED-0002','2026-02-14'];
+    downloadCsv('plantilla_empleados.csv',[headers,sampleA,sampleB]);
   });
 
   function renderSummary(total, ok, err){

@@ -46,7 +46,6 @@ export const Sidebar = () => {
     const bulkLinks = [];
     if (can(PERMS.EDIT_SEDES)) bulkLinks.push(navLink('Cargue sedes', '/bulk-upload-sedes'));
     if (can(PERMS.EDIT_EMPLOYEES)) bulkLinks.push(navLink('Cargue empleados', '/bulk-upload'));
-    if (can(PERMS.EDIT_SUPERNUMERARIOS)) bulkLinks.push(navLink('Cargue supernumerarios', '/bulk-upload-supernumerarios'));
     if (bulkLinks.length) sections.push(section('Cargue masivo', bulkLinks, 'cargue_masivo'));
 
     const opLinks = [];
@@ -159,7 +158,6 @@ function getNavIconLabel(route) {
     '/supernumerarios': 'SN',
     '/bulk-upload-sedes': 'BS',
     '/bulk-upload': 'BE',
-    '/bulk-upload-supernumerarios': 'BN',
     '/imports': 'WA',
     '/whatsapp-live': 'WA',
     '/registros-vivo': 'WA',

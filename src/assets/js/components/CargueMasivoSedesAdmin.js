@@ -3,6 +3,7 @@ import { el, qs } from '../utils/dom.js';
 export const CargueMasivoSedesAdmin=(mount,deps={})=>{
   const ui=el('section',{className:'main-card'},[
     el('h2',{},['Cargue masivo de sedes']),
+    el('p',{className:'text-muted mt-2'},['Columnas esperadas: nombre sede, dependencia codigo, zona codigo, nro operarios, jornada. El código de sede se genera automáticamente. Jornada válida: lun_vie, lun_sab o lun_dom.']),
     el('div',{className:'form-row mt-2'},[
       el('button',{id:'btnTemplate',className:'btn',type:'button'},['Descargar plantilla CSV']),
       el('input',{id:'fileInput',className:'input',type:'file',accept:'.csv,.xls,.xlsx'}),
@@ -91,8 +92,9 @@ export const CargueMasivoSedesAdmin=(mount,deps={})=>{
 
   btnTemplate.addEventListener('click',()=>{
     const headers=['nombre sede','dependencia codigo','zona codigo','nro operarios','jornada'];
-    const sample=['Sede Norte','DEP-0001','ZON-0001','12','lun_vie'];
-    downloadCsv('plantilla_sedes.csv',[headers,sample]);
+    const sampleA=['Sede Norte','DEP-0001','ZON-0001','12','lun_vie'];
+    const sampleB=['Sede Centro','DEP-0002','ZON-0002','18','lun_sab'];
+    downloadCsv('plantilla_sedes.csv',[headers,sampleA,sampleB]);
   });
 
   function renderSummary(total, ok, err){

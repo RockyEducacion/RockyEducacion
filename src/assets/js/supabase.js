@@ -770,6 +770,26 @@ export async function createSede({ codigo, nombre, dependenciaCodigo, dependenci
   return data.id;
 }
 
+export async function createSedesBulk(rows = []) {
+  const items = Array.isArray(rows) ? rows.filter(Boolean) : [];
+  let created = 0;
+  for (const row of items) {
+    const codigo = row.codigo || await getNextSedeCode('SED', 4);
+    await createSede({
+      codigo,
+      nombre: row.nombre || null,
+      dependenciaCodigo: row.dependenciaCodigo || null,
+      dependenciaNombre: row.dependenciaNombre || null,
+      zonaCodigo: row.zonaCodigo || null,
+      zonaNombre: row.zonaNombre || null,
+      numeroOperarios: typeof row.numeroOperarios === 'number' ? row.numeroOperarios : Number(row.numeroOperarios || 0),
+      jornada: row.jornada || 'lun_vie'
+    });
+    created += 1;
+  }
+  return { created };
+}
+
 export async function updateSede(id, { codigo, nombre, dependenciaCodigo, dependenciaNombre, zonaCodigo, zonaNombre, numeroOperarios, jornada }) {
   const patch = {};
   if (typeof codigo === 'string') patch.codigo = codigo;
@@ -956,6 +976,46 @@ export async function createEmployee({ codigo, documento, nombre, telefono, carg
   return data.id;
 }
 
+function normalizeBulkPhone(value) {
+  const digits = String(value || '').replace(/\D+/g, '').trim();
+  if (!digits) return null;
+  if (digits.startsWith('57') && digits.length >= 12) return digits.slice(0, 12);
+  if (digits.length === 10) return `57${digits}`;
+  return digits;
+}
+
+function normalizeBulkDate(value) {
+  if (!value) return null;
+  if (value instanceof Date && !Number.isNaN(value.getTime())) return value.toISOString();
+  const raw = String(value).trim();
+  if (!raw) return null;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return `${raw}T00:00:00`;
+  const parsed = new Date(raw);
+  if (Number.isNaN(parsed.getTime())) return null;
+  return parsed.toISOString();
+}
+
+export async function createEmployeesBulk(rows = []) {
+  const items = Array.isArray(rows) ? rows.filter(Boolean) : [];
+  let created = 0;
+  for (const row of items) {
+    const codigo = row.codigo || await getNextEmployeeCode('EMP', 4);
+    await createEmployee({
+      codigo,
+      documento: String(row.documento || '').trim(),
+      nombre: row.nombre || null,
+      telefono: normalizeBulkPhone(row.telefono),
+      cargoCodigo: row.cargoCodigo || null,
+      cargoNombre: row.cargoNombre || null,
+      sedeCodigo: row.sedeCodigo || null,
+      sedeNombre: row.sedeNombre || null,
+      fechaIngreso: normalizeBulkDate(row.fechaIngreso)
+    });
+    created += 1;
+  }
+  return { created };
+}
+
 export async function updateEmployee(id, data = {}) {
   const audit = await getCurrentAuditFields();
   const current = await supabase.from('employees').select('*').eq('id', id).single();
@@ -1115,6 +1175,31 @@ export async function getNextSupernumerarioCode(prefix = 'SUPN', width = 4) {
 
 export async function createSupernumerario(payload) {
   return createEmployee(payload);
+}
+
+export async function createSupernumerariosBulk(rows = []) {
+  const items = Array.isArray(rows) ? rows.filter(Boolean) : [];
+  let created = 0;
+  for (const row of items) {
+    const alignment = await getCargoCrudAlignmentByCode(row.cargoCodigo, row.cargoNombre);
+    if (alignment !== 'supernumerario') {
+      throw new Error(`El cargo ${row.cargoCodigo || row.cargoNombre || '-'} no está alineado como supernumerario.`);
+    }
+    const codigo = row.codigo || await getNextSupernumerarioCode('SUPN', 4);
+    await createSupernumerario({
+      codigo,
+      documento: String(row.documento || '').trim(),
+      nombre: row.nombre || null,
+      telefono: normalizeBulkPhone(row.telefono),
+      cargoCodigo: row.cargoCodigo || null,
+      cargoNombre: row.cargoNombre || null,
+      sedeCodigo: row.sedeCodigo || null,
+      sedeNombre: row.sedeNombre || null,
+      fechaIngreso: normalizeBulkDate(row.fechaIngreso)
+    });
+    created += 1;
+  }
+  return { created };
 }
 
 export async function updateSupernumerario(id, data = {}) {
