@@ -233,6 +233,32 @@ async function processIncomingMessage({ incomingId, from, textBody, phoneNumberI
     }
   }
 
+  if (session?.session_state === 'awaiting_incapacity_start') {
+    const handled = await handleIncapacityStart({
+      phone,
+      textBody,
+      session,
+      phoneNumberId
+    });
+    if (handled.ok) {
+      await markIncomingProcessed(incomingId, 'processed', handled.reason || 'awaiting_incapacity_start_handled');
+      return;
+    }
+  }
+
+  if (session?.session_state === 'awaiting_incapacity_end') {
+    const handled = await handleIncapacityEnd({
+      phone,
+      textBody,
+      session,
+      phoneNumberId
+    });
+    if (handled.ok) {
+      await markIncomingProcessed(incomingId, 'processed', handled.reason || 'awaiting_incapacity_end_handled');
+      return;
+    }
+  }
+
   if (session?.session_state === 'awaiting_update_choice') {
     const handled = await handleUpdateChoice({
       phone,
@@ -645,6 +671,21 @@ async function handleAwaitingNovedad({ phone, text, session, phoneNumberId }) {
     if (!sent.ok) return sent;
     return { ok: true, reason: 'invalid_novedad_prompt' };
   }
+  if (novedad.codigo === '8' || novedad.codigo === '9') {
+    const sent = await sendWhatsAppText(phone, 'Escribe la fecha de inicio en formato DD/MM/AAAA.', phoneNumberId);
+    if (!sent.ok) return sent;
+    await updateSession(phone, {
+      session_state: 'awaiting_incapacity_start',
+      last_message_at: new Date().toISOString(),
+      session_data: {
+        ...sessionSafeData(session),
+        pending_flow: 'incapacidad',
+        incapacity_novedad_codigo: novedad.codigo,
+        incapacity_novedad_nombre: novedad.nombre
+      }
+    });
+    return { ok: true, reason: 'incapacity_start_prompt' };
+  }
   const saved = await saveAttendanceFromSession({
     sessionPhone: phone,
     asistio: false,
@@ -665,6 +706,99 @@ async function handleAwaitingNovedad({ phone, text, session, phoneNumberId }) {
     }
   });
   return { ok: true, reason: 'novedad_registered' };
+}
+
+async function handleIncapacityStart({ phone, textBody, session, phoneNumberId }) {
+  const start = parseLatamDate(textBody);
+  if (!start) {
+    const sent = await sendWhatsAppText(phone, 'Fecha no valida. Escribe la fecha de inicio en formato DD/MM/AAAA.', phoneNumberId);
+    if (!sent.ok) return sent;
+    return { ok: true, reason: 'invalid_incapacity_start_prompt' };
+  }
+  const sent = await sendWhatsAppText(phone, 'Escribe la fecha de terminacion en formato DD/MM/AAAA.', phoneNumberId);
+  if (!sent.ok) return sent;
+  await updateSession(phone, {
+    session_state: 'awaiting_incapacity_end',
+    last_message_at: new Date().toISOString(),
+    session_data: {
+      ...sessionSafeData(session),
+      incapacity_start: start
+    }
+  });
+  return { ok: true, reason: 'incapacity_end_prompt' };
+}
+
+async function handleIncapacityEnd({ phone, textBody, session, phoneNumberId }) {
+  const end = parseLatamDate(textBody);
+  if (!end) {
+    const sent = await sendWhatsAppText(phone, 'Fecha no valida. Escribe la fecha de terminacion en formato DD/MM/AAAA.', phoneNumberId);
+    if (!sent.ok) return sent;
+    return { ok: true, reason: 'invalid_incapacity_end_prompt' };
+  }
+  const start = String(session?.session_data?.incapacity_start || '').trim();
+  if (!start) {
+    const sent = await sendWhatsAppText(phone, 'No encontramos la fecha de inicio. Escribe HOLA para reiniciar.', phoneNumberId);
+    if (!sent.ok) return sent;
+    return { ok: true, reason: 'missing_incapacity_start' };
+  }
+  if (end < start) {
+    const sent = await sendWhatsAppText(phone, 'La fecha final no puede ser anterior a la inicial. Escribe nuevamente la fecha final en formato DD/MM/AAAA.', phoneNumberId);
+    if (!sent.ok) return sent;
+    return { ok: true, reason: 'invalid_incapacity_range_prompt' };
+  }
+
+  const sessionData = sessionSafeData(session);
+  const novedadCodigo = String(sessionData.incapacity_novedad_codigo || '').trim() || '8';
+  const novedadNombre = String(sessionData.incapacity_novedad_nombre || 'ENFERMEDAD GENERAL').trim();
+
+  const savedAttendance = await saveAttendanceFromSession({
+    sessionPhone: phone,
+    asistio: false,
+    novedadCodigo,
+    novedadNombre
+  });
+
+  const employeeId = session?.employee_id;
+  if (!employeeId) throw new Error('session_without_employee');
+  const { data: employee, error: employeeError } = await supabaseAdmin
+    .from('employees')
+    .select('id, documento, nombre')
+    .eq('id', employeeId)
+    .single();
+  if (employeeError) throw employeeError;
+
+  const { error: incapError } = await supabaseAdmin.from('incapacitados').insert({
+    employee_id: employee.id,
+    documento: employee.documento || null,
+    nombre: employee.nombre || null,
+    fecha_inicio: start,
+    fecha_fin: end,
+    estado: 'activo',
+    source: 'whatsapp_cloud_api'
+  });
+  if (incapError) throw incapError;
+
+  const sent = await sendWhatsAppText(
+    phone,
+    `Incapacidad registrada correctamente. Inicio: ${formatIsoForLatam(start)}. Fin: ${formatIsoForLatam(end)}.`,
+    phoneNumberId
+  );
+  if (!sent.ok) return sent;
+
+  await updateSession(phone, {
+    session_state: 'identified',
+    last_message_at: new Date().toISOString(),
+    session_data: {
+      ...sessionSafeData(session),
+      pending_flow: null,
+      incapacity_start: null,
+      incapacity_novedad_codigo: null,
+      incapacity_novedad_nombre: null,
+      last_attendance_id: savedAttendance.attendanceId,
+      last_attendance_kind: 'incapacidad'
+    }
+  });
+  return { ok: true, reason: 'incapacity_registered' };
 }
 
 function mapNovedadInput(text) {
@@ -780,6 +914,32 @@ function normalizeColombianPhone(value) {
   if (digits.length !== 10) return '';
   if (!digits.startsWith('3')) return '';
   return digits;
+}
+
+function parseLatamDate(value) {
+  const raw = String(value || '').trim();
+  const match = raw.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+  if (!match) return '';
+  const dd = Number(match[1]);
+  const mm = Number(match[2]);
+  const yyyy = Number(match[3]);
+  if (!dd || !mm || !yyyy) return '';
+  const date = new Date(Date.UTC(yyyy, mm - 1, dd));
+  if (
+    date.getUTCFullYear() !== yyyy ||
+    date.getUTCMonth() !== mm - 1 ||
+    date.getUTCDate() !== dd
+  ) {
+    return '';
+  }
+  return `${yyyy}-${String(mm).padStart(2, '0')}-${String(dd).padStart(2, '0')}`;
+}
+
+function formatIsoForLatam(iso) {
+  const value = String(iso || '').trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return value;
+  const [yyyy, mm, dd] = value.split('-');
+  return `${dd}/${mm}/${yyyy}`;
 }
 
 async function sendWhatsAppText(toDigits, bodyText, phoneNumberIdHint = null) {
