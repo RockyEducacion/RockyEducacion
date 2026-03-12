@@ -35,7 +35,7 @@ import { RegistroDiarioSupervisor } from './components/RegistroDiarioSupervisor.
 import { addRoute, startRouter, navigate, refreshRoute } from './router.js';
 import { getState, setState } from './state.js';
 import { can, PERMS, isSuperAdmin } from './permissions.js';
-import { USE_FIREBASE } from './config.js';
+import { DATA_PROVIDER, USE_FIREBASE } from './config.js';
 
 const sidebarMount=document.getElementById('app-sidebar');
 const headerMount =document.getElementById('app-header');
@@ -55,8 +55,8 @@ const guardWrite=(perm,fn)=> async (...args)=>{
 };
 
 (function init(){
-  if(USE_FIREBASE){
-    import('./firebase.js')
+  if(USE_FIREBASE || DATA_PROVIDER === 'supabase'){
+    import(USE_FIREBASE ? './firebase.js' : './supabase.js')
       .then((fb) => {
         deps={
           authState:fb.authState, login:fb.login, register:fb.register, logout:fb.logout,
@@ -121,7 +121,7 @@ const guardWrite=(perm,fn)=> async (...args)=>{
         });
       })
       .catch((err) => {
-        console.error('Firebase init failed:', err);
+        console.error(`${USE_FIREBASE ? 'Firebase' : 'Supabase'} init failed:`, err);
       });
   } else {
     setState({ user:null, userProfile:null });
