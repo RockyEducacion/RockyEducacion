@@ -1,6 +1,3 @@
-export const DATA_PROVIDER = 'supabase';
-export const USE_FIREBASE = DATA_PROVIDER === 'firebase';
-
 export const SUPABASE_URL = 'https://rknphdxrtcftttmapbkx.supabase.co';
 export const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJrbnBoZHhydGNmdHR0bWFwYmt4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzMyNzM1NjEsImV4cCI6MjA4ODg0OTU2MX0.cHZbEyuflz53KlWWkamxhzpYxUDzFx6svtS2nyUSv3M';
 export const SUPABASE_PROFILES_TABLE = 'profiles';

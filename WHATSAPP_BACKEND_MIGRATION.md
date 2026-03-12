@@ -1,64 +1,64 @@
-# Migracion del webhook de WhatsApp fuera de Firebase
+# Backend WhatsApp - Estado actual
 
-## Estado actual
-- Ya existe una base inicial de backend en `whatsapp-backend/src/server.js:1`.
-- Este backend:
-  - verifica el webhook de Meta
-  - valida la firma `x-hub-signature-256`
-  - recibe mensajes y estados
-  - guarda eventos en `public.whatsapp_incoming`
+## Estado
+- El webhook ya opera fuera de Firebase.
+- El backend activo está en `whatsapp-backend/`.
+- El despliegue objetivo es Vercel.
 
-## 1. Crear tablas en Supabase
-- Ejecuta `supabase/schema_whatsapp_phase4.sql:1` en `SQL Editor`.
+## Backend actual
+Archivos principales:
+- `whatsapp-backend/src/app.js:1`
+- `whatsapp-backend/api/index.js:1`
+- `whatsapp-backend/vercel.json:1`
+- `whatsapp-backend/package.json:1`
 
-## 2. Preparar variables de entorno
-- Copia `whatsapp-backend/.env.example:1` como `.env`.
-- Completa:
-  - `SUPABASE_URL`
-  - `SUPABASE_SERVICE_ROLE_KEY`
-  - `WHATSAPP_VERIFY_TOKEN`
-  - `WHATSAPP_ACCESS_TOKEN`
-  - `WHATSAPP_PHONE_NUMBER_ID`
-  - `WHATSAPP_APP_SECRET`
+## Variables requeridas
+Definir en Vercel para el proyecto backend:
+- `SUPABASE_URL`
+- `SUPABASE_SERVICE_ROLE_KEY`
+- `WHATSAPP_VERIFY_TOKEN`
+- `WHATSAPP_ACCESS_TOKEN`
+- `WHATSAPP_PHONE_NUMBER_ID`
+- `WHATSAPP_GRAPH_VERSION`
+- `WHATSAPP_APP_SECRET`
 
-## 3. Instalar y correr localmente
-- Entra a `whatsapp-backend`
-- Ejecuta:
+## Base de datos requerida
+Ejecutar al menos:
+- `supabase/schema_whatsapp_phase4.sql:1`
+- `supabase/schema_operations_phase3.sql:1`
+- `supabase/schema_operations_phase2.sql:1`
+- `supabase/schema_catalogs_phase1.sql:1`
 
-```bash
-npm install
-npm run dev
-```
+## Flujo ya operativo
+- verificacion del webhook de Meta
+- recepcion de mensajes
+- escritura en `whatsapp_incoming`
+- manejo de `whatsapp_sessions`
+- saludo inicial con `hola`
+- identificacion por documento
+- menu por rol
+- registro:
+  - `TRABAJANDO`
+  - `COMPENSATORIO`
+  - `NOVEDAD`
+- `ACTUALIZAR DATOS`
+  - cambio de telefono
+  - traslado de sede
+- incapacidades con fechas
 
-- El backend quedara escuchando por defecto en `http://localhost:8787`
+## Tablas ya usadas por el backend
+- `whatsapp_incoming`
+- `whatsapp_sessions`
+- `employees`
+- `cargos`
+- `sedes`
+- `attendance`
+- `absenteeism`
+- `daily_metrics`
+- `supervisor_profile`
+- `incapacitados`
 
-## 4. Exponer el webhook
-- Para pruebas locales, expone el puerto con tu herramienta habitual (`ngrok`, `cloudflared`, etc.).
-- La URL del webhook debe quedar asi:
-  - `GET /webhooks/whatsapp` para verificacion
-  - `POST /webhooks/whatsapp` para eventos
-
-## 5. Configurar Meta
-- En tu app de Meta / WhatsApp Cloud API:
-  - actualiza la URL del webhook
-  - usa el mismo `WHATSAPP_VERIFY_TOKEN`
-- Una vez guardado, Meta validara por `GET`.
-
-## 6. Que ya queda resuelto
-- Salida del webhook fuera de Firebase.
-- Persistencia inicial de eventos entrantes en Supabase.
-
-## 7. Que sigue despues
-- Portar el procesador conversacional que hoy vive en `functions/index.js`
-- Reemplazar lecturas Firestore por Supabase:
-  - sesiones
-  - empleados
-  - sedes
-  - novedades
-  - asistencias
-  - incapacidades
-- Conectar envio de respuestas a Meta desde este backend
-
-## 8. Nota importante
-- Esta fase saca el webhook de Firebase, pero todavia no migra toda la logica conversacional.
-- El siguiente bloque de trabajo sera portar el flujo de negocio de WhatsApp sobre este backend.
+## Pendiente
+- endurecer validacion final de firma con `WHATSAPP_APP_SECRET`
+- ampliar reglas finas de negocio
+- revisar rotacion de secretos expuestos historicamente

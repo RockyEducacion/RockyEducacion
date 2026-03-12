@@ -51,7 +51,7 @@ export const Login = (mount, deps = {}) => {
     if (blocked) qs('#msg', ui).textContent = blocked;
 
     if (!deps.login) {
-      qs('#msg', ui).textContent = 'Firebase no esta activo.';
+      qs('#msg', ui).textContent = 'El proveedor de autenticacion no esta disponible.';
     } else {
       ui.querySelector('#btnLogin').addEventListener('click', async () => {
         try {
@@ -84,7 +84,7 @@ export const Login = (mount, deps = {}) => {
     ]);
 
     if (!deps.register || !deps.createUserProfile) {
-      qs('#msg', ui).textContent = 'Firebase no esta activo.';
+      qs('#msg', ui).textContent = 'El proveedor de autenticacion no esta disponible.';
     } else {
       ui.querySelector('#btnReg').addEventListener('click', async () => {
         try {

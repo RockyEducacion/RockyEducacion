@@ -35,8 +35,6 @@ import { RegistroDiarioSupervisor } from './components/RegistroDiarioSupervisor.
 import { addRoute, startRouter, navigate, refreshRoute } from './router.js';
 import { getState, setState } from './state.js';
 import { can, PERMS, isSuperAdmin } from './permissions.js';
-import { DATA_PROVIDER, USE_FIREBASE } from './config.js';
-
 const sidebarMount=document.getElementById('app-sidebar');
 const headerMount =document.getElementById('app-header');
 const footerMount =document.getElementById('app-footer');
@@ -55,77 +53,61 @@ const guardWrite=(perm,fn)=> async (...args)=>{
 };
 
 (function init(){
-  if(USE_FIREBASE || DATA_PROVIDER === 'supabase'){
-    import(USE_FIREBASE ? './firebase.js' : './supabase.js')
-      .then((fb) => {
-        deps={
-          authState:fb.authState, login:fb.login, register:fb.register, logout:fb.logout,
-          ensureUserProfile:fb.ensureUserProfile, loadUserProfile:fb.loadUserProfile, createUserProfile:fb.createUserProfile,
-          addNote:fb.addNote, streamNotes:fb.streamNotes,
-          // permisos
-          streamRoleMatrix:fb.streamRoleMatrix, setRolePermissions:fb.setRolePermissions, streamUserOverrides:fb.streamUserOverrides,
-          getUserOverrides:fb.getUserOverrides, setUserOverrides:fb.setUserOverrides, clearUserOverrides:fb.clearUserOverrides,
-          addAuditLog:fb.addAuditLog, streamAuditLogs:(cb)=>{ if(unsubAudit)unsubAudit(); unsubAudit=fb.streamAuditLogs(cb); return unsubAudit; },
-          // users
-          streamUsers:fb.streamUsers, setUserRole:guardWrite(PERMS.EDIT_USERS,fb.setUserRole), setUserStatus:guardWrite(PERMS.EDIT_USERS,fb.setUserStatus), softDeleteUser:guardWrite(PERMS.EDIT_USERS,fb.softDeleteUser), findUserByEmail:fb.findUserByEmail,
-          // zonas
-          streamZones:fb.streamZones, createZone:guardWrite(PERMS.EDIT_ZONES,fb.createZone), updateZone:guardWrite(PERMS.EDIT_ZONES,fb.updateZone), setZoneStatus:guardWrite(PERMS.EDIT_ZONES,fb.setZoneStatus), findZoneByCode:fb.findZoneByCode, getNextZoneCode:fb.getNextZoneCode,
-          // dependencias
-          streamDependencies:fb.streamDependencies, createDependency:guardWrite(PERMS.EDIT_DEPENDENCIES,fb.createDependency), updateDependency:guardWrite(PERMS.EDIT_DEPENDENCIES,fb.updateDependency), setDependencyStatus:guardWrite(PERMS.EDIT_DEPENDENCIES,fb.setDependencyStatus), findDependencyByCode:fb.findDependencyByCode, getNextDependencyCode:fb.getNextDependencyCode,
-          // sedes
-          streamSedes:fb.streamSedes, createSede:guardWrite(PERMS.EDIT_SEDES,fb.createSede), updateSede:guardWrite(PERMS.EDIT_SEDES,fb.updateSede), setSedeStatus:guardWrite(PERMS.EDIT_SEDES,fb.setSedeStatus), findSedeByCode:fb.findSedeByCode, getNextSedeCode:fb.getNextSedeCode,
-          createSedesBulk:guardWrite(PERMS.EDIT_SEDES,fb.createSedesBulk),
-          // empleados
-          streamEmployees:fb.streamEmployees, createEmployee:guardWrite(PERMS.EDIT_EMPLOYEES,fb.createEmployee), updateEmployee:guardWrite(PERMS.EDIT_EMPLOYEES,fb.updateEmployee), setEmployeeStatus:guardWrite(PERMS.EDIT_EMPLOYEES,fb.setEmployeeStatus), findEmployeeByCode:fb.findEmployeeByCode, findEmployeeByDocument:fb.findEmployeeByDocument, getNextEmployeeCode:fb.getNextEmployeeCode,
-          streamEmployeeCargoHistory:fb.streamEmployeeCargoHistory,
-          createEmployeesBulk:guardWrite(PERMS.EDIT_EMPLOYEES,fb.createEmployeesBulk),
-          // supernumerarios
-          streamSupernumerarios:fb.streamSupernumerarios, createSupernumerario:guardWrite(PERMS.EDIT_SUPERNUMERARIOS,fb.createSupernumerario), updateSupernumerario:guardWrite(PERMS.EDIT_SUPERNUMERARIOS,fb.updateSupernumerario), setSupernumerarioStatus:guardWrite(PERMS.EDIT_SUPERNUMERARIOS,fb.setSupernumerarioStatus), findSupernumerarioByCode:fb.findSupernumerarioByCode, findSupernumerarioByDocument:fb.findSupernumerarioByDocument, getNextSupernumerarioCode:fb.getNextSupernumerarioCode, createSupernumerariosBulk:guardWrite(PERMS.EDIT_SUPERNUMERARIOS,fb.createSupernumerariosBulk),
-          // cargos
-          streamCargos:fb.streamCargos, createCargo:guardWrite(PERMS.EDIT_CARGOS,fb.createCargo), updateCargo:guardWrite(PERMS.EDIT_CARGOS,fb.updateCargo), setCargoStatus:guardWrite(PERMS.EDIT_CARGOS,fb.setCargoStatus), findCargoByCode:fb.findCargoByCode, getNextCargoCode:fb.getNextCargoCode,
-          // novedades
-          streamNovedades:fb.streamNovedades, createNovedad:guardWrite(PERMS.EDIT_NOVEDADES,fb.createNovedad), updateNovedad:guardWrite(PERMS.EDIT_NOVEDADES,fb.updateNovedad), setNovedadStatus:guardWrite(PERMS.EDIT_NOVEDADES,fb.setNovedadStatus), findNovedadByCode:fb.findNovedadByCode, findNovedadByCodigoNovedad:fb.findNovedadByCodigoNovedad, getNextNovedadCode:fb.getNextNovedadCode,
-          // supervisores
-          streamSupervisors:fb.streamSupervisors, createSupervisor:guardWrite(PERMS.EDIT_SUPERVISORS,fb.createSupervisor), updateSupervisor:guardWrite(PERMS.EDIT_SUPERVISORS,fb.updateSupervisor), setSupervisorStatus:guardWrite(PERMS.EDIT_SUPERVISORS,fb.setSupervisorStatus), findSupervisorByCode:fb.findSupervisorByCode, findSupervisorByDocument:fb.findSupervisorByDocument, getNextSupervisorCode:fb.getNextSupervisorCode,
-          // operacion
-          confirmImportOperation:fb.confirmImportOperation, saveImportReplacements:fb.saveImportReplacements,
-          closeOperationDayManual:fb.closeOperationDayManual,
-          isOperationDayClosed:fb.isOperationDayClosed, listClosedOperationDaysRange:fb.listClosedOperationDaysRange, listDailyClosuresRange:fb.listDailyClosuresRange,
-          listSedeStatusRange:fb.listSedeStatusRange, listAttendanceRange:fb.listAttendanceRange, listImportReplacementsRange:fb.listImportReplacementsRange,
-          listDailyMetricsRange:fb.listDailyMetricsRange,
-          streamDailyMetricsByDate:fb.streamDailyMetricsByDate,
-          streamDashboardAttendanceByDate:fb.streamDashboardAttendanceByDate,
-          streamDashboardReplacementsByDate:fb.streamDashboardReplacementsByDate,
-          streamImportHistory:fb.streamImportHistory, streamDailyClosures:fb.streamDailyClosures, streamWhatsAppIncoming:fb.streamWhatsAppIncoming,
-          streamAttendanceByDate:fb.streamAttendanceByDate, streamAttendanceRecent:fb.streamAttendanceRecent, streamImportReplacementsByDate:fb.streamImportReplacementsByDate
-        };
+  import('./supabase.js')
+    .then((fb) => {
+      deps={
+        authState:fb.authState, login:fb.login, register:fb.register, logout:fb.logout,
+        ensureUserProfile:fb.ensureUserProfile, loadUserProfile:fb.loadUserProfile, createUserProfile:fb.createUserProfile,
+        addNote:fb.addNote, streamNotes:fb.streamNotes,
+        streamRoleMatrix:fb.streamRoleMatrix, setRolePermissions:fb.setRolePermissions, streamUserOverrides:fb.streamUserOverrides,
+        getUserOverrides:fb.getUserOverrides, setUserOverrides:fb.setUserOverrides, clearUserOverrides:fb.clearUserOverrides,
+        addAuditLog:fb.addAuditLog, streamAuditLogs:(cb)=>{ if(unsubAudit)unsubAudit(); unsubAudit=fb.streamAuditLogs(cb); return unsubAudit; },
+        streamUsers:fb.streamUsers, setUserRole:guardWrite(PERMS.EDIT_USERS,fb.setUserRole), setUserStatus:guardWrite(PERMS.EDIT_USERS,fb.setUserStatus), softDeleteUser:guardWrite(PERMS.EDIT_USERS,fb.softDeleteUser), findUserByEmail:fb.findUserByEmail,
+        streamZones:fb.streamZones, createZone:guardWrite(PERMS.EDIT_ZONES,fb.createZone), updateZone:guardWrite(PERMS.EDIT_ZONES,fb.updateZone), setZoneStatus:guardWrite(PERMS.EDIT_ZONES,fb.setZoneStatus), findZoneByCode:fb.findZoneByCode, getNextZoneCode:fb.getNextZoneCode,
+        streamDependencies:fb.streamDependencies, createDependency:guardWrite(PERMS.EDIT_DEPENDENCIES,fb.createDependency), updateDependency:guardWrite(PERMS.EDIT_DEPENDENCIES,fb.updateDependency), setDependencyStatus:guardWrite(PERMS.EDIT_DEPENDENCIES,fb.setDependencyStatus), findDependencyByCode:fb.findDependencyByCode, getNextDependencyCode:fb.getNextDependencyCode,
+        streamSedes:fb.streamSedes, createSede:guardWrite(PERMS.EDIT_SEDES,fb.createSede), updateSede:guardWrite(PERMS.EDIT_SEDES,fb.updateSede), setSedeStatus:guardWrite(PERMS.EDIT_SEDES,fb.setSedeStatus), findSedeByCode:fb.findSedeByCode, getNextSedeCode:fb.getNextSedeCode,
+        createSedesBulk:guardWrite(PERMS.EDIT_SEDES,fb.createSedesBulk),
+        streamEmployees:fb.streamEmployees, createEmployee:guardWrite(PERMS.EDIT_EMPLOYEES,fb.createEmployee), updateEmployee:guardWrite(PERMS.EDIT_EMPLOYEES,fb.updateEmployee), setEmployeeStatus:guardWrite(PERMS.EDIT_EMPLOYEES,fb.setEmployeeStatus), findEmployeeByCode:fb.findEmployeeByCode, findEmployeeByDocument:fb.findEmployeeByDocument, getNextEmployeeCode:fb.getNextEmployeeCode,
+        streamEmployeeCargoHistory:fb.streamEmployeeCargoHistory,
+        createEmployeesBulk:guardWrite(PERMS.EDIT_EMPLOYEES,fb.createEmployeesBulk),
+        streamSupernumerarios:fb.streamSupernumerarios, createSupernumerario:guardWrite(PERMS.EDIT_SUPERNUMERARIOS,fb.createSupernumerario), updateSupernumerario:guardWrite(PERMS.EDIT_SUPERNUMERARIOS,fb.updateSupernumerario), setSupernumerarioStatus:guardWrite(PERMS.EDIT_SUPERNUMERARIOS,fb.setSupernumerarioStatus), findSupernumerarioByCode:fb.findSupernumerarioByCode, findSupernumerarioByDocument:fb.findSupernumerarioByDocument, getNextSupernumerarioCode:fb.getNextSupernumerarioCode, createSupernumerariosBulk:guardWrite(PERMS.EDIT_SUPERNUMERARIOS,fb.createSupernumerariosBulk),
+        streamCargos:fb.streamCargos, createCargo:guardWrite(PERMS.EDIT_CARGOS,fb.createCargo), updateCargo:guardWrite(PERMS.EDIT_CARGOS,fb.updateCargo), setCargoStatus:guardWrite(PERMS.EDIT_CARGOS,fb.setCargoStatus), findCargoByCode:fb.findCargoByCode, getNextCargoCode:fb.getNextCargoCode,
+        streamNovedades:fb.streamNovedades, createNovedad:guardWrite(PERMS.EDIT_NOVEDADES,fb.createNovedad), updateNovedad:guardWrite(PERMS.EDIT_NOVEDADES,fb.updateNovedad), setNovedadStatus:guardWrite(PERMS.EDIT_NOVEDADES,fb.setNovedadStatus), findNovedadByCode:fb.findNovedadByCode, findNovedadByCodigoNovedad:fb.findNovedadByCodigoNovedad, getNextNovedadCode:fb.getNextNovedadCode,
+        streamSupervisors:fb.streamSupervisors, createSupervisor:guardWrite(PERMS.EDIT_SUPERVISORS,fb.createSupervisor), updateSupervisor:guardWrite(PERMS.EDIT_SUPERVISORS,fb.updateSupervisor), setSupervisorStatus:guardWrite(PERMS.EDIT_SUPERVISORS,fb.setSupervisorStatus), findSupervisorByCode:fb.findSupervisorByCode, findSupervisorByDocument:fb.findSupervisorByDocument, getNextSupervisorCode:fb.getNextSupervisorCode,
+        confirmImportOperation:fb.confirmImportOperation, saveImportReplacements:fb.saveImportReplacements,
+        closeOperationDayManual:fb.closeOperationDayManual,
+        isOperationDayClosed:fb.isOperationDayClosed, listClosedOperationDaysRange:fb.listClosedOperationDaysRange, listDailyClosuresRange:fb.listDailyClosuresRange,
+        listSedeStatusRange:fb.listSedeStatusRange, listAttendanceRange:fb.listAttendanceRange, listImportReplacementsRange:fb.listImportReplacementsRange,
+        listDailyMetricsRange:fb.listDailyMetricsRange,
+        streamDailyMetricsByDate:fb.streamDailyMetricsByDate,
+        streamDashboardAttendanceByDate:fb.streamDashboardAttendanceByDate,
+        streamDashboardReplacementsByDate:fb.streamDashboardReplacementsByDate,
+        streamImportHistory:fb.streamImportHistory, streamDailyClosures:fb.streamDailyClosures, streamWhatsAppIncoming:fb.streamWhatsAppIncoming,
+        streamAttendanceByDate:fb.streamAttendanceByDate, streamAttendanceRecent:fb.streamAttendanceRecent, streamImportReplacementsByDate:fb.streamImportReplacementsByDate
+      };
 
-        // Re-render current route so Login receives hydrated deps.
-        refreshRoute();
+      refreshRoute();
 
-        fb.authState(async (user)=>{
-          if(unsubRoleMatrix){unsubRoleMatrix();unsubRoleMatrix=null;} if(unsubUserOverrides){unsubUserOverrides();unsubUserOverrides=null;}
-          if(!user){ setState({ user:null, userProfile:null, userOverrides:{} }); headerMount.replaceChildren(Header(deps)); sidebarMount.replaceChildren(Sidebar()); if(location.hash!=="#/login") navigate('/login'); else refreshRoute(); return; }
-          await fb.ensureUserProfile(user); const profile=await fb.loadUserProfile(user.uid);
-          const status=String(profile?.estado||'activo').toLowerCase();
-          if(status==='inactivo' || status==='eliminado'){
-            try{ sessionStorage.setItem('auth_block_msg', status==='eliminado' ? 'Tu usuario fue eliminado. Contacta al administrador.' : 'Tu usuario esta inactivo. Contacta al administrador.'); }catch{}
-            await fb.logout();
-            return;
-          }
-          setState({ user, userProfile: profile });
-          unsubRoleMatrix=fb.streamRoleMatrix((map)=> setState({ roleMatrix: map }));
-          unsubUserOverrides=fb.streamUserOverrides(user.uid,(ov)=> setState({ userOverrides: ov||{} }));
-          headerMount.replaceChildren(Header(deps)); sidebarMount.replaceChildren(Sidebar());
-          if(location.hash==='' || location.hash==="#/login") navigate('/');
-        });
-      })
-      .catch((err) => {
-        console.error(`${USE_FIREBASE ? 'Firebase' : 'Supabase'} init failed:`, err);
+      fb.authState(async (user)=>{
+        if(unsubRoleMatrix){unsubRoleMatrix();unsubRoleMatrix=null;} if(unsubUserOverrides){unsubUserOverrides();unsubUserOverrides=null;}
+        if(!user){ setState({ user:null, userProfile:null, userOverrides:{} }); headerMount.replaceChildren(Header(deps)); sidebarMount.replaceChildren(Sidebar()); if(location.hash!=="#/login") navigate('/login'); else refreshRoute(); return; }
+        await fb.ensureUserProfile(user); const profile=await fb.loadUserProfile(user.uid);
+        const status=String(profile?.estado||'activo').toLowerCase();
+        if(status==='inactivo' || status==='eliminado'){
+          try{ sessionStorage.setItem('auth_block_msg', status==='eliminado' ? 'Tu usuario fue eliminado. Contacta al administrador.' : 'Tu usuario esta inactivo. Contacta al administrador.'); }catch{}
+          await fb.logout();
+          return;
+        }
+        setState({ user, userProfile: profile });
+        unsubRoleMatrix=fb.streamRoleMatrix((map)=> setState({ roleMatrix: map }));
+        unsubUserOverrides=fb.streamUserOverrides(user.uid,(ov)=> setState({ userOverrides: ov||{} }));
+        headerMount.replaceChildren(Header(deps)); sidebarMount.replaceChildren(Sidebar());
+        if(location.hash==='' || location.hash==="#/login") navigate('/');
       });
-  } else {
-    setState({ user:null, userProfile:null });
-  }
+    })
+    .catch((err) => {
+      console.error('Supabase init failed:', err);
+    });
 
   addRoute('/login', ()=> Login(root, deps));
   addRoute('/', ()=> requireAuth(()=> Home(root, deps)));
