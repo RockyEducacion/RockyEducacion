@@ -252,8 +252,8 @@ export const RegistroSede = (mount, deps = {}) => {
           const planeados = parseOperatorCount(planeadosRaw);
           const contratados = Number(contratadosBySede.get(sedeCode) || 0);
           const registrados = atts.length;
-          const faltantes = Math.max(0, planeados - registrados);
-          const sobrantes = Math.max(0, registrados - planeados);
+          const faltantes = Math.max(0, contratados - registrados);
+          const sobrantes = Math.max(0, registrados - contratados);
           const meta = sedeMetaByCode.get(sedeCode) || {};
           const dependenciaCodigo = String(meta.dependenciaCodigo || '').trim();
           const dependenciaNombre = String(meta.dependenciaNombre || '').trim() || 'Sin dependencia';

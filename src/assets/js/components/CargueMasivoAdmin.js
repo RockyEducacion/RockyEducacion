@@ -11,6 +11,15 @@ export const CargueMasivoAdmin=(mount,deps={})=>{
       el('button',{id:'btnImport',className:'btn',disabled:true},['Importar empleados']),
       el('span',{id:'msg',className:'text-muted'},[' '])
     ]),
+    el('div',{id:'importProgress',className:'bulk-progress hidden','aria-live':'polite'},[
+      el('div',{className:'bulk-progress__meta'},[
+        el('span',{id:'progressLabel',className:'bulk-progress__label'},['Listo para importar']),
+        el('span',{id:'progressNumbers',className:'bulk-progress__numbers text-muted'},['0 / 0'])
+      ]),
+      el('div',{className:'bulk-progress__track',role:'progressbar','aria-valuemin':'0','aria-valuemax':'100','aria-valuenow':'0','aria-label':'Progreso de importacion'},[
+        el('div',{id:'progressFill',className:'bulk-progress__fill',style:'width:0%'})
+      ])
+    ]),
     el('div',{className:'divider'}),
     el('div',{className:'form-row'},[
       el('div',{},[ el('label',{className:'label'},['Filas leidas']), el('input',{id:'sumRows',className:'input',disabled:true}) ]),
@@ -43,8 +52,14 @@ export const CargueMasivoAdmin=(mount,deps={})=>{
 
   const msg=qs('#msg',ui);
   const btnImport=qs('#btnImport',ui);
+  const btnValidate=qs('#btnValidate',ui);
   const fileInput=qs('#fileInput',ui);
   const btnTemplate=qs('#btnTemplate',ui);
+  const progressBox=qs('#importProgress',ui);
+  const progressLabel=qs('#progressLabel',ui);
+  const progressNumbers=qs('#progressNumbers',ui);
+  const progressFill=qs('#progressFill',ui);
+  const progressTrack=ui.querySelector('.bulk-progress__track');
   let employees=[]; let cargos=[]; let sedes=[];
   let validRows=[];
 
@@ -59,6 +74,7 @@ export const CargueMasivoAdmin=(mount,deps={})=>{
     try{
       const file=fileInput.files?.[0];
       if(!file){ msg.textContent='Selecciona un archivo CSV/XLS/XLSX.'; return; }
+      resetProgress();
       const rows=await readInputFile(file);
       const result=validateRows(rows, employees, cargos, sedes);
       renderSummary(result.rows.length, result.valid.length, result.errors.length);
@@ -75,19 +91,33 @@ export const CargueMasivoAdmin=(mount,deps={})=>{
   btnImport.addEventListener('click',async()=>{
     if(!validRows.length){ msg.textContent='No hay filas validas para importar.'; return; }
     btnImport.disabled=true;
+    btnValidate.disabled=true;
+    btnTemplate.disabled=true;
+    fileInput.disabled=true;
+    showProgress();
+    updateProgress({ created:0, total:validRows.length, percent:0, phase:'preparing' });
     msg.textContent='Importando empleados...';
     try{
-      const out=await deps.createEmployeesBulk?.(validRows);
+      const out=await deps.createEmployeesBulk?.(validRows,{
+        chunkSize:250,
+        onProgress:updateProgress
+      });
       await deps.addAuditLog?.({
         targetType:'employee',
         action:'bulk_create_employees',
         after:{ total: out?.created||validRows.length }
       });
       msg.textContent=`Importacion completada. Creados: ${out?.created||validRows.length}`;
+      updateProgress({ created:out?.created||validRows.length, total:validRows.length, percent:100, phase:'completed' });
       validRows=[];
     }catch(e){
       msg.textContent='Error al importar: '+(e?.message||e);
       btnImport.disabled=false;
+      updateProgress({ created:0, total:validRows.length, percent:0, phase:'error' });
+    } finally {
+      btnValidate.disabled=false;
+      btnTemplate.disabled=false;
+      fileInput.disabled=false;
     }
   });
 
@@ -102,6 +132,33 @@ export const CargueMasivoAdmin=(mount,deps={})=>{
     qs('#sumRows',ui).value=String(total||0);
     qs('#sumOk',ui).value=String(ok||0);
     qs('#sumErr',ui).value=String(err||0);
+  }
+
+  function showProgress(){
+    progressBox.classList.remove('hidden');
+  }
+
+  function resetProgress(){
+    progressLabel.textContent='Listo para importar';
+    progressNumbers.textContent='0 / 0';
+    progressFill.style.width='0%';
+    progressTrack?.setAttribute('aria-valuenow','0');
+  }
+
+  function updateProgress({ created=0, total=0, percent=0, phase='importing' } = {}){
+    const labels={
+      preparing:'Preparando importacion...',
+      importing:'Importando empleados...',
+      refreshing:'Actualizando vista...',
+      completed:'Importacion completada',
+      error:'Importacion interrumpida'
+    };
+    showProgress();
+    const safePercent=Math.max(0,Math.min(100,Number(percent)||0));
+    progressLabel.textContent=labels[phase]||'Importando empleados...';
+    progressNumbers.textContent=`${created} / ${total}`;
+    progressFill.style.width=`${safePercent}%`;
+    progressTrack?.setAttribute('aria-valuenow',String(safePercent));
   }
 
   function renderPreview(rows){
@@ -269,5 +326,6 @@ export const CargueMasivoAdmin=(mount,deps={})=>{
   }
 
   mount.replaceChildren(ui);
+  resetProgress();
   return ()=>{ unEmp?.(); unCargo?.(); unSede?.(); };
 };

@@ -101,6 +101,21 @@ function normalizeTimestamp(value) {
   return value;
 }
 
+function formatHour(value) {
+  try {
+    const d = value?.toDate ? value.toDate() : value ? new Date(value) : null;
+    if (!d || Number.isNaN(d.getTime())) return null;
+    return d.toLocaleTimeString('es-CO', {
+      hour12: false,
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit'
+    });
+  } catch {
+    return null;
+  }
+}
+
 function mapCatalogRow(row = {}) {
   return {
     id: row.id,
@@ -241,6 +256,7 @@ function mapAttendanceRow(row = {}) {
   const rawNovedad = row.novedad || null;
   const novedadText = String(rawNovedad || '').trim();
   const novedadCodigo = /^\d+$/.test(novedadText) ? novedadText : null;
+  const createdAt = row.created_at || null;
   return {
     id: row.id,
     fecha: row.fecha || null,
@@ -253,7 +269,8 @@ function mapAttendanceRow(row = {}) {
     novedad: rawNovedad,
     novedadCodigo,
     novedadNombre: novedadCodigo ? null : rawNovedad,
-    createdAt: row.created_at || null
+    createdAt,
+    hora: formatHour(createdAt)
   };
 }
 
@@ -384,6 +401,60 @@ function normalizeCargoAlignment(value) {
   return 'empleado';
 }
 
+function toISODate(value) {
+  if (!value) return null;
+  if (typeof value === 'string') {
+    const v = value.trim();
+    if (/^\d{4}-\d{2}-\d{2}$/.test(v)) return v;
+    const dt = new Date(v);
+    if (!Number.isNaN(dt.getTime())) return dt.toISOString().slice(0, 10);
+    return null;
+  }
+  if (typeof value?.toDate === 'function') {
+    const dt = value.toDate();
+    if (!Number.isNaN(dt.getTime())) return dt.toISOString().slice(0, 10);
+    return null;
+  }
+  if (value instanceof Date) {
+    if (!Number.isNaN(value.getTime())) return value.toISOString().slice(0, 10);
+    return null;
+  }
+  return null;
+}
+
+function isSedeScheduledForDate(sede, selectedDate) {
+  const iso = toISODate(selectedDate);
+  if (!iso) return false;
+  const [year, month, day] = iso.split('-').map((n) => Number(n));
+  const weekday = new Date(Date.UTC(year, (month || 1) - 1, day || 1)).getUTCDay();
+  const jornada = String(sede?.jornada || 'lun_vie').trim().toLowerCase();
+  if (jornada === 'lun_dom') return true;
+  if (jornada === 'lun_sab') return weekday >= 1 && weekday <= 6;
+  return weekday >= 1 && weekday <= 5;
+}
+
+function isEmployeeExpectedForDate(emp, selectedDate, sedeRows = []) {
+  if (!selectedDate) return false;
+  const ingreso = toISODate(emp?.fechaIngreso || emp?.fecha_ingreso);
+  if (!ingreso || ingreso > selectedDate) return false;
+  const retiro = toISODate(emp?.fechaRetiro || emp?.fecha_retiro);
+  const estado = String(emp?.estado || '').trim().toLowerCase();
+  if (estado === 'inactivo') return Boolean(retiro && retiro >= selectedDate);
+  if (retiro && retiro < selectedDate) return false;
+  const sedeCodigo = String(emp?.sedeCodigo || emp?.sede_codigo || '').trim();
+  if (!sedeCodigo) return false;
+  const sede = (sedeRows || []).find((row) => String(row?.codigo || '').trim() === sedeCodigo) || null;
+  if (!isSedeScheduledForDate(sede, selectedDate)) return false;
+  return true;
+}
+
+function isEmployeeSupernumerario(emp, cargoMap = new Map()) {
+  const cargoCode = String(emp?.cargoCodigo || emp?.cargo_codigo || '').trim();
+  const cargo = cargoMap.get(cargoCode) || null;
+  const alignment = normalizeCargoAlignment(cargo?.alineacion_crud || emp?.cargoNombre || emp?.cargo_nombre);
+  return alignment === 'supernumerario';
+}
+
 async function getCargoCrudAlignmentByCode(cargoCodigo, cargoNombre = null) {
   const code = String(cargoCodigo || '').trim();
   const inferByName = (name) => {
@@ -468,19 +539,39 @@ async function upsertSupervisorProfileFromEmployee(employee, override = {}) {
 async function recomputeDailyMetrics(fecha) {
   const day = String(fecha || '').trim();
   if (!day) return null;
-  const [{ data: attendance }, { data: replacements }, { data: closures }] = await Promise.all([
+  const [{ data: attendance }, { data: replacements }, { data: closures }, sedesRows, employeesRows, cargosRows] = await Promise.all([
     supabase.from('attendance').select('*').eq('fecha', day),
     supabase.from('import_replacements').select('*').eq('fecha', day),
-    supabase.from('daily_closures').select('*').eq('fecha', day).maybeSingle()
+    supabase.from('daily_closures').select('*').eq('fecha', day).maybeSingle(),
+    selectAllRows('sedes', { select: '*' }),
+    selectAllRows('employees', { select: '*' }),
+    selectAllRows('cargos', { select: 'codigo, alineacion_crud, nombre' })
   ]);
   const attRows = (attendance || []).map(mapAttendanceRow);
   const repRows = (replacements || []).map(mapImportReplacementRow);
+  const sedes = (sedesRows || []).filter((s) => String(s?.estado || 'activo').trim().toLowerCase() !== 'inactivo');
+  const cargoMap = new Map((cargosRows || []).map((row) => [String(row.codigo || '').trim(), row]));
+  const supernumerarioDocs = new Set(
+    (employeesRows || [])
+      .filter((emp) => isEmployeeExpectedForDate(emp, day, sedes) && isEmployeeSupernumerario(emp, cargoMap))
+      .map((emp) => String(emp.documento || '').trim())
+      .filter(Boolean)
+  );
+  const expected = (employeesRows || []).filter((emp) => {
+    if (!isEmployeeExpectedForDate(emp, day, sedes)) return false;
+    const doc = String(emp.documento || '').trim();
+    if (doc && supernumerarioDocs.has(doc)) return false;
+    return !isEmployeeSupernumerario(emp, cargoMap);
+  }).length;
+  const planned = sedes.reduce((acc, sede) => {
+    if (!isSedeScheduledForDate(sede, day)) return acc;
+    const n = Number(sede?.numero_operarios ?? 0);
+    return acc + (Number.isFinite(n) && n > 0 ? n : 0);
+  }, 0);
   const uniqueDocs = new Set(attRows.map((row) => String(row.documento || row.empleadoId || '')).filter(Boolean));
   const absenteeism = repRows.filter((row) => row.decision === 'ausentismo').length;
   const replaced = repRows.filter((row) => row.decision === 'reemplazo').length;
   const attendanceCount = attRows.length;
-  const expected = attendanceCount;
-  const planned = attendanceCount + absenteeism;
   const paidServices = Math.max(0, expected - absenteeism + replaced);
   const noContracted = Math.max(0, planned - expected);
   const payload = {
@@ -489,7 +580,7 @@ async function recomputeDailyMetrics(fecha) {
     planned,
     expected,
     unique_count: uniqueDocs.size,
-    missing: Math.max(0, planned - expected),
+    missing: Math.max(0, expected - attendanceCount),
     attendance_count: attendanceCount,
     absenteeism,
     paid_services: paidServices,
@@ -630,6 +721,15 @@ function extractPrefixedCodeNumber(code, prefix) {
 
 function buildNextPrefixedCode(prefix, value, width = 4) {
   return `${prefix}-${String(value).padStart(width, '0')}`;
+}
+
+function chunkArray(items = [], size = 250) {
+  const out = [];
+  const safeSize = Math.max(1, Number(size) || 1);
+  for (let i = 0; i < items.length; i += safeSize) {
+    out.push(items.slice(i, i + safeSize));
+  }
+  return out;
 }
 
 async function insertEmployeeRecord({
@@ -1205,9 +1305,21 @@ function normalizeBulkDate(value) {
   return parsed.toISOString();
 }
 
-export async function createEmployeesBulk(rows = []) {
+export async function createEmployeesBulk(rows = [], options = {}) {
   const items = Array.isArray(rows) ? rows.filter(Boolean) : [];
   if (!items.length) return { created: 0 };
+  const onProgress = typeof options?.onProgress === 'function' ? options.onProgress : null;
+  const chunkSize = Math.max(1, Number(options?.chunkSize) || 250);
+  const reportProgress = (created, total, phase = 'importing') => {
+    if (!onProgress) return;
+    onProgress({
+      created,
+      total,
+      percent: total > 0 ? Math.min(100, Math.round((created / total) * 100)) : 0,
+      phase
+    });
+  };
+  reportProgress(0, items.length, 'preparing');
   const audit = await getCurrentAuditFields();
   const existingCodes = await selectAllRows('employees', { select: 'codigo' });
   let nextCodeNumber = 0;
@@ -1230,51 +1342,59 @@ export async function createEmployeesBulk(rows = []) {
       });
     });
   }
-  const timestamp = new Date().toISOString();
-  const payloads = items.map((row) => {
-    const codigo = row.codigo || buildNextPrefixedCode('EMP', ++nextCodeNumber, 4);
-    const zone = zoneBySedeCode.get(String(row.sedeCodigo || '').trim()) || { zonaCodigo: null, zonaNombre: null };
-    return {
-      codigo,
-      documento: String(row.documento || '').trim() || null,
-      nombre: row.nombre || null,
-      telefono: normalizeBulkPhone(row.telefono),
-      cargo_codigo: row.cargoCodigo || null,
-      cargo_nombre: row.cargoNombre || null,
-      sede_codigo: row.sedeCodigo || null,
-      sede_nombre: row.sedeNombre || null,
-      zona_codigo: zone.zonaCodigo || null,
-      zona_nombre: zone.zonaNombre || null,
-      fecha_ingreso: normalizeBulkDate(row.fechaIngreso),
+  const batches = chunkArray(items, chunkSize);
+  let created = 0;
+  for (const batch of batches) {
+    const timestamp = new Date().toISOString();
+    const payloads = batch.map((row) => {
+      const codigo = row.codigo || buildNextPrefixedCode('EMP', ++nextCodeNumber, 4);
+      const zone = zoneBySedeCode.get(String(row.sedeCodigo || '').trim()) || { zonaCodigo: null, zonaNombre: null };
+      return {
+        codigo,
+        documento: String(row.documento || '').trim() || null,
+        nombre: row.nombre || null,
+        telefono: normalizeBulkPhone(row.telefono),
+        cargo_codigo: row.cargoCodigo || null,
+        cargo_nombre: row.cargoNombre || null,
+        sede_codigo: row.sedeCodigo || null,
+        sede_nombre: row.sedeNombre || null,
+        zona_codigo: zone.zonaCodigo || null,
+        zona_nombre: zone.zonaNombre || null,
+        fecha_ingreso: normalizeBulkDate(row.fechaIngreso),
+        fecha_retiro: null,
+        estado: 'activo',
+        created_by_uid: audit.created_by_uid,
+        created_by_email: audit.created_by_email,
+        last_modified_by_uid: audit.created_by_uid,
+        last_modified_by_email: audit.created_by_email,
+        last_modified_at: timestamp
+      };
+    });
+    const { data: insertedRows, error: insertError } = await supabase
+      .from('employees')
+      .insert(payloads)
+      .select('id, codigo, documento, cargo_codigo, cargo_nombre, fecha_ingreso');
+    if (insertError) throw insertError;
+    await appendEmployeeCargoHistoryBulk((insertedRows || []).map((row) => ({
+      employee_id: row.id,
+      employee_codigo: row.codigo || null,
+      documento: row.documento || null,
+      cargo_codigo: row.cargo_codigo || null,
+      cargo_nombre: row.cargo_nombre || null,
+      fecha_ingreso: row.fecha_ingreso || null,
       fecha_retiro: null,
-      estado: 'activo',
-      created_by_uid: audit.created_by_uid,
-      created_by_email: audit.created_by_email,
-      last_modified_by_uid: audit.created_by_uid,
-      last_modified_by_email: audit.created_by_email,
-      last_modified_at: timestamp
-    };
-  });
-  const { data: insertedRows, error: insertError } = await supabase
-    .from('employees')
-    .insert(payloads)
-    .select('id, codigo, documento, cargo_codigo, cargo_nombre, fecha_ingreso');
-  if (insertError) throw insertError;
-  await appendEmployeeCargoHistoryBulk((insertedRows || []).map((row) => ({
-    employee_id: row.id,
-    employee_codigo: row.codigo || null,
-    documento: row.documento || null,
-    cargo_codigo: row.cargo_codigo || null,
-    cargo_nombre: row.cargo_nombre || null,
-    fecha_ingreso: row.fecha_ingreso || null,
-    fecha_retiro: null,
-    source: 'bulk_create_employee'
-  })), false);
+      source: 'bulk_create_employee'
+    })), false);
+    created += (insertedRows || []).length;
+    reportProgress(created, items.length, 'importing');
+  }
+  reportProgress(created, items.length, 'refreshing');
   await Promise.all([
     notifyTableReload('employees'),
     notifyTableReload('employee_cargo_history')
   ]);
-  return { created: (insertedRows || []).length };
+  reportProgress(created, items.length, 'completed');
+  return { created };
 }
 
 export async function updateEmployee(id, data = {}) {

@@ -750,7 +750,7 @@ export const WhatsAppLive = (mount, deps = {}) => {
 
   function calculateStats() {
     const dayRows = (statsAttendance || []).filter((r) => String(r.fecha || '').trim() === today);
-    const uniqueLocal = new Set(dayRows.map((r) => String(r.empleadoId || r.employeeId || '').trim()).filter(Boolean)).size;
+    const registeredLocal = dayRows.length;
     const supernumerarioDocs = new Set(
       (supernumerarios || [])
         .filter((s) => isEmployeeExpectedForDate(s, today, sedes))
@@ -767,7 +767,7 @@ export const WhatsAppLive = (mount, deps = {}) => {
       const n = parseOperatorCount(s?.numeroOperarios);
       return acc + (Number.isFinite(n) && n > 0 ? n : 0);
     }, 0);
-    const missingLocal = Math.max(0, expectedLocal - uniqueLocal);
+    const missingLocal = Math.max(0, expectedLocal - registeredLocal);
     const replMap = new Map();
     (statsReplacements || []).forEach((r) => {
       const key = replacementRowKey(r);
@@ -787,7 +787,7 @@ export const WhatsAppLive = (mount, deps = {}) => {
     return {
       planned: useDailyMetrics ? (Number(dailyMetrics.planned || 0) || 0) : plannedLocal,
       expected: useDailyMetrics ? (Number(dailyMetrics.expected || 0) || 0) : expectedLocal,
-      unique: useDailyMetrics ? (Number(dailyMetrics.unique || 0) || 0) : uniqueLocal,
+      unique: useDailyMetrics ? (Number(dailyMetrics.attendanceCount || 0) || 0) : registeredLocal,
       missing: useDailyMetrics ? (Number(dailyMetrics.missing || 0) || 0) : missingLocal,
       noveltyTotal,
       noveltyHandled,
