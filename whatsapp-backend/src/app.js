@@ -175,7 +175,8 @@ async function processIncomingMessage({ incomingId, from, textBody, phoneNumberI
       return;
     }
 
-    const sent = await sendWhatsAppText(phone, `Gracias ${employee.nombre || ''}. Tu documento fue validado correctamente.`, phoneNumberId);
+    const role = await resolveEmployeeRole(employee);
+    const sent = await sendRoleWelcome(phone, employee, role, phoneNumberId);
     if (!sent.ok) {
       await markIncomingProcessed(incomingId, 'failed', sent.error || 'send_failed');
       return;
@@ -187,11 +188,35 @@ async function processIncomingMessage({ incomingId, from, textBody, phoneNumberI
       last_message_at: new Date().toISOString(),
       session_data: {
         ...(session?.session_data || {}),
-        employee_nombre: employee.nombre || null
+        employee_nombre: employee.nombre || null,
+        employee_role: role,
+        phone_linked: true
       }
     });
-    await markIncomingProcessed(incomingId, 'processed', 'employee_identified');
+    await markIncomingProcessed(incomingId, 'processed', `employee_identified_${role}`);
     return;
+  }
+
+  if (session?.session_state === 'identified') {
+    const role = String(session?.session_data?.employee_role || '').trim() || 'empleado';
+    const normalized = normalizeIncomingText(textBody);
+    const handled = await handleIdentifiedMenu({
+      phone,
+      text: normalized,
+      role,
+      phoneNumberId
+    });
+    if (handled.ok) {
+      await updateSession(phone, {
+        last_message_at: new Date().toISOString(),
+        session_data: {
+          ...(session?.session_data || {}),
+          last_menu_action: handled.action || null
+        }
+      });
+      await markIncomingProcessed(incomingId, 'processed', handled.reason || 'identified_menu_handled');
+      return;
+    }
   }
 
   const sent = await sendWhatsAppText(phone, 'No entendi tu mensaje. Si deseas iniciar el registro, por favor escribe "Hola".', phoneNumberId);
@@ -278,13 +303,95 @@ async function updateSession(phone, patch = {}) {
 async function findEmployeeByDocument(documento) {
   const { data, error } = await supabaseAdmin
     .from('employees')
-    .select('id, documento, nombre, estado')
+    .select('id, documento, nombre, estado, cargo_codigo, cargo_nombre, sede_codigo, sede_nombre, zona_codigo, zona_nombre')
     .eq('documento', documento)
     .maybeSingle();
   if (error) throw error;
   if (!data) return null;
   if (String(data.estado || '').trim().toLowerCase() === 'inactivo') return null;
   return data;
+}
+
+async function resolveEmployeeRole(employee) {
+  const cargoCode = String(employee?.cargo_codigo || '').trim();
+  if (cargoCode) {
+    const { data, error } = await supabaseAdmin
+      .from('cargos')
+      .select('alineacion_crud, nombre')
+      .eq('codigo', cargoCode)
+      .maybeSingle();
+    if (error) throw error;
+    const alignment = normalizeRole(data?.alineacion_crud || employee?.cargo_nombre || data?.nombre || '');
+    if (alignment !== 'empleado') return alignment;
+  }
+  const documento = String(employee?.documento || '').trim();
+  if (documento) {
+    const { data, error } = await supabaseAdmin
+      .from('supervisor_profile')
+      .select('id')
+      .eq('documento', documento)
+      .maybeSingle();
+    if (error) throw error;
+    if (data?.id) return 'supervisor';
+  }
+  return normalizeRole(employee?.cargo_nombre || '');
+}
+
+function normalizeRole(value) {
+  const text = normalizeIncomingText(value);
+  if (text.includes('supernumer')) return 'supernumerario';
+  if (text.includes('supervisor')) return 'supervisor';
+  if (['supernumerario', 'supervisor', 'empleado'].includes(text)) return text;
+  return 'empleado';
+}
+
+async function sendRoleWelcome(phone, employee, role, phoneNumberId) {
+  const name = String(employee?.nombre || '').trim() || 'usuario';
+  if (role === 'supervisor') {
+    return sendWhatsAppText(
+      phone,
+      `Gracias ${name}. Validacion correcta.\nOpciones disponibles:\n- TRABAJANDO\n- NOVEDAD\n- ACTUALIZAR DATOS`,
+      phoneNumberId
+    );
+  }
+  return sendWhatsAppText(
+    phone,
+    `Gracias ${name}. Validacion correcta.\nOpciones disponibles:\n- TRABAJANDO\n- COMPENSATORIO\n- NOVEDAD`,
+    phoneNumberId
+  );
+}
+
+async function handleIdentifiedMenu({ phone, text, role, phoneNumberId }) {
+  if (role === 'supervisor') {
+    if (text === 'trabajando') {
+      const sent = await sendWhatsAppText(phone, 'Recibido. Registro de supervisor en construccion. Siguiente fase.', phoneNumberId);
+      return sent.ok ? { ok: true, action: 'supervisor_trabajando', reason: 'menu_supervisor_trabajando' } : sent;
+    }
+    if (text === 'novedad') {
+      const sent = await sendWhatsAppText(phone, 'Recibido. Flujo de novedad para supervisor en construccion.', phoneNumberId);
+      return sent.ok ? { ok: true, action: 'supervisor_novedad', reason: 'menu_supervisor_novedad' } : sent;
+    }
+    if (text === 'actualizar datos') {
+      const sent = await sendWhatsAppText(phone, 'Recibido. Flujo de actualizacion de datos en construccion.', phoneNumberId);
+      return sent.ok ? { ok: true, action: 'supervisor_actualizar_datos', reason: 'menu_supervisor_actualizar_datos' } : sent;
+    }
+    return { ok: false };
+  }
+
+  if (text === 'trabajando') {
+    const sent = await sendWhatsAppText(phone, 'Recibido. Registro TRABAJANDO en construccion. Siguiente fase.', phoneNumberId);
+    return sent.ok ? { ok: true, action: 'employee_trabajando', reason: 'menu_employee_trabajando' } : sent;
+  }
+  if (text === 'compensatorio') {
+    const sent = await sendWhatsAppText(phone, 'Recibido. Registro COMPENSATORIO en construccion. Siguiente fase.', phoneNumberId);
+    return sent.ok ? { ok: true, action: 'employee_compensatorio', reason: 'menu_employee_compensatorio' } : sent;
+  }
+  if (text === 'novedad') {
+    const sent = await sendWhatsAppText(phone, 'Recibido. Flujo de NOVEDAD en construccion. Siguiente fase.', phoneNumberId);
+    return sent.ok ? { ok: true, action: 'employee_novedad', reason: 'menu_employee_novedad' } : sent;
+  }
+
+  return { ok: false };
 }
 
 async function sendWhatsAppText(toDigits, bodyText, phoneNumberIdHint = null) {
