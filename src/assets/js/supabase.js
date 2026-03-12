@@ -17,6 +17,7 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
   }
 });
 
+const POSTGREST_PAGE_SIZE = 1000;
 const tableReloaders = new Map();
 
 function registerTableReloader(table, reloader) {
@@ -34,6 +35,37 @@ async function notifyTableReload(table) {
       console.error(`No se pudo refrescar ${table}:`, error);
     }
   }));
+}
+
+async function selectAllRows(table, {
+  select = '*',
+  order = null,
+  ascending = false
+} = {}) {
+  const rows = [];
+  let from = 0;
+
+  while (true) {
+    let query = supabase
+      .from(table)
+      .select(select)
+      .range(from, from + POSTGREST_PAGE_SIZE - 1);
+
+    if (order) {
+      query = query.order(order, { ascending });
+    }
+
+    const { data, error } = await query;
+    if (error) throw error;
+
+    const batch = Array.isArray(data) ? data : [];
+    rows.push(...batch);
+
+    if (batch.length < POSTGREST_PAGE_SIZE) break;
+    from += POSTGREST_PAGE_SIZE;
+  }
+
+  return rows;
 }
 
 function normalizeUser(user) {
@@ -570,35 +602,93 @@ async function propagateIncapacitiesToNextDay(day) {
 }
 
 async function getNextPrefixedCode(table, prefix, width = 4) {
-  const { data, error } = await supabase
-    .from(table)
-    .select('codigo');
-  if (error) throw error;
+  const data = await selectAllRows(table, { select: 'codigo' });
   let max = 0;
   (data || []).forEach((row) => {
-    const code = String(row?.codigo || '').trim();
-    const match = code.match(new RegExp(`^${prefix}-(\\d+)$`));
-    if (!match) return;
-    const num = Number(match[1] || 0);
+    const num = extractPrefixedCodeNumber(row?.codigo, prefix);
     if (num > max) max = num;
   });
   return `${prefix}-${String(max + 1).padStart(width, '0')}`;
 }
 
+function extractPrefixedCodeNumber(code, prefix) {
+  const normalized = String(code || '').trim();
+  const match = normalized.match(new RegExp(`^${prefix}-(\\d+)$`));
+  if (!match) return 0;
+  return Number(match[1] || 0);
+}
+
+function buildNextPrefixedCode(prefix, value, width = 4) {
+  return `${prefix}-${String(value).padStart(width, '0')}`;
+}
+
+async function insertEmployeeRecord({
+  codigo,
+  documento,
+  nombre,
+  telefono,
+  cargoCodigo,
+  cargoNombre,
+  sedeCodigo,
+  sedeNombre,
+  fechaIngreso,
+  audit,
+  zone,
+  notifyEmployeesReload = true,
+  historySource = 'create_employee'
+}) {
+  const { data, error } = await supabase
+    .from('employees')
+    .insert({
+      codigo: codigo || null,
+      documento: String(documento || '').trim() || null,
+      nombre: nombre || null,
+      telefono: telefono || null,
+      cargo_codigo: cargoCodigo || null,
+      cargo_nombre: cargoNombre || null,
+      sede_codigo: sedeCodigo || null,
+      sede_nombre: sedeNombre || null,
+      zona_codigo: zone?.zonaCodigo || null,
+      zona_nombre: zone?.zonaNombre || null,
+      fecha_ingreso: fechaIngreso || null,
+      fecha_retiro: null,
+      estado: 'activo',
+      created_by_uid: audit?.created_by_uid || null,
+      created_by_email: audit?.created_by_email || null,
+      last_modified_by_uid: audit?.created_by_uid || null,
+      last_modified_by_email: audit?.created_by_email || null,
+      last_modified_at: new Date().toISOString()
+    })
+    .select('*')
+    .single();
+  if (error) throw error;
+  await appendEmployeeCargoHistory({
+    employeeId: data.id,
+    employeeCodigo: data.codigo,
+    documento: data.documento,
+    cargoCodigo: data.cargo_codigo,
+    cargoNombre: data.cargo_nombre,
+    fechaIngreso: data.fecha_ingreso,
+    source: historySource
+  });
+  if (notifyEmployeesReload) {
+    await notifyTableReload('employees');
+  }
+  return data;
+}
+
 function streamTable(table, mapper, onData, order = 'created_at') {
   let active = true;
   const emit = async () => {
-    const { data, error } = await supabase
-      .from(table)
-      .select('*')
-      .order(order, { ascending: false });
-    if (!active) return;
-    if (error) {
+    try {
+      const data = await selectAllRows(table, { select: '*', order, ascending: false });
+      if (!active) return;
+      onData((data || []).map((row) => mapper(row)));
+    } catch (error) {
+      if (!active) return;
       console.error(`No se pudo cargar ${table}:`, error);
       onData([]);
-      return;
     }
-    onData((data || []).map((row) => mapper(row)));
   };
 
   emit();
@@ -1068,41 +1158,21 @@ export async function getNextEmployeeCode(prefix = 'EMP', width = 4) {
 export async function createEmployee({ codigo, documento, nombre, telefono, cargoCodigo, cargoNombre, sedeCodigo, sedeNombre, fechaIngreso }) {
   const audit = await getCurrentAuditFields();
   const zone = await resolveZoneBySedeCode(sedeCodigo);
-  const { data, error } = await supabase
-    .from('employees')
-    .insert({
-      codigo: codigo || null,
-      documento: String(documento || '').trim() || null,
-      nombre: nombre || null,
-      telefono: telefono || null,
-      cargo_codigo: cargoCodigo || null,
-      cargo_nombre: cargoNombre || null,
-      sede_codigo: sedeCodigo || null,
-      sede_nombre: sedeNombre || null,
-      zona_codigo: zone.zonaCodigo || null,
-      zona_nombre: zone.zonaNombre || null,
-      fecha_ingreso: fechaIngreso || null,
-      fecha_retiro: null,
-      estado: 'activo',
-      created_by_uid: audit.created_by_uid,
-      created_by_email: audit.created_by_email,
-      last_modified_by_uid: audit.created_by_uid,
-      last_modified_by_email: audit.created_by_email,
-      last_modified_at: new Date().toISOString()
-    })
-    .select('*')
-    .single();
-  if (error) throw error;
-  await appendEmployeeCargoHistory({
-    employeeId: data.id,
-    employeeCodigo: data.codigo,
-    documento: data.documento,
-    cargoCodigo: data.cargo_codigo,
-    cargoNombre: data.cargo_nombre,
-    fechaIngreso: data.fecha_ingreso,
-    source: 'create_employee'
+  const data = await insertEmployeeRecord({
+    codigo,
+    documento,
+    nombre,
+    telefono,
+    cargoCodigo,
+    cargoNombre,
+    sedeCodigo,
+    sedeNombre,
+    fechaIngreso,
+    audit,
+    zone,
+    notifyEmployeesReload: true,
+    historySource: 'create_employee'
   });
-  await notifyTableReload('employees');
   return data.id;
 }
 
@@ -1127,10 +1197,33 @@ function normalizeBulkDate(value) {
 
 export async function createEmployeesBulk(rows = []) {
   const items = Array.isArray(rows) ? rows.filter(Boolean) : [];
+  if (!items.length) return { created: 0 };
+  const audit = await getCurrentAuditFields();
+  const existingCodes = await selectAllRows('employees', { select: 'codigo' });
+  let nextCodeNumber = 0;
+  (existingCodes || []).forEach((row) => {
+    const num = extractPrefixedCodeNumber(row?.codigo, 'EMP');
+    if (num > nextCodeNumber) nextCodeNumber = num;
+  });
+  const sedeCodes = [...new Set(items.map((row) => String(row?.sedeCodigo || '').trim()).filter(Boolean))];
+  const zoneBySedeCode = new Map();
+  if (sedeCodes.length) {
+    const { data: sedesRows, error: sedesError } = await supabase
+      .from('sedes')
+      .select('codigo, zona_codigo, zona_nombre')
+      .in('codigo', sedeCodes);
+    if (sedesError) throw sedesError;
+    (sedesRows || []).forEach((row) => {
+      zoneBySedeCode.set(String(row.codigo || '').trim(), {
+        zonaCodigo: row.zona_codigo || null,
+        zonaNombre: row.zona_nombre || null
+      });
+    });
+  }
   let created = 0;
   for (const row of items) {
-    const codigo = row.codigo || await getNextEmployeeCode('EMP', 4);
-    await createEmployee({
+    const codigo = row.codigo || buildNextPrefixedCode('EMP', ++nextCodeNumber, 4);
+    await insertEmployeeRecord({
       codigo,
       documento: String(row.documento || '').trim(),
       nombre: row.nombre || null,
@@ -1139,10 +1232,15 @@ export async function createEmployeesBulk(rows = []) {
       cargoNombre: row.cargoNombre || null,
       sedeCodigo: row.sedeCodigo || null,
       sedeNombre: row.sedeNombre || null,
-      fechaIngreso: normalizeBulkDate(row.fechaIngreso)
+      fechaIngreso: normalizeBulkDate(row.fechaIngreso),
+      audit,
+      zone: zoneBySedeCode.get(String(row.sedeCodigo || '').trim()) || { zonaCodigo: null, zonaNombre: null },
+      notifyEmployeesReload: false,
+      historySource: 'bulk_create_employee'
     });
     created += 1;
   }
+  await notifyTableReload('employees');
   return { created };
 }
 
@@ -1265,18 +1363,20 @@ export function streamEmployeeCargoHistory(employeeId, onData) {
 export function streamSupernumerarios(onData) {
   let active = true;
   const emit = async () => {
-    const [{ data: employees, error: empError }, { data: cargos, error: cargoError }] = await Promise.all([
-      supabase.from('employees').select('*').order('created_at', { ascending: false }),
+    const [employeesResult, { data: cargos, error: cargoError }] = await Promise.all([
+      selectAllRows('employees', { select: '*', order: 'created_at', ascending: false }).then((value) => ({ status: 'fulfilled', value })).catch((error) => ({ status: 'rejected', reason: error })),
       supabase.from('cargos').select('codigo, nombre, alineacion_crud')
     ]);
     if (!active) return;
+    const empError = employeesResult.status === 'rejected' ? employeesResult.reason : null;
+    const employeeRows = employeesResult.status === 'fulfilled' ? employeesResult.value : [];
     if (empError || cargoError) {
       console.error('No se pudieron cargar supernumerarios:', empError || cargoError);
       onData([]);
       return;
     }
     const cargoMap = new Map((cargos || []).map((row) => [String(row.codigo || ''), row]));
-    const rows = (employees || [])
+    const rows = (employeeRows || [])
       .filter((emp) => {
         const cargo = cargoMap.get(String(emp.cargo_codigo || '')) || null;
         const alignment = normalizeCargoAlignment(cargo?.alineacion_crud || emp.cargo_nombre);
@@ -1358,14 +1458,19 @@ export function streamSupervisors(onData) {
   let active = true;
   const emit = async () => {
     const [
-      { data: employees, error: empError },
-      { data: profiles, error: profileError },
+      employeesResult,
+      profilesResult,
       { data: cargos, error: cargoError }
     ] = await Promise.all([
-      supabase.from('employees').select('*').order('created_at', { ascending: false }),
-      supabase.from('supervisor_profile').select('*').order('created_at', { ascending: false }),
+      selectAllRows('employees', { select: '*', order: 'created_at', ascending: false }).then((value) => ({ status: 'fulfilled', value })).catch((error) => ({ status: 'rejected', reason: error })),
+      selectAllRows('supervisor_profile', { select: '*', order: 'created_at', ascending: false }).then((value) => ({ status: 'fulfilled', value })).catch((error) => ({ status: 'rejected', reason: error })),
       supabase.from('cargos').select('codigo, nombre, alineacion_crud')
     ]);
+
+    const empError = employeesResult.status === 'rejected' ? employeesResult.reason : null;
+    const profileError = profilesResult.status === 'rejected' ? profilesResult.reason : null;
+    const employees = employeesResult.status === 'fulfilled' ? employeesResult.value : [];
+    const profiles = profilesResult.status === 'fulfilled' ? profilesResult.value : [];
 
     if (!active) return;
     if (empError || profileError || cargoError) {
