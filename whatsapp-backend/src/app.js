@@ -174,6 +174,12 @@ async function processIncomingMessage(message) {
     return;
   }
 
+
+  if (normalizeKey(parsed.value) === 'hola') {
+    await resetSession(phone, session, {});
+    await startIdentificationFlow(phone);
+    return;
+  }
   if (session.session_state === SESSION.IDLE || session.session_state === SESSION.COMPLETED) {
     await startIdentificationFlow(phone);
     return;
