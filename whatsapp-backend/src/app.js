@@ -53,15 +53,17 @@ app.post('/webhooks/whatsapp', async (req, res) => {
         for (const msg of messages) {
           const messageId = String(msg?.id || '').trim();
           if (!messageId) continue;
+          const from = String(msg?.from || '').trim() || null;
+          const textBody = extractIncomingText(msg);
           const row = {
             id: messageId,
             source: 'whatsapp_cloud_api',
             event_type: 'message',
             message_id: messageId,
-            wa_from: String(msg?.from || '').trim() || null,
+            wa_from: from,
             wa_timestamp: String(msg?.timestamp || '').trim() || null,
             wa_type: String(msg?.type || '').trim() || 'unknown',
-            text_body: extractIncomingText(msg),
+            text_body: textBody,
             phone_number_id: phoneNumberId,
             display_phone_number: displayPhoneNumber,
             raw_payload: msg,
@@ -69,6 +71,12 @@ app.post('/webhooks/whatsapp', async (req, res) => {
           };
           const { error } = await supabaseAdmin.from('whatsapp_incoming').upsert(row, { onConflict: 'id' });
           if (error) throw error;
+          await processIncomingMessage({
+            incomingId: messageId,
+            from,
+            textBody,
+            phoneNumberId
+          });
           stored += 1;
         }
 
@@ -106,12 +114,218 @@ app.post('/webhooks/whatsapp', async (req, res) => {
 
 export default app;
 
+async function processIncomingMessage({ incomingId, from, textBody, phoneNumberId }) {
+  const phone = digitsOnly(from);
+  if (!phone) {
+    await markIncomingProcessed(incomingId, 'ignored', 'missing_phone');
+    return;
+  }
+
+  const normalizedText = normalizeIncomingText(textBody);
+  const session = await getOrCreateSession(phone);
+
+  if (normalizedText === 'hola') {
+    const body = 'Hola. Bienvenido al registro diario. Por favor escribe tu numero de cedula sin puntos.';
+    const sent = await sendWhatsAppText(phone, body, phoneNumberId);
+    if (!sent.ok) {
+      await markIncomingProcessed(incomingId, 'failed', sent.error || 'send_failed');
+      return;
+    }
+    await updateSession(phone, {
+      session_state: 'awaiting_document',
+      last_message_at: new Date().toISOString(),
+      session_data: {
+        ...(session?.session_data || {}),
+        last_prompt: 'awaiting_document'
+      }
+    });
+    await markIncomingProcessed(incomingId, 'processed', 'sent_greeting');
+    return;
+  }
+
+  if (session?.session_state === 'awaiting_document') {
+    const doc = phoneDigitsOrText(textBody);
+    if (!/^\d{5,15}$/.test(doc)) {
+      const sent = await sendWhatsAppText(phone, 'Documento no valido. Escribe tu numero de cedula sin puntos.', phoneNumberId);
+      if (!sent.ok) {
+        await markIncomingProcessed(incomingId, 'failed', sent.error || 'send_failed');
+        return;
+      }
+      await markIncomingProcessed(incomingId, 'processed', 'invalid_document_prompt');
+      return;
+    }
+
+    const employee = await findEmployeeByDocument(doc);
+    if (!employee) {
+      const sent = await sendWhatsAppText(phone, 'No fue posible encontrar tu registro de empleado. Por favor contacta a administracion.', phoneNumberId);
+      if (!sent.ok) {
+        await markIncomingProcessed(incomingId, 'failed', sent.error || 'send_failed');
+        return;
+      }
+      await updateSession(phone, {
+        documento: doc,
+        session_state: 'idle',
+        last_message_at: new Date().toISOString(),
+        session_data: {
+          ...(session?.session_data || {}),
+          last_lookup_status: 'employee_not_found'
+        }
+      });
+      await markIncomingProcessed(incomingId, 'processed', 'employee_not_found');
+      return;
+    }
+
+    const sent = await sendWhatsAppText(phone, `Gracias ${employee.nombre || ''}. Tu documento fue validado correctamente.`, phoneNumberId);
+    if (!sent.ok) {
+      await markIncomingProcessed(incomingId, 'failed', sent.error || 'send_failed');
+      return;
+    }
+    await updateSession(phone, {
+      employee_id: employee.id,
+      documento: employee.documento,
+      session_state: 'identified',
+      last_message_at: new Date().toISOString(),
+      session_data: {
+        ...(session?.session_data || {}),
+        employee_nombre: employee.nombre || null
+      }
+    });
+    await markIncomingProcessed(incomingId, 'processed', 'employee_identified');
+    return;
+  }
+
+  const sent = await sendWhatsAppText(phone, 'No entendi tu mensaje. Si deseas iniciar el registro, por favor escribe "Hola".', phoneNumberId);
+  if (!sent.ok) {
+    await markIncomingProcessed(incomingId, 'failed', sent.error || 'send_failed');
+    return;
+  }
+  await updateSession(phone, {
+    last_message_at: new Date().toISOString()
+  });
+  await markIncomingProcessed(incomingId, 'processed', 'unsupported_message');
+}
+
 function extractIncomingText(message = {}) {
   if (message?.text?.body) return String(message.text.body).trim();
   if (message?.button?.text) return String(message.button.text).trim();
   if (message?.interactive?.button_reply?.title) return String(message.interactive.button_reply.title).trim();
   if (message?.interactive?.list_reply?.title) return String(message.interactive.list_reply.title).trim();
   return '';
+}
+
+function normalizeIncomingText(value) {
+  return String(value || '')
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '');
+}
+
+function digitsOnly(value) {
+  return String(value || '').replace(/\D+/g, '').trim();
+}
+
+function phoneDigitsOrText(value) {
+  return String(value || '').replace(/[^\d]/g, '').trim();
+}
+
+async function markIncomingProcessed(id, status, reason) {
+  const { error } = await supabaseAdmin
+    .from('whatsapp_incoming')
+    .update({
+      process_status: status,
+      process_reason: reason,
+      processed_at: new Date().toISOString()
+    })
+    .eq('id', id);
+  if (error) throw error;
+}
+
+async function getOrCreateSession(phone) {
+  const { data, error } = await supabaseAdmin
+    .from('whatsapp_sessions')
+    .select('*')
+    .eq('id', phone)
+    .maybeSingle();
+  if (error) throw error;
+  if (data) return data;
+  const { data: created, error: createError } = await supabaseAdmin
+    .from('whatsapp_sessions')
+    .insert({
+      id: phone,
+      phone_number: phone,
+      session_state: 'idle',
+      session_data: {},
+      last_message_at: new Date().toISOString()
+    })
+    .select('*')
+    .single();
+  if (createError) throw createError;
+  return created;
+}
+
+async function updateSession(phone, patch = {}) {
+  const { error } = await supabaseAdmin
+    .from('whatsapp_sessions')
+    .update({
+      ...patch,
+      updated_at: new Date().toISOString()
+    })
+    .eq('id', phone);
+  if (error) throw error;
+}
+
+async function findEmployeeByDocument(documento) {
+  const { data, error } = await supabaseAdmin
+    .from('employees')
+    .select('id, documento, nombre, estado')
+    .eq('documento', documento)
+    .maybeSingle();
+  if (error) throw error;
+  if (!data) return null;
+  if (String(data.estado || '').trim().toLowerCase() === 'inactivo') return null;
+  return data;
+}
+
+async function sendWhatsAppText(toDigits, bodyText, phoneNumberIdHint = null) {
+  return sendWhatsAppPayload(
+    digitsOnly(toDigits),
+    {
+      type: 'text',
+      text: { body: String(bodyText || '').trim() }
+    },
+    phoneNumberIdHint
+  );
+}
+
+async function sendWhatsAppPayload(toDigits, payload, phoneNumberIdHint = null) {
+  const token = config.whatsappAccessToken;
+  const phoneNumberId = String(phoneNumberIdHint || config.whatsappPhoneNumberId || '').trim();
+  if (!token || !phoneNumberId || !toDigits) {
+    return { ok: false, error: 'missing_whatsapp_credentials_or_recipient' };
+  }
+
+  const url = `https://graph.facebook.com/${config.whatsappGraphVersion}/${phoneNumberId}/messages`;
+  const resp = await fetch(url, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      messaging_product: 'whatsapp',
+      to: toDigits,
+      ...payload
+    })
+  });
+
+  if (!resp.ok) {
+    const body = await resp.text();
+    console.error('WhatsApp send API error', { status: resp.status, body });
+    return { ok: false, error: `send_failed_${resp.status}` };
+  }
+
+  return { ok: true };
 }
 
 function isValidWhatsAppSignature(req) {
