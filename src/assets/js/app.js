@@ -79,6 +79,7 @@ const guardWrite=(perm,fn)=> async (...args)=>{
         listSedeStatusRange:fb.listSedeStatusRange, listAttendanceRange:fb.listAttendanceRange, listImportReplacementsRange:fb.listImportReplacementsRange,
         listDailyMetricsRange:fb.listDailyMetricsRange,
         streamDailyMetricsByDate:fb.streamDailyMetricsByDate,
+        streamIncapacitadosByDate:fb.streamIncapacitadosByDate,
         streamDashboardAttendanceByDate:fb.streamDashboardAttendanceByDate,
         streamDashboardReplacementsByDate:fb.streamDashboardReplacementsByDate,
         streamImportHistory:fb.streamImportHistory, streamDailyClosures:fb.streamDailyClosures, streamWhatsAppIncoming:fb.streamWhatsAppIncoming,

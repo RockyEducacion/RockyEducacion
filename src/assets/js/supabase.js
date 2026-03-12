@@ -206,6 +206,9 @@ function mapImportHistoryRow(row = {}) {
 }
 
 function mapAttendanceRow(row = {}) {
+  const rawNovedad = row.novedad || null;
+  const novedadText = String(rawNovedad || '').trim();
+  const novedadCodigo = /^\d+$/.test(novedadText) ? novedadText : null;
   return {
     id: row.id,
     fecha: row.fecha || null,
@@ -215,7 +218,9 @@ function mapAttendanceRow(row = {}) {
     sedeCodigo: row.sede_codigo || null,
     sedeNombre: row.sede_nombre || null,
     asistio: row.asistio === true,
-    novedad: row.novedad || null,
+    novedad: rawNovedad,
+    novedadCodigo,
+    novedadNombre: novedadCodigo ? null : rawNovedad,
     createdAt: row.created_at || null
   };
 }
@@ -288,6 +293,22 @@ function mapDailyClosureRow(row = {}) {
     closedByUid: row.closed_by_uid || null,
     closedByEmail: row.closed_by_email || null,
     closedAt: row.closed_at || null,
+    createdAt: row.created_at || null,
+    updatedAt: row.updated_at || null
+  };
+}
+
+function mapIncapacidadRow(row = {}) {
+  return {
+    id: row.id,
+    employeeId: row.employee_id || null,
+    documento: row.documento || null,
+    nombre: row.nombre || null,
+    fechaInicio: row.fecha_inicio || null,
+    fechaFin: row.fecha_fin || null,
+    estado: row.estado || 'activo',
+    source: row.source || null,
+    whatsappMessageId: row.whatsapp_message_id || null,
     createdAt: row.created_at || null,
     updatedAt: row.updated_at || null
   };
@@ -437,6 +458,115 @@ async function recomputeDailyMetrics(fecha) {
   if (error) throw error;
   await notifyTableReload('daily_metrics');
   return data;
+}
+
+function addDaysToIsoDate(value, days = 1) {
+  const iso = String(value || '').trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(iso)) return null;
+  const [year, month, day] = iso.split('-').map((n) => Number(n));
+  const utc = new Date(Date.UTC(year, (month || 1) - 1, day || 1));
+  utc.setUTCDate(utc.getUTCDate() + Number(days || 0));
+  const y = utc.getUTCFullYear();
+  const m = String(utc.getUTCMonth() + 1).padStart(2, '0');
+  const d = String(utc.getUTCDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
+function normalizeDailyDocument(value) {
+  return String(value || '').replace(/\D+/g, '').trim();
+}
+
+function buildDailyRecordId(fecha, documento = null, empleadoId = null) {
+  const day = String(fecha || '').trim();
+  const doc = normalizeDailyDocument(documento);
+  if (day && doc) return `${day}_${doc}`;
+  const employee = String(empleadoId || '').trim();
+  if (day && employee) return `${day}_${employee}`;
+  return `${day}_${crypto.randomUUID()}`;
+}
+
+function incapacitySourceToNoveltyCode(source) {
+  const raw = String(source || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .trim()
+    .toLowerCase();
+  if (raw.includes('accidente laboral')) return '2';
+  if (raw.includes('enfermedad general')) return '3';
+  if (raw.includes('calamidad')) return '4';
+  if (raw.includes('licencia no remunerada')) return '5';
+  return '3';
+}
+
+async function propagateIncapacitiesToNextDay(day) {
+  const nextDay = addDaysToIsoDate(day, 1);
+  if (!nextDay) return;
+  if (await isOperationDayClosed(nextDay)) return;
+
+  const { data: incapRows, error: incapError } = await supabase
+    .from('incapacitados')
+    .select('*')
+    .eq('estado', 'activo')
+    .lte('fecha_inicio', nextDay)
+    .gte('fecha_fin', nextDay);
+  if (incapError) throw incapError;
+
+  for (const incap of incapRows || []) {
+    const employeeId = incap.employee_id || null;
+    if (!employeeId) continue;
+
+    const { data: employee, error: employeeError } = await supabase
+      .from('employees')
+      .select('*')
+      .eq('id', employeeId)
+      .maybeSingle();
+    if (employeeError) throw employeeError;
+    if (!employee) continue;
+
+    const normalizedDocument = normalizeDailyDocument(employee.documento);
+    if (!normalizedDocument) continue;
+
+    const { data: existingAttendance, error: existingAttendanceError } = await supabase
+      .from('attendance')
+      .select('id')
+      .eq('fecha', nextDay)
+      .eq('documento', normalizedDocument)
+      .limit(1)
+      .maybeSingle();
+    if (existingAttendanceError) throw existingAttendanceError;
+    if (existingAttendance?.id) continue;
+
+    const noveltyCode = incapacitySourceToNoveltyCode(incap.source);
+    const attendanceId = buildDailyRecordId(nextDay, normalizedDocument, employee.id);
+    const { error: attendanceError } = await supabase.from('attendance').upsert({
+      id: attendanceId,
+      fecha: nextDay,
+      empleado_id: employee.id,
+      documento: normalizedDocument,
+      nombre: employee.nombre || null,
+      sede_codigo: employee.sede_codigo || null,
+      sede_nombre: employee.sede_nombre || null,
+      asistio: false,
+      novedad: noveltyCode
+    }, { onConflict: 'id' });
+    if (attendanceError) throw attendanceError;
+
+    const { error: absenteeismError } = await supabase.from('absenteeism').upsert({
+      id: attendanceId,
+      fecha: nextDay,
+      empleado_id: employee.id,
+      documento: normalizedDocument,
+      nombre: employee.nombre || null,
+      sede_codigo: employee.sede_codigo || null,
+      sede_nombre: employee.sede_nombre || null,
+      estado: 'programado_incapacidad'
+    }, { onConflict: 'id' });
+    if (absenteeismError) throw absenteeismError;
+  }
+
+  await recomputeDailyMetrics(nextDay);
+  await notifyTableReload('attendance');
+  await notifyTableReload('absenteeism');
 }
 
 async function getNextPrefixedCode(table, prefix, width = 4) {
@@ -1544,6 +1674,42 @@ export function streamDailyMetricsByDate(fecha, onData) {
   };
 }
 
+export function streamIncapacitadosByDate(fecha, onData) {
+  const day = String(fecha || '').trim();
+  if (!day) {
+    onData([]);
+    return () => {};
+  }
+  let active = true;
+  const emit = async () => {
+    const { data, error } = await supabase
+      .from('incapacitados')
+      .select('*')
+      .eq('estado', 'activo')
+      .lte('fecha_inicio', day)
+      .gte('fecha_fin', day)
+      .order('fecha_inicio', { ascending: false });
+    if (!active) return;
+    if (error) {
+      console.error('No se pudo cargar incapacitados por fecha:', error);
+      onData([]);
+      return;
+    }
+    onData((data || []).map(mapIncapacidadRow));
+  };
+  emit();
+  const unregister = registerTableReloader('incapacitados', emit);
+  const channel = supabase
+    .channel(`incapacitados-${day}`)
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'incapacitados' }, emit)
+    .subscribe();
+  return () => {
+    active = false;
+    unregister();
+    supabase.removeChannel(channel);
+  };
+}
+
 export function streamDashboardAttendanceByDate(fecha, onData) {
   return streamAttendanceByDate(fecha, onData);
 }
@@ -1670,11 +1836,12 @@ export async function confirmImportOperation(payload) {
 
   for (const a of data.attendance || []) {
     if (!a || !a.empleadoId || !a.fecha) continue;
+    const dailyId = buildDailyRecordId(a.fecha, a.documento, a.empleadoId);
     const { error } = await supabase.from('attendance').upsert({
-      id: `${a.fecha}_${a.empleadoId}`,
+      id: dailyId,
       fecha: a.fecha,
       empleado_id: a.empleadoId,
-      documento: a.documento || null,
+      documento: normalizeDailyDocument(a.documento) || null,
       nombre: a.nombre || null,
       sede_codigo: a.sedeCodigo || null,
       sede_nombre: a.sedeNombre || null,
@@ -1686,11 +1853,12 @@ export async function confirmImportOperation(payload) {
 
   for (const ab of data.absences || []) {
     if (!ab || !ab.empleadoId || !ab.fecha) continue;
+    const dailyId = buildDailyRecordId(ab.fecha, ab.documento, ab.empleadoId);
     const { error } = await supabase.from('absenteeism').upsert({
-      id: `${ab.fecha}_${ab.empleadoId}`,
+      id: dailyId,
       fecha: ab.fecha,
       empleado_id: ab.empleadoId,
-      documento: ab.documento || null,
+      documento: normalizeDailyDocument(ab.documento) || null,
       nombre: ab.nombre || null,
       sede_codigo: ab.sedeCodigo || null,
       sede_nombre: ab.sedeNombre || null,
@@ -1745,8 +1913,9 @@ export async function saveImportReplacements({ importId = null, fechaOperacion =
     const empId = String(a.empleadoId || '').trim();
     const fecha = String(a.fecha || fechaOperacion || '').trim();
     if (!empId || !fecha) continue;
+    const replacementId = buildDailyRecordId(fecha, a.documento, empId);
     const { error } = await supabase.from('import_replacements').upsert({
-      id: `${fecha}_${empId}`,
+      id: replacementId,
       import_id: importId || null,
       fecha_operacion: fechaOperacion || fecha,
       fecha,
@@ -1795,6 +1964,7 @@ export async function closeOperationDayManual(fecha) {
     closed_by_email: audit.created_by_email
   }, { onConflict: 'id' });
   if (error) throw error;
+  await propagateIncapacitiesToNextDay(day);
   await recomputeDailyMetrics(day);
   await notifyTableReload('daily_closures');
   return { ok: true, results: [{ date: day, status: 'closed' }] };

@@ -1,4 +1,4 @@
-
+Ôªø
 import crypto from 'node:crypto';
 import express from 'express';
 import { config } from './config.js';
@@ -34,7 +34,7 @@ const NOVELTIES = {
   SICKNESS: { code: '3', label: 'Enfermedad General', absenteeism: true, requiresDates: true },
   CALAMITY: { code: '4', label: 'Calamidad', absenteeism: true, requiresDates: true },
   UNPAID_LEAVE: { code: '5', label: 'Licencia No Remunerada', absenteeism: true, requiresDates: false },
-  COMPENSATORY: { code: '7', label: 'Compensatorio', absenteeism: true, requiresDates: false }
+  COMPENSATORY: { code: '7', label: 'Compensatorio', absenteeism: false, requiresDates: false }
 };
 
 const MENU_IDS = {
@@ -52,7 +52,7 @@ const MENU_IDS = {
   NOVELTY_UNPAID: 'novelty_5'
 };
 
-const NO_REGISTERED_MESSAGE = 'No est·s registrado en nuestra base de datos, por favor comunÌcate con tu supervisor.';
+const NO_REGISTERED_MESSAGE = 'No est√°s registrado en nuestra base de datos, por favor comun√≠cate con tu supervisor.';
 
 app.get('/health', (_req, res) => {
   res.json({ ok: true });
@@ -130,6 +130,15 @@ function extractStatuses(body = {}) {
   );
 }
 
+function buildDailyRecordId(date, documento = null, employeeId = null) {
+  const day = String(date || '').trim();
+  const doc = normalizeDocument(documento);
+  if (day && doc) return `${day}_${doc}`;
+  const employee = String(employeeId || '').trim();
+  if (day && employee) return `${day}_${employee}`;
+  return `${day}_${crypto.randomUUID()}`;
+}
+
 async function storeIncomingEvent({ eventType, payload }) {
   const row = {
     id: payload?.id || payload?.message_id || crypto.randomUUID(),
@@ -170,7 +179,7 @@ async function processIncomingMessage(message) {
   const parsed = parseInboundAction(message);
 
   if (!parsed.value && !parsed.id) {
-    await sendText(phone, 'No entendÌ tu respuesta. Por favor selecciona una opciÛn del men˙.');
+    await sendText(phone, 'No entend√≠ tu respuesta. Por favor selecciona una opci√≥n del men√∫.');
     return;
   }
 
@@ -241,13 +250,13 @@ async function startIdentificationFlow(phone) {
     session_state: SESSION.AWAITING_DOCUMENT,
     session_data: { identifiedBy: 'unknown_phone' }
   });
-  await sendText(phone, 'Hola, no encontramos tu n˙mero registrado en la base de datos, por favor escribe tu cÈdula sin puntos.');
+  await sendText(phone, 'Hola, no encontramos tu n√∫mero registrado en la base de datos, por favor escribe tu c√©dula sin puntos.');
 }
 
 async function handleDocumentInput(phone, session, value) {
   const document = normalizeDocument(value);
   if (!document) {
-    await sendText(phone, 'Por favor escribe tu n˙mero de cÈdula sin puntos.');
+    await sendText(phone, 'Por favor escribe tu n√∫mero de c√©dula sin puntos.');
     return;
   }
 
@@ -270,7 +279,7 @@ async function handleDocumentInput(phone, session, value) {
 async function sendIdentityOrMenu(phone, employee) {
   if (employee.isSupernumerario) {
     await sendButtons(phone,
-      `Hola, soy Rocky\n\nEres: ${employee.nombre}\nCÈdula: ${employee.documento}\nEstas como SUPERNUMERARIO\n\nElige una opciÛn:`,
+      `Hola, soy Rocky\n\nEres: ${employee.nombre}\nC√©dula: ${employee.documento}\nEstas como SUPERNUMERARIO\n\nElige una opci√≥n:`,
       [
         { id: MENU_IDS.ACTION_WORKING, title: 'Trabajando' },
         { id: MENU_IDS.ACTION_NOVELTY, title: 'Novedad' },
@@ -281,7 +290,7 @@ async function sendIdentityOrMenu(phone, employee) {
   }
 
   await sendButtons(phone,
-    `Hola, soy Rocky\n\nEres: ${employee.nombre}\nCÈdula: ${employee.documento}\nEst·s en: ${employee.sede_nombre || 'Sin sede'}\n\nElige una opciÛn:`,
+    `Hola, soy Rocky\n\nEres: ${employee.nombre}\nC√©dula: ${employee.documento}\nEst√°s en: ${employee.sede_nombre || 'Sin sede'}\n\nElige una opci√≥n:`,
     [
       { id: MENU_IDS.IDENTITY_YES, title: 'Soy Yo' },
       { id: MENU_IDS.IDENTITY_NO, title: 'No Soy Yo' },
@@ -301,7 +310,7 @@ async function handleActionSelection(phone, session, parsed) {
   const hasMainMenu = Boolean(session?.session_data?.menuReady);
   const choice = mapActionChoice(parsed, employee.isSupernumerario, hasMainMenu);
   if (!choice) {
-    await sendText(phone, 'Selecciona una opciÛn v·lida del men˙.');
+    await sendText(phone, 'Selecciona una opci√≥n v√°lida del men√∫.');
     return;
   }
 
@@ -324,7 +333,7 @@ async function handleActionSelection(phone, session, parsed) {
       session_state: SESSION.AWAITING_ACTION,
       session_data: { employee: sessionEmployee(employee), menuReady: true }
     });
-    await sendButtons(phone, 'Elige una opciÛn:', [
+    await sendButtons(phone, 'Elige una opci√≥n:', [
       { id: MENU_IDS.ACTION_WORKING, title: 'Trabajando' },
       { id: MENU_IDS.ACTION_COMPENSATORY, title: 'Compensatorio' },
       { id: MENU_IDS.ACTION_NOVELTY, title: 'Novedad' }
@@ -337,7 +346,7 @@ async function handleActionSelection(phone, session, parsed) {
       session_state: SESSION.AWAITING_DOCUMENT,
       session_data: { identifiedBy: 'identity_override' }
     });
-    await sendText(phone, 'Por favor escribe tu n˙mero de cÈdula sin puntos:');
+    await sendText(phone, 'Por favor escribe tu n√∫mero de c√©dula sin puntos:');
     return;
   }
 
@@ -348,9 +357,9 @@ async function handleActionSelection(phone, session, parsed) {
       session_state: SESSION.AWAITING_UPDATE_ACTION,
       session_data: { employee: sessionEmployee(employee), menuReady: hasMainMenu }
     });
-    await sendButtons(phone, 'Selecciona una opciÛn:', [
+    await sendButtons(phone, 'Selecciona una opci√≥n:', [
       { id: MENU_IDS.UPDATE_TRANSFER, title: 'Traslado de Sede' },
-      { id: MENU_IDS.UPDATE_PHONE, title: 'Cambio de TelÈfono' }
+      { id: MENU_IDS.UPDATE_PHONE, title: 'Cambio de Tel√©fono' }
     ]);
     return;
   }
@@ -394,7 +403,7 @@ async function handleActionSelection(phone, session, parsed) {
     return;
   }
 
-  await sendText(phone, 'Selecciona una opciÛn v·lida del men˙.');
+  await sendText(phone, 'Selecciona una opci√≥n v√°lida del men√∫.');
 }
 
 async function handleUpdateSelection(phone, session, parsed) {
@@ -424,11 +433,11 @@ async function handleUpdateSelection(phone, session, parsed) {
       session_state: SESSION.AWAITING_PHONE,
       session_data: { employee: sessionEmployee(employee) }
     });
-    await sendText(phone, 'Diligencia el n˙mero de celular nuevo:');
+    await sendText(phone, 'Diligencia el n√∫mero de celular nuevo:');
     return;
   }
 
-  await sendText(phone, 'Selecciona una opciÛn v·lida del men˙.');
+  await sendText(phone, 'Selecciona una opci√≥n v√°lida del men√∫.');
 }
 
 async function handlePhoneUpdate(phone, session, value) {
@@ -441,7 +450,7 @@ async function handlePhoneUpdate(phone, session, value) {
 
   const normalizedPhone = normalizePhone(value);
   if (!normalizedPhone) {
-    await sendText(phone, 'Diligencia el n˙mero de celular nuevo:');
+    await sendText(phone, 'Diligencia el n√∫mero de celular nuevo:');
     return;
   }
 
@@ -455,7 +464,7 @@ async function handlePhoneUpdate(phone, session, value) {
     session_state: SESSION.COMPLETED,
     session_data: { employee: sessionEmployee(refreshed) }
   });
-  await sendText(phone, 'InformaciÛn actualizada correctamente, si no haz realizado el registro por favor escribe nuevamente "Hola".');
+  await sendText(phone, 'Informaci√≥n actualizada correctamente, si no haz realizado el registro por favor escribe nuevamente "Hola".');
 }
 async function handleTransferKeyword(phone, session, value, forWorkingSelection) {
   const employee = await loadEmployeeFromSession(session);
@@ -489,7 +498,7 @@ async function handleTransferKeyword(phone, session, value, forWorkingSelection)
     rows: matches.map((sede) => ({
       id: `${forWorkingSelection ? 'work' : 'transfer'}_sede_${sede.id}`,
       title: truncate(sede.nombre || sede.codigo, 24),
-      description: truncate(`${sede.codigo || 'Sin cÛdigo'} ∑ ${sede.zona_nombre || 'Sin zona'}`, 72)
+      description: truncate(`${sede.codigo || 'Sin c√≥digo'} ¬∑ ${sede.zona_nombre || 'Sin zona'}`, 72)
     }))
   }]);
 }
@@ -498,7 +507,7 @@ async function handleTransferSelection(phone, session, parsed) {
   const employee = await loadEmployeeFromSession(session);
   const selected = resolveSedeSelection(session, parsed, 'transfer_sede_');
   if (!employee || !selected) {
-    await sendText(phone, 'Selecciona una sede v·lida del listado.');
+    await sendText(phone, 'Selecciona una sede v√°lida del listado.');
     return;
   }
 
@@ -518,7 +527,7 @@ async function handleTransferSelection(phone, session, parsed) {
     session_state: SESSION.COMPLETED,
     session_data: { employee: sessionEmployee(refreshed) }
   });
-  await sendText(phone, 'InformaciÛn actualizada correctamente, si no haz realizado el registro por favor escribe nuevamente "Hola".');
+  await sendText(phone, 'Informaci√≥n actualizada correctamente, si no haz realizado el registro por favor escribe nuevamente "Hola".');
 }
 
 async function handleWorkingSedeSelection(phone, session, parsed) {
@@ -526,7 +535,7 @@ async function handleWorkingSedeSelection(phone, session, parsed) {
   const selected = resolveSedeSelection(session, parsed, 'work_sede_');
   const novelty = session?.session_data?.pendingNovelty || NOVELTIES.WORKING;
   if (!employee || !selected) {
-    await sendText(phone, 'Selecciona una sede v·lida del listado.');
+    await sendText(phone, 'Selecciona una sede v√°lida del listado.');
     return;
   }
 
@@ -543,7 +552,7 @@ async function handleNoveltySelection(phone, session, parsed) {
 
   const novelty = mapNovelty(parsed);
   if (!novelty) {
-    await sendText(phone, 'Selecciona una novedad v·lida del listado.');
+    await sendText(phone, 'Selecciona una novedad v√°lida del listado.');
     return;
   }
 
@@ -582,7 +591,7 @@ async function handleDateStart(phone, session, value) {
     session_state: SESSION.AWAITING_DATE_END,
     session_data: { ...(session.session_data || {}), employee: sessionEmployee(employee), pendingNovelty: novelty, incapacityStart: parsedDate }
   });
-  await sendText(phone, 'Fecha de terminaciÛn de incapacidad, por favor escribe DD/MM/AAAA:');
+  await sendText(phone, 'Fecha de terminaci√≥n de incapacidad, por favor escribe DD/MM/AAAA:');
 }
 
 async function handleDateEnd(phone, session, value) {
@@ -597,7 +606,7 @@ async function handleDateEnd(phone, session, value) {
   }
 
   if (!endDate || endDate < startDate) {
-    await sendText(phone, 'Fecha de terminaciÛn de incapacidad, por favor escribe DD/MM/AAAA:');
+    await sendText(phone, 'Fecha de terminaci√≥n de incapacidad, por favor escribe DD/MM/AAAA:');
     return;
   }
 
@@ -607,7 +616,8 @@ async function handleDateEnd(phone, session, value) {
 async function registerNovelty(phone, employee, novelty, selectedSede = null, incapacity = null) {
   const date = currentDate();
   const time = currentTime();
-  const attendanceId = `${date}_${employee.id}`;
+  const documento = normalizeDocument(employee.documento);
+  const attendanceId = buildDailyRecordId(date, documento, employee.id);
   const sedeCodigo = selectedSede?.codigo || employee.sede_codigo || null;
   const sedeNombre = selectedSede?.nombre || employee.sede_nombre || null;
 
@@ -615,11 +625,11 @@ async function registerNovelty(phone, employee, novelty, selectedSede = null, in
     id: attendanceId,
     fecha: date,
     empleado_id: employee.id,
-    documento: employee.documento,
+    documento,
     nombre: employee.nombre,
     sede_codigo: sedeCodigo,
     sede_nombre: sedeNombre,
-    asistio: novelty.code === NOVELTIES.WORKING.code,
+    asistio: [NOVELTIES.WORKING.code, NOVELTIES.COMPENSATORY.code].includes(novelty.code),
     novedad: novelty.code
   }, { onConflict: 'id' });
   if (attendanceError) throw attendanceError;
@@ -629,7 +639,7 @@ async function registerNovelty(phone, employee, novelty, selectedSede = null, in
       id: attendanceId,
       fecha: date,
       empleado_id: employee.id,
-      documento: employee.documento,
+      documento,
       nombre: employee.nombre,
       sede_codigo: sedeCodigo,
       sede_nombre: sedeNombre,
@@ -641,7 +651,7 @@ async function registerNovelty(phone, employee, novelty, selectedSede = null, in
   if (incapacity?.startDate && incapacity?.endDate) {
     const { error: incapacityError } = await supabaseAdmin.from('incapacitados').insert({
       employee_id: employee.id,
-      documento: employee.documento,
+      documento,
       nombre: employee.nombre,
       fecha_inicio: incapacity.startDate,
       fecha_fin: incapacity.endDate,
@@ -993,4 +1003,6 @@ function truncate(value, max) {
 }
 
 export default app;
+
+
 

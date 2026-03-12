@@ -72,7 +72,7 @@ export const WhatsAppLive = (mount, deps = {}) => {
       ])
     ]),
     el('div', { className: 'mt-2', style: 'display:flex;justify-content:space-between;gap:.5rem;align-items:center;flex-wrap:wrap;' }, [
-      el('div', { id: 'waModeHint', className: 'text-muted', style: 'font-size:.86rem;' }, ['Vista completa del dia (dashboard docs)']),
+      el('div', { id: 'waModeHint', className: 'text-muted', style: 'font-size:.86rem;' }, ['Vista completa del día']),
       el('button', { id: 'btnManualClose', className: 'btn btn--primary', type: 'button' }, ['Cerrar dia'])
     ]),
     el('p', { id: 'waMsg', className: 'text-muted mt-2' }, ['Conectando...'])
@@ -96,6 +96,7 @@ export const WhatsAppLive = (mount, deps = {}) => {
   let novedades = [];
   let employees = [];
   let sedes = [];
+  let incapacitados = [];
 
   let unAttendance = null;
   let unReplacements = null;
@@ -103,6 +104,7 @@ export const WhatsAppLive = (mount, deps = {}) => {
   let unNovedades = null;
   let unEmployees = null;
   let unSedes = null;
+  let unIncapacitados = null;
   let unDailyMetrics = null;
   let unDashboardAttendance = null;
   let unDashboardReplacements = null;
@@ -130,13 +132,15 @@ export const WhatsAppLive = (mount, deps = {}) => {
   function classifyRow(row) {
     if (isSupernumerarioAttendance(row)) return 'super_replacement';
     const raw = String(row.novedadNombre || row.novedad || '').trim();
-    const code = String(row.novedadCodigo || '').trim();
+    const code = attendanceNovedadCode(row);
     if ((!raw && !code) || code === '1' || raw === '1') return row.asistio ? 'replace_no' : 'none';
+    if (code === '7') return 'replace_no';
+    if (['2', '3', '4', '5', '8'].includes(code)) return 'replace_yes';
     const rawNorm = normalize(raw);
     if (rawNorm.startsWith('otra sede')) return 'otra_sede';
 
-    const base = baseNovedadName(raw);
-    const nov = findNovedadCatalog(base);
+    const base = baseNovedadName(raw || code);
+    const nov = findNovedadCatalog(base, code);
     if (nov) return nov.reemplazo === true ? 'replace_yes' : 'replace_no';
 
     const fallback = inferNovedadByKeyword(base);
@@ -164,10 +168,10 @@ export const WhatsAppLive = (mount, deps = {}) => {
   }
 
   function novedadTextStyleByClass(kind) {
-    if (kind === 'super_replacement') return 'color:#1d4ed8;';
-    if (kind === 'replace_no') return 'color:#15803d;';
-    if (kind === 'otra_sede') return 'color:#c2410c;';
-    if (kind === 'replace_yes') return 'color:#b91c1c;';
+    if (kind === 'super_replacement') return 'color:#1d4ed8;font-weight:600;';
+    if (kind === 'replace_no') return 'color:#15803d;font-weight:600;';
+    if (kind === 'otra_sede') return 'color:#c2410c;font-weight:600;';
+    if (kind === 'replace_yes') return 'color:#b91c1c;font-weight:600;';
     return '';
   }
 
@@ -207,22 +211,58 @@ export const WhatsAppLive = (mount, deps = {}) => {
   function incapacidadDaysForRow(row) {
     const byRange = inclusiveDaysBetween(row?.incapacidadInicio, row?.incapacidadFin);
     if (byRange != null) return byRange;
+    const doc = String(row?.documento || '').trim();
+    const active = (incapacitados || []).find((item) => {
+      if (String(item?.documento || '').trim() !== doc) return false;
+      const start = normalizeIsoDate(item?.fechaInicio);
+      const end = normalizeIsoDate(item?.fechaFin);
+      return Boolean(start && end && String(row?.fecha || '').trim() >= start && String(row?.fecha || '').trim() <= end);
+    });
+    if (active) {
+      const fromRegistry = inclusiveDaysBetween(active.fechaInicio, active.fechaFin);
+      if (fromRegistry != null) return fromRegistry;
+    }
     const byValue = Number(row?.incapacidadDias);
     return Number.isFinite(byValue) && byValue > 0 ? byValue : null;
   }
 
   function findNovedadCatalog(name) {
+    return findNovedadCatalogByNameOrCode(name, '');
+  }
+
+  function attendanceNovedadCode(row) {
+    const explicit = String(row.novedadCodigo || '').trim();
+    if (explicit) return explicit;
+    const raw = String(row.novedad || '').trim();
+    return /^\d+$/.test(raw) ? raw : '';
+  }
+
+  function findNovedadCatalogByNameOrCode(name, code = '') {
     const target = normalize(name);
-    if (!target) return null;
+    const targetCode = String(code || '').trim();
+    if (!target && !targetCode) return null;
+    if (['1', '7'].includes(targetCode)) {
+      return { nombre: targetCode === '1' ? 'TRABAJANDO' : 'COMPENSATORIO', reemplazo: false };
+    }
+    if (['2', '3', '4', '5', '8'].includes(targetCode)) {
+      const labels = {
+        '2': 'ACCIDENTE LABORAL',
+        '3': 'ENFERMEDAD GENERAL',
+        '4': 'CALAMIDAD',
+        '5': 'LICENCIA NO REMUNERADA',
+        '8': 'NOVEDAD'
+      };
+      return { nombre: labels[targetCode] || targetCode, reemplazo: true };
+    }
     const rows = (novedades || []).map((n) => ({
       ...n,
       _nameNorm: normalize(n.nombre),
       _codeNorm: normalize(n.codigoNovedad || n.codigo || '')
     }));
 
-    let row = rows.find((n) => n._nameNorm === target || n._codeNorm === target);
+    let row = rows.find((n) => (targetCode && n._codeNorm === normalize(targetCode)) || (target && (n._nameNorm === target || n._codeNorm === target)));
     if (!row) {
-      row = rows.find((n) => n._nameNorm.includes(target) || target.includes(n._nameNorm));
+      row = rows.find((n) => target && (n._nameNorm.includes(target) || target.includes(n._nameNorm)));
     }
     if (!row) {
       const targetTokens = target.split(' ').filter(Boolean);
@@ -248,20 +288,20 @@ export const WhatsAppLive = (mount, deps = {}) => {
     if (t.includes('accidente laboral')) return 'replace_yes';
     if (t.includes('calamidad')) return 'replace_yes';
     if (t.includes('permiso no remunerado')) return 'replace_yes';
-    if (t.includes('compensatorio')) return 'replace_yes';
+    if (t.includes('compensatorio')) return 'replace_no';
     return null;
   }
 
   function displayNovedad(row) {
     const baseRaw = String(row.novedadNombre || row.novedad || '').trim();
-    const code = String(row.novedadCodigo || '').trim();
+    const code = attendanceNovedadCode(row);
     const raw = baseRaw || code;
     if (!raw || raw === '1' || code === '1') return 'TRABAJANDO';
     const rawNorm = normalize(raw);
     if (rawNorm.startsWith('otra sede')) return raw;
 
     const base = baseNovedadName(raw);
-    const nov = findNovedadCatalog(base);
+    const nov = findNovedadCatalogByNameOrCode(base, code);
     if (!nov) return raw;
 
     const daysMatch = raw.match(/\(([^)]+)\)\s*$/);
@@ -322,7 +362,7 @@ export const WhatsAppLive = (mount, deps = {}) => {
     const now = Date.now();
     if (now - Number(lastLegacyBackfillAt || 0) < 8000) return;
     lastLegacyBackfillAt = now;
-    msg.textContent = 'Sincronizando respaldo para completar registros del dia...';
+    msg.textContent = 'Sincronizando respaldo para completar registros del día...';
     try {
       const [att, repl] = await Promise.all([
         deps.listAttendanceRange(today, today),
@@ -334,7 +374,7 @@ export const WhatsAppLive = (mount, deps = {}) => {
       statsReplacements = replacements;
       render();
     } catch (err) {
-      msg.textContent = `Error cargando respaldo legacy: ${err?.message || err}`;
+      msg.textContent = `Error cargando respaldo del día: ${err?.message || err}`;
     }
   }
 
@@ -487,7 +527,7 @@ export const WhatsAppLive = (mount, deps = {}) => {
     btn.disabled = true;
     const oldText = btn.textContent;
     btn.textContent = 'Guardando...';
-    msg.textContent = 'Guardando reemplazo...';
+    msg.textContent = 'Guardando reemplazo o ausentismo...';
 
     try {
       await deps.saveImportReplacements?.({
@@ -602,7 +642,7 @@ export const WhatsAppLive = (mount, deps = {}) => {
             disabled: !canAssign
           },
           [
-            el('option', { value: '__ausentismo__' }, ['Ausentismo']),
+            el('option', { value: '__ausentismo__' }, ['Confirmar ausentismo']),
             ...opts.map((o) => el('option', { value: o.documento }, [`${o.nombre} (${o.documento || '-'})`]))
           ]
         );
@@ -624,18 +664,14 @@ export const WhatsAppLive = (mount, deps = {}) => {
             disabled: !canAssign,
             style: 'padding:3px 7px;font-size:.74rem;line-height:1.05;min-height:24px;'
           },
-          ['Guardar']
+          ['Confirmar']
         );
         saveBtn.addEventListener('click', () => saveReplacement(r, select.value, saveBtn, select));
         select.addEventListener('change', () => {
           const label = selectedLabel();
           select.title = label;
           selectedPreview.textContent = label;
-          if (String(select.value || '').trim() === '__ausentismo__') {
-            saveReplacement(r, select.value, saveBtn, select);
-          } else if (!saveBtn.disabled) {
-            saveBtn.textContent = 'Guardar';
-          }
+          if (!saveBtn.disabled) saveReplacement(r, select.value, saveBtn, select);
         });
 
         const replacementCell = el('div', { style: 'display:grid;gap:4px;min-width:0;' }, [
@@ -664,8 +700,8 @@ export const WhatsAppLive = (mount, deps = {}) => {
     qs('#waNoveltyHandled', ui).textContent = String(stats.noveltyHandled);
     qs('#waNoveltyPending', ui).textContent = String(stats.noveltyPending);
     msg.textContent = usingDashboardDocs
-      ? `Total registros del dia (dashboard docs): ${rows.length}`
-      : `Total registros del dia: ${rows.length}`;
+      ? `Total registros del día: ${rows.length}`
+      : `Total registros del día: ${rows.length}`;
     updateCardFilterUI();
     updateSortIndicators();
   }
@@ -774,7 +810,7 @@ export const WhatsAppLive = (mount, deps = {}) => {
     dailyMetrics = null;
     lastLegacyBackfillAt = 0;
     usingDashboardDocs = false;
-    if (modeHint) modeHint.textContent = 'Vista completa del dia (dashboard docs)';
+    if (modeHint) modeHint.textContent = 'Vista completa del día';
     render();
     if (deps.streamDailyMetricsByDate) {
       unDailyMetrics = deps.streamDailyMetricsByDate(
@@ -810,7 +846,7 @@ export const WhatsAppLive = (mount, deps = {}) => {
       );
       return;
     }
-    if (modeHint) modeHint.textContent = 'Modo legacy (sin dashboard docs)';
+    if (modeHint) modeHint.textContent = 'Modo de respaldo';
     Promise.all([
       deps.listAttendanceRange?.(today, today) || [],
       deps.listImportReplacementsRange?.(today, today) || []
@@ -913,6 +949,12 @@ export const WhatsAppLive = (mount, deps = {}) => {
       render();
     });
   }
+  if (deps.streamIncapacitadosByDate) {
+    unIncapacitados = deps.streamIncapacitadosByDate(today, (rows) => {
+      incapacitados = rows || [];
+      render();
+    });
+  }
 
   bindDateStreams();
   mount.replaceChildren(ui);
@@ -927,6 +969,7 @@ export const WhatsAppLive = (mount, deps = {}) => {
     unNovedades?.();
     unEmployees?.();
     unSedes?.();
+    unIncapacitados?.();
   };
 };
 
