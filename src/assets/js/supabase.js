@@ -73,7 +73,8 @@ function normalizeUser(user) {
   return {
     uid: user.id,
     email: user.email || '',
-    displayName: user.user_metadata?.display_name || user.user_metadata?.full_name || null
+    displayName: user.user_metadata?.display_name || user.user_metadata?.full_name || null,
+    documento: user.user_metadata?.documento || null
   };
 }
 
@@ -85,6 +86,51 @@ function normalizeProfileRow(uid, data = {}) {
     documento: data.documento || null,
     estado: data.estado || 'activo',
     updated_at: new Date().toISOString()
+  };
+}
+
+function mapUserProfileRow(row = {}) {
+  return {
+    uid: row.id,
+    email: row.email || '',
+    displayName: row.display_name || null,
+    documento: row.documento || null,
+    role: row.role || 'empleado',
+    estado: row.estado || 'activo',
+    zonaCodigo: row.zona_codigo || null,
+    zonasPermitidas: Array.isArray(row.zonas_permitidas) ? row.zonas_permitidas : [],
+    supervisorEligible: row.supervisor_eligible === true,
+    createdAt: row.created_at || null,
+    lastModifiedAt: row.updated_at || null,
+    createdByUid: row.created_by_uid || null,
+    createdByEmail: row.created_by_email || null,
+    lastModifiedByUid: row.last_modified_by_uid || null,
+    lastModifiedByEmail: row.last_modified_by_email || null,
+    deletedAt: row.deleted_at || null,
+    deletedByUid: row.deleted_by_uid || null,
+    deletedByEmail: row.deleted_by_email || null
+  };
+}
+
+function sanitizePermissionsRecord(data = {}) {
+  if (!data || typeof data !== 'object' || Array.isArray(data)) return {};
+  return Object.fromEntries(
+    Object.entries(data).map(([key, value]) => [key, value === true])
+  );
+}
+
+function mapAuditLogRow(row = {}) {
+  return {
+    id: row.id,
+    ts: row.created_at || null,
+    actorUid: row.actor_uid || null,
+    actorEmail: row.actor_email || null,
+    targetType: row.target_type || null,
+    targetId: row.target_id || null,
+    action: row.action || null,
+    before: row.before_data || null,
+    after: row.after_data || null,
+    note: row.note || null
   };
 }
 
@@ -837,14 +883,32 @@ export async function login(email, pass) {
   return { user: normalizeUser(data.user) };
 }
 
-export async function register(email, pass) {
+export async function register(email, pass, profile = {}) {
   const cleanEmail = String(email || '').trim().toLowerCase();
+  const emailRedirectTo = (() => {
+    try {
+      return window.location.origin;
+    } catch {
+      return undefined;
+    }
+  })();
   const { data, error } = await supabase.auth.signUp({
     email: cleanEmail,
-    password: pass
+    password: pass,
+    options: {
+      ...(emailRedirectTo ? { emailRedirectTo } : {}),
+      data: {
+        display_name: profile?.displayName || profile?.nombre || null,
+        full_name: profile?.displayName || profile?.nombre || null,
+        documento: profile?.documento || null
+      }
+    }
   });
   if (error) throw error;
-  return { user: normalizeUser(data.user) };
+  return {
+    user: normalizeUser(data.user),
+    session: data.session || null
+  };
 }
 
 export async function logout() {
@@ -863,6 +927,7 @@ export async function ensureUserProfile(user) {
   await upsertProfile(user.uid, {
     email: user.email,
     displayName: user.displayName,
+    documento: user.documento,
     estado: 'activo'
   });
 }
@@ -888,24 +953,57 @@ export async function loadUserProfile(uid) {
   };
 }
 
-export async function getUserOverrides() {
-  const user = (await supabase.auth.getUser()).data.user;
-  if (!user?.id) return {};
+export async function getUserOverrides(uid = null) {
+  const currentUser = (await supabase.auth.getUser()).data.user;
+  const targetUid = String(uid || currentUser?.id || '').trim();
+  if (!targetUid) return {};
   const { data, error } = await supabase
     .from('user_overrides')
     .select('permissions')
-    .eq('user_id', user.id)
+    .eq('user_id', targetUid)
     .maybeSingle();
   if (error) throw error;
   return data?.permissions || {};
 }
 
-export async function setUserOverrides() {
-  throw new Error('setUserOverrides aun no esta migrado a Supabase.');
+export async function setUserOverrides(uid, permissions = {}) {
+  const targetUid = String(uid || '').trim();
+  if (!targetUid) throw new Error('Falta el usuario para guardar overrides.');
+  const payload = {
+    user_id: targetUid,
+    permissions: sanitizePermissionsRecord(permissions),
+    updated_at: new Date().toISOString()
+  };
+  const { error } = await supabase
+    .from('user_overrides')
+    .upsert(payload, { onConflict: 'user_id' });
+  if (error) throw error;
+  await notifyTableReload('user_overrides');
 }
 
-export async function clearUserOverrides() {
-  throw new Error('clearUserOverrides aun no esta migrado a Supabase.');
+export async function clearUserOverrides(uid) {
+  const targetUid = String(uid || '').trim();
+  if (!targetUid) throw new Error('Falta el usuario para limpiar overrides.');
+  const { error } = await supabase
+    .from('user_overrides')
+    .delete()
+    .eq('user_id', targetUid);
+  if (error) throw error;
+  await notifyTableReload('user_overrides');
+}
+
+export async function setRolePermissions(role, permissions = {}) {
+  const cleanRole = String(role || '').trim().toLowerCase();
+  if (!cleanRole) throw new Error('Falta el rol a actualizar.');
+  const { error } = await supabase
+    .from('roles_matrix')
+    .upsert({
+      role: cleanRole,
+      permissions: sanitizePermissionsRecord(permissions),
+      updated_at: new Date().toISOString()
+    }, { onConflict: 'role' });
+  if (error) throw error;
+  await notifyTableReload('roles_matrix');
 }
 
 export function streamRoleMatrix(onData) {
@@ -929,6 +1027,7 @@ export function streamRoleMatrix(onData) {
 
   emit();
 
+  const unregister = registerTableReloader('roles_matrix', emit);
   const channel = supabase
     .channel('roles-matrix-watch')
     .on('postgres_changes', { event: '*', schema: 'public', table: 'roles_matrix' }, emit)
@@ -936,6 +1035,177 @@ export function streamRoleMatrix(onData) {
 
   return () => {
     active = false;
+    unregister();
+    supabase.removeChannel(channel);
+  };
+}
+
+export function streamUsers(onData) {
+  let active = true;
+  const emit = async () => {
+    try {
+      const rows = await selectAllRows(SUPABASE_PROFILES_TABLE, {
+        select: '*',
+        order: 'email',
+        ascending: true
+      });
+      if (!active) return;
+      onData((rows || []).map(mapUserProfileRow));
+    } catch (error) {
+      console.error('No se pudo cargar profiles:', error);
+      if (!active) return;
+      onData([]);
+    }
+  };
+
+  emit();
+
+  const unregister = registerTableReloader(SUPABASE_PROFILES_TABLE, emit);
+  const channel = supabase
+    .channel('profiles-watch')
+    .on('postgres_changes', { event: '*', schema: 'public', table: SUPABASE_PROFILES_TABLE }, emit)
+    .subscribe();
+
+  return () => {
+    active = false;
+    unregister();
+    supabase.removeChannel(channel);
+  };
+}
+
+export async function findUserByEmail(email) {
+  const cleanEmail = String(email || '').trim().toLowerCase();
+  if (!cleanEmail) return null;
+  const { data, error } = await supabase
+    .from(SUPABASE_PROFILES_TABLE)
+    .select('*')
+    .eq('email', cleanEmail)
+    .maybeSingle();
+  if (error) throw error;
+  return data ? mapUserProfileRow(data) : null;
+}
+
+export async function setUserRole(uid, role) {
+  const targetUid = String(uid || '').trim();
+  const nextRole = String(role || '').trim().toLowerCase();
+  if (!targetUid) throw new Error('Falta el usuario a actualizar.');
+  if (!nextRole) throw new Error('Falta el rol a asignar.');
+  const audit = await getCurrentAuditFields();
+  const patch = {
+    role: nextRole,
+    updated_at: new Date().toISOString(),
+    last_modified_by_uid: audit.created_by_uid,
+    last_modified_by_email: audit.created_by_email
+  };
+  const { error } = await supabase
+    .from(SUPABASE_PROFILES_TABLE)
+    .update(patch)
+    .eq('id', targetUid);
+  if (error) throw error;
+  await notifyTableReload(SUPABASE_PROFILES_TABLE);
+}
+
+export async function setUserStatus(uid, estado) {
+  const targetUid = String(uid || '').trim();
+  const nextStatus = String(estado || '').trim().toLowerCase();
+  if (!targetUid) throw new Error('Falta el usuario a actualizar.');
+  if (!nextStatus) throw new Error('Falta el estado a asignar.');
+  const audit = await getCurrentAuditFields();
+  const patch = {
+    estado: nextStatus,
+    updated_at: new Date().toISOString(),
+    last_modified_by_uid: audit.created_by_uid,
+    last_modified_by_email: audit.created_by_email
+  };
+  if (nextStatus !== 'eliminado') {
+    patch.deleted_at = null;
+    patch.deleted_by_uid = null;
+    patch.deleted_by_email = null;
+  }
+  const { error } = await supabase
+    .from(SUPABASE_PROFILES_TABLE)
+    .update(patch)
+    .eq('id', targetUid);
+  if (error) throw error;
+  await notifyTableReload(SUPABASE_PROFILES_TABLE);
+}
+
+export async function softDeleteUser(uid) {
+  const targetUid = String(uid || '').trim();
+  if (!targetUid) throw new Error('Falta el usuario a eliminar.');
+  const audit = await getCurrentAuditFields();
+  const timestamp = new Date().toISOString();
+  const { error } = await supabase
+    .from(SUPABASE_PROFILES_TABLE)
+    .update({
+      estado: 'eliminado',
+      role: 'empleado',
+      updated_at: timestamp,
+      last_modified_by_uid: audit.created_by_uid,
+      last_modified_by_email: audit.created_by_email,
+      deleted_at: timestamp,
+      deleted_by_uid: audit.created_by_uid,
+      deleted_by_email: audit.created_by_email
+    })
+    .eq('id', targetUid);
+  if (error) throw error;
+  await clearUserOverrides(targetUid);
+  await notifyTableReload(SUPABASE_PROFILES_TABLE);
+}
+
+export async function addAuditLog({
+  targetType = null,
+  targetId = null,
+  action = null,
+  before = null,
+  after = null,
+  note = null
+} = {}) {
+  const audit = await getCurrentAuditFields();
+  const { error } = await supabase
+    .from('audit_logs')
+    .insert({
+      actor_uid: audit.created_by_uid,
+      actor_email: audit.created_by_email,
+      target_type: targetType,
+      target_id: targetId == null ? null : String(targetId),
+      action,
+      before_data: before,
+      after_data: after,
+      note
+    });
+  if (error) throw error;
+  await notifyTableReload('audit_logs');
+}
+
+export function streamAuditLogs(onData, max = 200) {
+  let active = true;
+  const emit = async () => {
+    const { data, error } = await supabase
+      .from('audit_logs')
+      .select('*')
+      .order('created_at', { ascending: false })
+      .limit(max);
+    if (!active) return;
+    if (error) {
+      console.error('No se pudo cargar audit_logs:', error);
+      onData([]);
+      return;
+    }
+    onData((data || []).map(mapAuditLogRow));
+  };
+
+  emit();
+
+  const unregister = registerTableReloader('audit_logs', emit);
+  const channel = supabase
+    .channel('audit-logs-watch')
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'audit_logs' }, emit)
+    .subscribe();
+
+  return () => {
+    active = false;
+    unregister();
     supabase.removeChannel(channel);
   };
 }
@@ -959,6 +1229,7 @@ export function streamUserOverrides(uid, onData) {
 
   emit();
 
+  const unregister = registerTableReloader('user_overrides', emit);
   const channel = supabase
     .channel(`user-overrides-${uid}`)
     .on('postgres_changes', { event: '*', schema: 'public', table: 'user_overrides', filter: `user_id=eq.${uid}` }, emit)
@@ -966,6 +1237,7 @@ export function streamUserOverrides(uid, onData) {
 
   return () => {
     active = false;
+    unregister();
     supabase.removeChannel(channel);
   };
 }

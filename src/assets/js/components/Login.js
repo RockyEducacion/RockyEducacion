@@ -83,7 +83,7 @@ export const Login = (mount, deps = {}) => {
       el('p', { id: 'msg', className: 'text-muted mt-2' }, [' '])
     ]);
 
-    if (!deps.register || !deps.createUserProfile) {
+    if (!deps.register) {
       qs('#msg', ui).textContent = 'El proveedor de autenticacion no esta disponible.';
     } else {
       ui.querySelector('#btnReg').addEventListener('click', async () => {
@@ -93,9 +93,15 @@ export const Login = (mount, deps = {}) => {
           const email = ui.querySelector('#email').value.trim();
           const pass = ui.querySelector('#pass').value;
           if (!doc || !name || !email || !pass) throw new Error('Completa documento, nombre, correo y contrasena.');
-          const cred = await deps.register(email, pass);
-          await deps.createUserProfile(cred.user.uid, { email, nombre: name, documento: doc });
-          qs('#msg', ui).textContent = 'Cuenta creada. Ahora inicia sesion.';
+          const cred = await deps.register(email, pass, { nombre: name, documento: doc });
+          if (cred?.session && cred?.user?.uid && deps.createUserProfile) {
+            await deps.createUserProfile(cred.user.uid, { email, nombre: name, documento: doc });
+            qs('#msg', ui).textContent = 'Cuenta creada. Comunicate con el administrador para que te asigne los permisos correspondientes.';
+            currentTab = 'login';
+            renderTab();
+            return;
+          }
+          qs('#msg', ui).textContent = 'Cuenta creada. Revisa tu correo si aplica y luego inicia sesion. Comunicate con el administrador para que te asigne los permisos correspondientes.';
           currentTab = 'login';
           renderTab();
         } catch (e) {
