@@ -58,6 +58,20 @@ app.get('/health', (_req, res) => {
   res.json({ ok: true });
 });
 
+app.get(['/cron/close-daily-operation', '/api/cron/close-daily-operation'], async (req, res) => {
+  try {
+    assertCronAuthorized(req);
+    const day = currentDate();
+    const result = await closeOperationDay(day);
+    res.json({ ok: true, ...result });
+  } catch (error) {
+    const message = error?.message || 'cron_close_failed';
+    const status = message === 'unauthorized_cron' ? 401 : 500;
+    console.error('Error en cierre automatico diario:', error);
+    res.status(status).json({ ok: false, error: message });
+  }
+});
+
 app.get('/webhooks/whatsapp', (req, res) => {
   const mode = String(req.query['hub.mode'] || '');
   const token = String(req.query['hub.verify_token'] || '');
@@ -673,29 +687,168 @@ async function registerNovelty(phone, employee, novelty, selectedSede = null, in
 }
 
 async function recomputeDailyMetrics(date) {
-  const [{ count: attendanceCount, error: attendanceError }, { count: absenteeismCount, error: absenteeismError }] = await Promise.all([
-    supabaseAdmin.from('attendance').select('*', { count: 'exact', head: true }).eq('fecha', date),
-    supabaseAdmin.from('absenteeism').select('*', { count: 'exact', head: true }).eq('fecha', date)
+  const day = String(date || '').trim();
+  const [{ data: attendance, error: attendanceError }, { data: replacements, error: replacementsError }, sedesRows, employeesRows, cargosRows] = await Promise.all([
+    supabaseAdmin.from('attendance').select('*').eq('fecha', day),
+    supabaseAdmin.from('import_replacements').select('*').eq('fecha', day),
+    selectAllRows('sedes'),
+    selectAllRows('employees'),
+    selectAllRows('cargos', 'codigo, alineacion_crud, nombre')
   ]);
   if (attendanceError) throw attendanceError;
-  if (absenteeismError) throw absenteeismError;
+  if (replacementsError) throw replacementsError;
 
-  const uniqueCount = Number(attendanceCount || 0);
-  const absenteeism = Number(absenteeismCount || 0);
+  const attRows = Array.isArray(attendance) ? attendance : [];
+  const repRows = Array.isArray(replacements) ? replacements : [];
+  const sedes = (sedesRows || []).filter((row) => String(row?.estado || 'activo').trim().toLowerCase() !== 'inactivo');
+  const cargoMap = new Map((cargosRows || []).map((row) => [String(row?.codigo || '').trim(), row]));
+  const expected = (employeesRows || []).filter((emp) => {
+    if (String(emp?.estado || '').trim().toLowerCase() !== 'activo') return false;
+    const sedeCodigo = String(emp?.sede_codigo || '').trim();
+    const sede = sedes.find((row) => String(row?.codigo || '').trim() === sedeCodigo) || null;
+    if (!isSedeScheduledForDate(sede, day)) return false;
+    return !isEmployeeSupernumerarioByCargoMap(emp, cargoMap);
+  }).length;
+  const planned = sedes.reduce((sum, sede) => {
+    if (!isSedeScheduledForDate(sede, day)) return sum;
+    const count = Number(sede?.numero_operarios ?? 0);
+    return sum + (Number.isFinite(count) && count > 0 ? count : 0);
+  }, 0);
+  const uniqueDocs = new Set(attRows.map((row) => String(row?.documento || row?.empleado_id || '').trim()).filter(Boolean));
+  const absenteeism = repRows.filter((row) => String(row?.decision || '').trim().toLowerCase() === 'ausentismo').length;
+  const replaced = repRows.filter((row) => String(row?.decision || '').trim().toLowerCase() === 'reemplazo').length;
+  const attendanceCount = attRows.length;
+  const paidServices = Math.max(0, expected - absenteeism + replaced);
+  const noContracted = Math.max(0, planned - expected);
   const { error } = await supabaseAdmin.from('daily_metrics').upsert({
-    id: date,
-    fecha: date,
-    planned: uniqueCount + absenteeism,
-    expected: uniqueCount,
-    unique_count: uniqueCount,
-    missing: absenteeism,
-    attendance_count: uniqueCount,
+    id: day,
+    fecha: day,
+    planned,
+    expected,
+    unique_count: uniqueDocs.size,
+    missing: Math.max(0, expected - attendanceCount),
+    attendance_count: attendanceCount,
     absenteeism,
-    paid_services: uniqueCount,
-    no_contracted: 0,
+    paid_services: paidServices,
+    no_contracted: noContracted,
     closed: false
   }, { onConflict: 'id' });
   if (error) throw error;
+}
+
+async function selectAllRows(table, select = '*') {
+  const rows = [];
+  let from = 0;
+  const pageSize = 1000;
+  while (true) {
+    const { data, error } = await supabaseAdmin
+      .from(table)
+      .select(select)
+      .range(from, from + pageSize - 1);
+    if (error) throw error;
+    const batch = Array.isArray(data) ? data : [];
+    rows.push(...batch);
+    if (batch.length < pageSize) break;
+    from += pageSize;
+  }
+  return rows;
+}
+
+function isSedeScheduledForDate(sede, selectedDate) {
+  const iso = String(selectedDate || '').trim();
+  if (!iso || !sede) return false;
+  const [year, month, day] = iso.split('-').map(Number);
+  const weekday = new Date(Date.UTC(year, (month || 1) - 1, day || 1)).getUTCDay();
+  const jornada = String(sede?.jornada || 'lun_vie').trim().toLowerCase();
+  if (jornada === 'lun_dom') return true;
+  if (jornada === 'lun_sab') return weekday >= 1 && weekday <= 6;
+  return weekday >= 1 && weekday <= 5;
+}
+
+function isEmployeeSupernumerarioByCargoMap(emp, cargoMap = new Map()) {
+  const cargoCode = String(emp?.cargo_codigo || '').trim();
+  const cargo = cargoMap.get(cargoCode) || null;
+  const alignment = normalizeCargoAlignment(cargo?.alineacion_crud || emp?.cargo_nombre || '');
+  return alignment === 'supernumerario';
+}
+
+function normalizeCargoAlignment(value) {
+  const normalized = String(value || '').trim().toLowerCase();
+  if (['supernumerario', 'supervisor', 'empleado'].includes(normalized)) return normalized;
+  if (normalized.includes('supernumer')) return 'supernumerario';
+  if (normalized.includes('supervisor')) return 'supervisor';
+  return 'empleado';
+}
+
+async function closeOperationDay(date) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(date || '').trim())) {
+    throw new Error('invalid_date');
+  }
+
+  const day = String(date).trim();
+  const { data: existingClosure, error: existingClosureError } = await supabaseAdmin
+    .from('daily_closures')
+    .select('*')
+    .eq('fecha', day)
+    .maybeSingle();
+  if (existingClosureError) throw existingClosureError;
+
+  if (existingClosure?.locked === true || String(existingClosure?.status || '').trim().toLowerCase() === 'closed') {
+    return { date: day, status: 'already_closed' };
+  }
+
+  const { data: metricRow, error: metricError } = await supabaseAdmin
+    .from('daily_metrics')
+    .select('*')
+    .eq('fecha', day)
+    .maybeSingle();
+  if (metricError) throw metricError;
+
+  const metrics = metricRow || (await recomputeAndFetchDailyMetrics(day));
+  const { error: closureError } = await supabaseAdmin
+    .from('daily_closures')
+    .upsert({
+      id: day,
+      fecha: day,
+      status: 'closed',
+      locked: true,
+      planeados: Number(metrics?.planned || 0),
+      contratados: Number(metrics?.expected || 0),
+      ausentismos: Number(metrics?.absenteeism || 0),
+      pagados: Number(metrics?.paid_services || metrics?.paidServices || 0),
+      no_contratados: Number(metrics?.no_contracted || metrics?.noContracted || 0),
+      closed_by_uid: null,
+      closed_by_email: 'cron@system'
+    }, { onConflict: 'id' });
+  if (closureError) throw closureError;
+
+  const { error: metricCloseError } = await supabaseAdmin
+    .from('daily_metrics')
+    .update({ closed: true })
+    .eq('fecha', day);
+  if (metricCloseError) throw metricCloseError;
+
+  return { date: day, status: 'closed' };
+}
+
+async function recomputeAndFetchDailyMetrics(date) {
+  await recomputeDailyMetrics(date);
+  const { data, error } = await supabaseAdmin
+    .from('daily_metrics')
+    .select('*')
+    .eq('fecha', date)
+    .maybeSingle();
+  if (error) throw error;
+  return data || null;
+}
+
+function assertCronAuthorized(req) {
+  if (!config.cronSecret) return;
+  const header = String(req.headers.authorization || '').trim();
+  const expected = `Bearer ${config.cronSecret}`;
+  if (header !== expected) {
+    throw new Error('unauthorized_cron');
+  }
 }
 async function findEmployeeByPhone(phone) {
   const normalized = normalizePhone(phone);

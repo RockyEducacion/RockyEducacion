@@ -12,7 +12,7 @@ create table if not exists public.profiles (
   email text unique,
   display_name text,
   documento text,
-  role public.app_role not null default 'supervisor',
+  role public.app_role not null default 'empleado',
   estado text not null default 'activo',
   zona_codigo text,
   zonas_permitidas text[] not null default '{}',
@@ -43,6 +43,8 @@ create or replace function public.is_admin_like()
 returns boolean
 language sql
 stable
+security definer
+set search_path = public
 as $$
   select exists (
     select 1
@@ -57,6 +59,8 @@ create or replace function public.is_superadmin()
 returns boolean
 language sql
 stable
+security definer
+set search_path = public
 as $$
   select exists (
     select 1

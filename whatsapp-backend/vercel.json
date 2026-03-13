@@ -1,5 +1,11 @@
 {
   "version": 2,
+  "crons": [
+    {
+      "path": "/api/cron/close-daily-operation",
+      "schedule": "59 4 * * *"
+    }
+  ],
   "rewrites": [
     {
       "source": "/(.*)",

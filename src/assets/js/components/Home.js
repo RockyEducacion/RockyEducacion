@@ -2,21 +2,59 @@ import { el, qs } from '../utils/dom.js';
 
 export const Home = async (mount, deps = {}) => {
   const ui = el('section', { className: 'main-card' }, [
-    el('h2', {}, ['Dashboard de operacion']),
-    el('div', { className: 'form-row mt-2' }, [
-      el('div', {}, [el('label', { className: 'label' }, ['Mes']), el('input', { id: 'monthPick', className: 'input', type: 'month' })]),
-      el('button', { id: 'btnLoad', className: 'btn btn--primary', type: 'button' }, ['Actualizar']),
-      el('span', { id: 'msg', className: 'text-muted' }, [' '])
+    el('div', { className: 'section-block', style: heroStyle() }, [
+      el('div', {}, [
+        el('p', { className: 'text-muted', style: 'margin:0 0 .35rem 0; letter-spacing:.08em; text-transform:uppercase;' }, ['Dashboard estable']),
+        el('h2', { style: 'margin:0; font-size:2rem; line-height:1.05;' }, ['Panel operativo consolidado']),
+        el('p', { className: 'mt-1', style: 'max-width:760px; margin-bottom:0;' }, [
+          'Los dias cerrados usan cifras congeladas desde ',
+          el('strong', {}, ['daily_closures']),
+          '. Solo el dia actual, si sigue abierto, usa lectura en vivo desde ',
+          el('strong', {}, ['daily_metrics']),
+          '.'
+        ])
+      ]),
+      el('div', { className: 'form-row mt-2', style: 'align-items:end;' }, [
+        el('div', {}, [el('label', { className: 'label' }, ['Mes']), el('input', { id: 'monthPick', className: 'input', type: 'month' })]),
+        el('button', { id: 'btnLoad', className: 'btn btn--primary', type: 'button' }, ['Actualizar']),
+        el('span', { id: 'msg', className: 'text-muted' }, [' '])
+      ])
     ]),
-    el('div', { className: 'perms-grid mt-2' }, [
-      statCard('Servicios planeados', 'kPlanned'),
-      statCard('No contratados', 'kNotContracted'),
-      statCard('Ausentismo', 'kAbsenteeism'),
-      statCard('Servicios pagados', 'kPaid')
+    el('div', { className: 'perms-grid mt-2', style: 'grid-template-columns:repeat(auto-fit,minmax(180px,1fr));' }, [
+      statCard('Dias cerrados', 'kClosedDays', '#0f766e'),
+      statCard('Dia actual', 'kTodayStatus', '#1d4ed8'),
+      statCard('Planeados mes', 'kPlanned', '#111827'),
+      statCard('Contratados mes', 'kExpected', '#4f46e5'),
+      statCard('Ausentismos mes', 'kAbsenteeism', '#b91c1c'),
+      statCard('Pagados mes', 'kPaid', '#0369a1'),
+      statCard('No contratados mes', 'kNotContracted', '#b45309'),
+      statCard('Asistencias mes', 'kAttendance', '#166534')
     ]),
     el('div', { className: 'section-block mt-2' }, [
-      el('h3', { className: 'section-title' }, ['Servicios contratados por dia']),
-      el('div', { style: 'min-height:320px;' }, [el('canvas', { id: 'chartPaid' })])
+      el('h3', { className: 'section-title', style: 'margin-bottom:.35rem;' }, ['Serie diaria consolidada']),
+      el('p', { className: 'text-muted', style: 'margin-top:0;' }, ['Historico cerrado + dia actual abierto en vivo.']),
+      el('div', { style: 'min-height:340px;' }, [el('canvas', { id: 'chartStableOps' })])
+    ]),
+    el('div', { className: 'section-block mt-2' }, [
+      el('div', { className: 'form-row', style: 'align-items:center;' }, [
+        el('h3', { className: 'section-title', style: 'margin:0;' }, ['Detalle diario']),
+        el('span', { id: 'summaryBadge', className: 'text-muted' }, [' '])
+      ]),
+      el('div', { className: 'mt-1 table-wrap' }, [
+        el('table', { className: 'table' }, [
+          el('thead', {}, [el('tr', {}, [
+            el('th', {}, ['Fecha']),
+            el('th', {}, ['Fuente']),
+            el('th', {}, ['Planeados']),
+            el('th', {}, ['Contratados']),
+            el('th', {}, ['Ausentismos']),
+            el('th', {}, ['Pagados']),
+            el('th', {}, ['No contratados']),
+            el('th', {}, ['Asistencias'])
+          ])]),
+          el('tbody', { id: 'dashboardRows' })
+        ])
+      ])
     ])
   ]);
 
@@ -25,34 +63,42 @@ export const Home = async (mount, deps = {}) => {
   const msg = qs('#msg', ui);
   const monthPick = qs('#monthPick', ui);
   const btnLoad = qs('#btnLoad', ui);
+  const tbody = qs('#dashboardRows', ui);
+  const summaryBadge = qs('#summaryBadge', ui);
+
   let chart = null;
   let ChartMod = null;
+  let unMetric = null;
+  let unClosures = null;
+  let activeModel = null;
+  let activeMonth = '';
 
   monthPick.value = await getDefaultMonth();
   btnLoad.addEventListener('click', () => loadMonth(monthPick.value));
   await loadMonth(monthPick.value);
 
   return () => {
+    cleanupSubscriptions();
     if (chart) chart.destroy();
   };
 
   async function getDefaultMonth() {
-    const latest = await getLatestDashboardDate();
-    return String(latest || todayBogota()).slice(0, 7);
-  }
-
-  async function getLatestDashboardDate() {
+    const today = todayBogota();
+    const from = shiftDay(today, -62);
     try {
-      const today = todayBogota();
-      const from = shiftDay(today, -62);
-      const rows = typeof deps.listAttendanceRange === 'function' ? await deps.listAttendanceRange(from, today) : [];
-      const dates = (rows || [])
-        .map((row) => String(row?.fecha || '').trim())
+      const [closures, metrics] = await Promise.all([
+        typeof deps.listDailyClosuresRange === 'function' ? deps.listDailyClosuresRange(from, today) : [],
+        typeof deps.listDailyMetricsRange === 'function' ? deps.listDailyMetricsRange(from, today) : []
+      ]);
+      const dates = [
+        ...(closures || []).map((row) => String(row?.fecha || '').trim()),
+        ...(metrics || []).map((row) => String(row?.fecha || '').trim())
+      ]
         .filter((value) => /^\d{4}-\d{2}-\d{2}$/.test(value))
         .sort();
-      return dates[dates.length - 1] || today;
+      return String(dates[dates.length - 1] || today).slice(0, 7);
     } catch {
-      return todayBogota();
+      return today.slice(0, 7);
     }
   }
 
@@ -62,78 +108,103 @@ export const Home = async (mount, deps = {}) => {
       return;
     }
 
-    const { from, to } = monthRange(month);
-    const visibleTo = minIsoDate(to, todayBogota());
-    const days = from <= visibleTo ? eachDay(from, visibleTo) : [];
-    msg.textContent = 'Consultando metricas mensuales...';
+    activeMonth = month;
+    cleanupSubscriptions();
+    msg.textContent = 'Consultando metricas consolidadas...';
 
     try {
-      const rows = await buildMonthRows(days, from, visibleTo);
-      const refDay = visibleTo || todayBogota();
-      const ref = rows.find((row) => row.fecha === refDay) || emptyRow(refDay);
-
-      qs('#kPlanned', ui).textContent = String(ref.planeados || 0);
-      qs('#kNotContracted', ui).textContent = String(ref.noContratados || 0);
-      qs('#kAbsenteeism', ui).textContent = String(ref.ausentismos || 0);
-      qs('#kPaid', ui).textContent = String(ref.pagados || 0);
-
-      await renderChart(rows, month);
-      msg.textContent = `Dashboard actualizado. Dia de referencia: ${refDay || '-'}.`;
+      activeModel = await fetchMonthModel(month);
+      renderModel(activeModel);
+      attachLiveSubscriptions(activeModel);
     } catch (error) {
+      activeModel = null;
+      tbody.replaceChildren();
+      summaryBadge.textContent = ' ';
       msg.textContent = `Error: ${error?.message || error}`;
     }
   }
 
-  async function buildMonthRows(days, from, to) {
-    const [attendanceRows, replacementRows, sedes, employees, supernumerarios, novedades] = await Promise.all([
-      typeof deps.listAttendanceRange === 'function' ? deps.listAttendanceRange(from, to) : [],
-      typeof deps.listImportReplacementsRange === 'function' ? deps.listImportReplacementsRange(from, to) : [],
-      snapshotFromStream(deps.streamSedes),
-      snapshotFromStream(deps.streamEmployees),
-      snapshotFromStream(deps.streamSupernumerarios),
-      snapshotFromStream(deps.streamNovedades)
+  async function fetchMonthModel(month) {
+    const today = todayBogota();
+    const { from, to } = monthRange(month);
+    const visibleTo = minIsoDate(to, today);
+    const days = from <= visibleTo ? eachDay(from, visibleTo) : [];
+    const [metricsRows, closureRows] = await Promise.all([
+      typeof deps.listDailyMetricsRange === 'function' ? deps.listDailyMetricsRange(from, visibleTo) : [],
+      typeof deps.listDailyClosuresRange === 'function' ? deps.listDailyClosuresRange(from, visibleTo) : []
     ]);
 
-    const sedesRows = (sedes || []).filter((row) => String(row?.estado || 'activo').trim().toLowerCase() !== 'inactivo');
-    const employeeRows = Array.isArray(employees) ? employees : [];
-    const superRows = Array.isArray(supernumerarios) ? supernumerarios : [];
-    const noveltyRows = Array.isArray(novedades) ? novedades : [];
+    return {
+      month,
+      today,
+      days,
+      metricsByDay: new Map((metricsRows || []).map((row) => [String(row.fecha || '').trim(), row])),
+      closuresByDay: new Map((closureRows || []).map((row) => [String(row.fecha || '').trim(), row]))
+    };
+  }
 
-    const attendanceByDay = groupByDay(attendanceRows);
-    const replacementsByDay = groupByDay(replacementRows);
+  function attachLiveSubscriptions(model) {
+    if (!model || !model.days.length) return;
+    if (!activeMonth.startsWith(model.today.slice(0, 7))) return;
 
-    return days.map((day) => {
-      const attendance = attendanceByDay.get(day) || [];
-      const replacementMap = new Map((replacementsByDay.get(day) || []).map((row) => [replacementRowKey(row), row]));
+    if (typeof deps.streamDailyMetricsByDate === 'function') {
+      unMetric = deps.streamDailyMetricsByDate(model.today, (row) => {
+        if (!activeModel || activeModel.month !== model.month) return;
+        if (row) activeModel.metricsByDay.set(model.today, row);
+        else activeModel.metricsByDay.delete(model.today);
+        renderModel(activeModel);
+      });
+    }
 
-      const planeados = sedesRows.reduce((sum, sede) => {
-        if (!isSedeScheduledForDate(sede, day)) return sum;
-        return sum + parseOperatorCount(sede?.numeroOperarios);
-      }, 0);
+    if (typeof deps.streamDailyClosures === 'function') {
+      unClosures = deps.streamDailyClosures((rows) => {
+        if (!activeModel || activeModel.month !== model.month) return;
+        const updated = new Map(activeModel.closuresByDay);
+        const monthPrefix = `${model.month}-`;
+        Array.isArray(rows) && rows.forEach((row) => {
+          const day = String(row?.fecha || '').trim();
+          if (!day.startsWith(monthPrefix)) return;
+          updated.set(day, row);
+        });
+        activeModel.closuresByDay = updated;
+        renderModel(activeModel);
+      });
+    }
+  }
 
-      const esperados = employeeRows.filter((emp) => {
-        if (!isEmployeeActiveForDate(emp, day, sedesRows)) return false;
-        return !isSupernumerarioEmployee(emp, superRows, day);
-      }).length;
+  function cleanupSubscriptions() {
+    try { unMetric?.(); } catch {}
+    try { unClosures?.(); } catch {}
+    unMetric = null;
+    unClosures = null;
+  }
 
-      const ausentismos = attendance.filter((row) => {
-        if (!requiresReplacement(row, noveltyRows)) return false;
-        const replacement = replacementMap.get(replacementRowKey(row)) || null;
-        const decision = String(replacement?.decision || '').trim().toLowerCase();
-        return !replacement || decision === 'ausentismo';
-      }).length;
+  function renderModel(model) {
+    const rows = buildDashboardRows(model);
+    const summary = summarizeRows(rows, model.today);
 
-      const pagados = attendance.filter((row) => isPaidNovelty(row)).length;
+    setText('#kClosedDays', String(summary.closedDays));
+    setText('#kTodayStatus', summary.todayStatus);
+    setText('#kPlanned', formatNumber(summary.planned));
+    setText('#kExpected', formatNumber(summary.expected));
+    setText('#kAbsenteeism', formatNumber(summary.absenteeism));
+    setText('#kPaid', formatNumber(summary.paid));
+    setText('#kNotContracted', formatNumber(summary.notContracted));
+    setText('#kAttendance', formatNumber(summary.attendance));
 
-      return {
-        fecha: day,
-        planeados,
-        contratados: esperados,
-        noContratados: Math.max(0, planeados - esperados),
-        ausentismos,
-        pagados
-      };
+    summaryBadge.textContent = summary.pendingPastDays > 0
+      ? `${summary.pendingPastDays} dia(s) historicos sin cierre quedaron fuera del consolidado`
+      : 'Historico totalmente consolidado';
+
+    tbody.replaceChildren(...rows.slice().reverse().map((row) => renderTableRow(row)));
+    renderChart(rows, model.month).catch((error) => {
+      console.error('No se pudo renderizar el dashboard:', error);
+      msg.textContent = `Error al renderizar grafico: ${error?.message || error}`;
     });
+
+    msg.textContent = summary.pendingPastDays > 0
+      ? `Dashboard actualizado. Fuente: cierres diarios + dia actual en vivo. Pendientes historicos: ${summary.pendingPastDays}.`
+      : 'Dashboard actualizado. Fuente estable: cierres diarios + dia actual en vivo si sigue abierto.';
   }
 
   async function renderChart(rows, month) {
@@ -141,54 +212,217 @@ export const Home = async (mount, deps = {}) => {
       ChartMod = await import('https://cdn.jsdelivr.net/npm/chart.js@4.4.1/+esm');
       ChartMod.Chart.register(...ChartMod.registerables);
     }
-    const canvas = qs('#chartPaid', ui);
+    const canvas = qs('#chartStableOps', ui);
     if (chart) chart.destroy();
+    const series = rows.filter((row) => row.includeInTotals);
     const { Chart } = ChartMod;
     chart = new Chart(canvas, {
       type: 'bar',
       data: {
-        labels: rows.map((row) => row.fecha.slice(8, 10)),
+        labels: series.map((row) => row.fecha.slice(8, 10)),
         datasets: [
-          { label: `Pagados (${month})`, data: rows.map((row) => row.pagados), backgroundColor: '#0ea5e9', stack: 'totales' },
-          { label: `Ausentismo (${month})`, data: rows.map((row) => row.ausentismos), backgroundColor: '#ef4444', stack: 'totales' },
-          { label: `No contratados (${month})`, data: rows.map((row) => row.noContratados), backgroundColor: '#f59e0b', stack: 'totales' },
+          {
+            label: `Pagados (${month})`,
+            data: series.map((row) => row.pagados),
+            backgroundColor: '#0f766e',
+            borderRadius: 6,
+            stack: 'totales'
+          },
+          {
+            label: `Ausentismos (${month})`,
+            data: series.map((row) => row.ausentismos),
+            backgroundColor: '#dc2626',
+            borderRadius: 6,
+            stack: 'totales'
+          },
+          {
+            label: `No contratados (${month})`,
+            data: series.map((row) => row.noContratados),
+            backgroundColor: '#f59e0b',
+            borderRadius: 6,
+            stack: 'totales'
+          },
           {
             type: 'line',
             label: `Planeados (${month})`,
-            data: rows.map((row) => row.planeados),
-            borderColor: '#1e3a8a',
+            data: series.map((row) => row.planeados),
+            borderColor: '#1d4ed8',
+            backgroundColor: '#1d4ed8',
             borderWidth: 2,
-            borderDash: [6, 4],
             pointRadius: 2,
-            pointHoverRadius: 3,
-            fill: false,
-            tension: 0.2
+            pointHoverRadius: 4,
+            tension: 0.25
+          },
+          {
+            type: 'line',
+            label: `Contratados (${month})`,
+            data: series.map((row) => row.contratados),
+            borderColor: '#7c3aed',
+            backgroundColor: '#7c3aed',
+            borderWidth: 2,
+            pointRadius: 2,
+            pointHoverRadius: 4,
+            tension: 0.25
           }
         ]
       },
       options: {
         responsive: true,
         maintainAspectRatio: false,
+        interaction: { intersect: false, mode: 'index' },
+        plugins: {
+          legend: { position: 'bottom' }
+        },
         scales: {
           x: { stacked: true },
-          y: { beginAtZero: true, ticks: { precision: 0 }, stacked: true }
+          y: { beginAtZero: true, stacked: true, ticks: { precision: 0 } }
         }
       }
     });
   }
+
+  function setText(selector, value) {
+    const target = qs(selector, ui);
+    if (target) target.textContent = value;
+  }
 };
 
-function statCard(label, id) {
-  return el('div', { className: 'perm-item' }, [
+function buildDashboardRows(model) {
+  return (model?.days || []).map((day) => {
+    const closure = model?.closuresByDay?.get(day) || null;
+    const metric = model?.metricsByDay?.get(day) || null;
+    const isToday = day === model?.today;
+
+    if (isClosedDay(closure)) {
+      return {
+        fecha: day,
+        planeados: Number(closure?.planeados || 0),
+        contratados: Number(closure?.contratados || 0),
+        ausentismos: Number(closure?.ausentismos || 0),
+        pagados: Number(closure?.pagados || 0),
+        noContratados: Number(closure?.noContratados || 0),
+        attendance: Number(metric?.attendanceCount || 0),
+        source: 'closed',
+        sourceLabel: 'Cerrado',
+        includeInTotals: true
+      };
+    }
+
+    if (isToday && metric) {
+      return {
+        fecha: day,
+        planeados: Number(metric?.planned || 0),
+        contratados: Number(metric?.expected || 0),
+        ausentismos: Number(metric?.absenteeism || 0),
+        pagados: Number(metric?.paidServices || 0),
+        noContratados: Number(metric?.noContracted || 0),
+        attendance: Number(metric?.attendanceCount || 0),
+        source: 'live',
+        sourceLabel: 'Hoy abierto',
+        includeInTotals: true
+      };
+    }
+
+    return {
+      fecha: day,
+      planeados: 0,
+      contratados: 0,
+      ausentismos: 0,
+      pagados: 0,
+      noContratados: 0,
+      attendance: 0,
+      source: isToday ? 'today_no_data' : 'pending',
+      sourceLabel: isToday ? 'Hoy sin datos' : 'Sin cierre',
+      includeInTotals: false
+    };
+  });
+}
+
+function summarizeRows(rows, today) {
+  const included = (rows || []).filter((row) => row.includeInTotals);
+  const todayRow = (rows || []).find((row) => row.fecha === today) || null;
+  const pendingPastDays = (rows || []).filter((row) => row.fecha < today && row.source === 'pending').length;
+  return {
+    closedDays: (rows || []).filter((row) => row.source === 'closed').length,
+    todayStatus: todayRow?.source === 'closed' ? 'Cerrado' : todayRow?.source === 'live' ? 'Abierto' : 'Sin datos',
+    planned: sumRows(included, 'planeados'),
+    expected: sumRows(included, 'contratados'),
+    absenteeism: sumRows(included, 'ausentismos'),
+    paid: sumRows(included, 'pagados'),
+    notContracted: sumRows(included, 'noContratados'),
+    attendance: sumRows(included, 'attendance'),
+    pendingPastDays
+  };
+}
+
+function renderTableRow(row) {
+  return el('tr', { 'data-day': row.fecha }, [
+    el('td', {}, [formatDateLabel(row.fecha)]),
+    el('td', {}, [sourceBadge(row)]),
+    el('td', {}, [formatNumber(row.planeados)]),
+    el('td', {}, [formatNumber(row.contratados)]),
+    el('td', {}, [formatNumber(row.ausentismos)]),
+    el('td', {}, [formatNumber(row.pagados)]),
+    el('td', {}, [formatNumber(row.noContratados)]),
+    el('td', {}, [formatNumber(row.attendance)])
+  ]);
+}
+
+function sourceBadge(row) {
+  const palette = {
+    closed: ['#dcfce7', '#166534'],
+    live: ['#dbeafe', '#1d4ed8'],
+    today_no_data: ['#e5e7eb', '#374151'],
+    pending: ['#fef3c7', '#b45309']
+  };
+  const [bg, fg] = palette[row?.source] || palette.pending;
+  return el('span', {
+    style: `display:inline-flex;align-items:center;gap:.35rem;padding:.2rem .55rem;border-radius:999px;background:${bg};color:${fg};font-weight:700;font-size:.8rem;`
+  }, [row?.sourceLabel || '-']);
+}
+
+function statCard(label, id, accent) {
+  return el('div', {
+    className: 'perm-item',
+    style: `border-top:4px solid ${accent}; min-height:108px; display:flex; align-items:center;`
+  }, [
     el('div', {}, [
-      el('div', { className: 'text-muted' }, [label]),
-      el('div', { id, style: 'font-size:1.45rem;font-weight:700;line-height:1.2;' }, ['0'])
+      el('div', { className: 'text-muted', style: 'font-size:.82rem; text-transform:uppercase; letter-spacing:.04em;' }, [label]),
+      el('div', { id, style: 'font-size:1.7rem;font-weight:800;line-height:1.1;margin-top:.2rem;' }, ['0'])
     ])
   ]);
 }
 
-function emptyRow(fecha) {
-  return { fecha, planeados: 0, contratados: 0, noContratados: 0, ausentismos: 0, pagados: 0 };
+function heroStyle() {
+  return [
+    'background:linear-gradient(135deg,#f8fafc 0%,#e0f2fe 52%,#ecfccb 100%)',
+    'border:1px solid #dbeafe',
+    'padding:1.25rem'
+  ].join(';');
+}
+
+function isClosedDay(row) {
+  if (!row) return false;
+  return row.locked === true || String(row.status || '').trim().toLowerCase() === 'closed';
+}
+
+function sumRows(rows, key) {
+  return (rows || []).reduce((sum, row) => sum + Number(row?.[key] || 0), 0);
+}
+
+function formatNumber(value) {
+  return new Intl.NumberFormat('es-CO').format(Number(value || 0));
+}
+
+function formatDateLabel(value) {
+  const iso = String(value || '').trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(iso)) return iso || '-';
+  const date = new Date(`${iso}T00:00:00Z`);
+  return new Intl.DateTimeFormat('es-CO', {
+    timeZone: 'America/Bogota',
+    month: 'short',
+    day: '2-digit'
+  }).format(date);
 }
 
 function monthRange(month) {
@@ -230,169 +464,4 @@ function shiftDay(day, delta) {
 
 function minIsoDate(left, right) {
   return left <= right ? left : right;
-}
-
-function groupByDay(rows) {
-  const map = new Map();
-  (Array.isArray(rows) ? rows : []).forEach((row) => {
-    const day = String(row?.fecha || '').trim();
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) return;
-    if (!map.has(day)) map.set(day, []);
-    map.get(day).push(row || {});
-  });
-  return map;
-}
-
-function snapshotFromStream(streamFn) {
-  if (typeof streamFn !== 'function') return Promise.resolve([]);
-  return new Promise((resolve) => {
-    let done = false;
-    let unsubscribe = null;
-    const finish = (rows) => {
-      if (done) return;
-      done = true;
-      try { unsubscribe?.(); } catch {}
-      resolve(Array.isArray(rows) ? rows : []);
-    };
-    try {
-      unsubscribe = streamFn((rows) => finish(rows));
-      setTimeout(() => finish([]), 4000);
-    } catch {
-      finish([]);
-    }
-  });
-}
-
-function replacementRowKey(row = {}) {
-  return `${String(row?.fecha || '').trim()}_${String(row?.empleadoId || row?.employeeId || '').trim()}`;
-}
-
-function attendanceNovedadCode(row = {}) {
-  const explicit = String(row?.novedadCodigo || '').trim();
-  if (explicit) return explicit;
-  const raw = String(row?.novedad || '').trim();
-  return /^\d+$/.test(raw) ? raw : '';
-}
-
-function normalize(text) {
-  return String(text || '')
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .toLowerCase();
-}
-
-function baseNovedadName(rawValue) {
-  const raw = String(rawValue || '').trim();
-  if (!raw) return '';
-  const noParens = raw.replace(/\s*\(.*\)\s*$/, '').trim();
-  if (/^OTRA\s+SEDE\s*:/i.test(noParens)) return 'OTRA SEDE';
-  return noParens;
-}
-
-function noveltyNeedsReplacement(row = {}, novedades = []) {
-  const code = attendanceNovedadCode(row);
-  if (['2', '3', '4', '5', '8'].includes(code)) return true;
-  if (['1', '7'].includes(code)) return false;
-
-  const base = normalize(baseNovedadName(row?.novedadNombre || row?.novedad || code));
-  if (!base) return false;
-  if (base.includes('incapacidad')) return true;
-  if (base.includes('accidente laboral')) return true;
-  if (base.includes('calamidad')) return true;
-  if (base.includes('permiso no remunerado')) return true;
-  if (base.includes('compensatorio')) return false;
-
-  const novelty = (novedades || []).find((item) => {
-    const name = normalize(item?.nombre);
-    const codeValue = normalize(item?.codigoNovedad || item?.codigo || '');
-    return (name && (name === base || name.includes(base) || base.includes(name))) || (codeValue && codeValue === base);
-  }) || null;
-  if (!novelty) return false;
-  const replacementFlag = normalize(novelty?.reemplazo);
-  return ['si', 'yes', 'true', '1', 'reemplazo'].includes(replacementFlag);
-}
-
-function requiresReplacement(row = {}, novedades = []) {
-  return noveltyNeedsReplacement(row, novedades);
-}
-
-function isPaidNovelty(row = {}) {
-  return ['1', '7'].includes(attendanceNovedadCode(row));
-}
-
-function isSedeScheduledForDate(sede, selectedDate) {
-  const iso = toISODate(selectedDate);
-  if (!iso || !sede) return false;
-  const [year, month, day] = iso.split('-').map(Number);
-  const weekday = new Date(Date.UTC(year, (month || 1) - 1, day || 1)).getUTCDay();
-  const jornada = String(sede?.jornada || 'lun_vie').trim().toLowerCase();
-  if (jornada === 'lun_dom') return true;
-  if (jornada === 'lun_sab') return weekday >= 1 && weekday <= 6;
-  return weekday >= 1 && weekday <= 5;
-}
-
-function parseOperatorCount(value) {
-  if (value == null) return 0;
-  if (typeof value === 'number') return Number.isFinite(value) ? Math.trunc(value) : 0;
-  const digits = String(value).replace(/[^\d]/g, '');
-  if (!digits) return 0;
-  const parsed = Number(digits);
-  return Number.isFinite(parsed) ? parsed : 0;
-}
-
-function isEmployeeActiveForDate(emp, selectedDate, sedes = []) {
-  const iso = toISODate(selectedDate);
-  if (!iso) return false;
-  const ingreso = toISODate(emp?.fechaIngreso);
-  if (ingreso && ingreso > iso) return false;
-  const retiro = toISODate(emp?.fechaRetiro);
-  if (String(emp?.estado || '').trim().toLowerCase() === 'inactivo') {
-    return Boolean(retiro && retiro >= iso);
-  }
-  if (retiro && retiro < iso) return false;
-  const sedeCodigo = String(emp?.sedeCodigo || emp?.sede_codigo || '').trim();
-  if (!sedeCodigo) return false;
-  const sede = (sedes || []).find((row) => String(row?.codigo || '').trim() === sedeCodigo) || null;
-  return isSedeScheduledForDate(sede, iso);
-}
-
-function isSupernumerarioEmployee(emp = {}, supernumerarios = [], selectedDate = '') {
-  const doc = String(emp?.documento || '').trim();
-  if (doc) {
-    return (supernumerarios || []).some((row) => isPersonActiveForDate(row, selectedDate) && String(row?.documento || '').trim() === doc);
-  }
-  const id = String(emp?.id || '').trim();
-  if (!id) return false;
-  return (supernumerarios || []).some((row) => isPersonActiveForDate(row, selectedDate) && String(row?.id || '').trim() === id);
-}
-
-function isPersonActiveForDate(person, selectedDate) {
-  const iso = toISODate(selectedDate);
-  if (!iso) return false;
-  if (String(person?.estado || '').trim().toLowerCase() === 'inactivo') return false;
-  const ingreso = toISODate(person?.fechaIngreso);
-  if (!ingreso || ingreso > iso) return false;
-  const retiro = toISODate(person?.fechaRetiro);
-  if (retiro && retiro < iso) return false;
-  return true;
-}
-
-function toISODate(value) {
-  if (!value) return null;
-  if (typeof value === 'string') {
-    const trimmed = value.trim();
-    if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) return trimmed;
-    const date = new Date(trimmed);
-    return Number.isNaN(date.getTime()) ? null : date.toISOString().slice(0, 10);
-  }
-  if (typeof value?.toDate === 'function') {
-    const date = value.toDate();
-    return Number.isNaN(date.getTime()) ? null : date.toISOString().slice(0, 10);
-  }
-  if (value instanceof Date) {
-    return Number.isNaN(value.getTime()) ? null : value.toISOString().slice(0, 10);
-  }
-  return null;
 }

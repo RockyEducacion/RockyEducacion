@@ -7,6 +7,9 @@ alter table public.profiles
   add column if not exists deleted_by_uid uuid references public.profiles(id) on delete set null,
   add column if not exists deleted_by_email text;
 
+alter table public.profiles
+  alter column role set default 'empleado';
+
 create table if not exists public.audit_logs (
   id uuid primary key default gen_random_uuid(),
   actor_uid uuid references public.profiles(id) on delete set null,
@@ -22,10 +25,44 @@ create table if not exists public.audit_logs (
 
 alter table public.audit_logs enable row level security;
 
+create or replace function public.is_admin_like()
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select exists (
+    select 1
+    from public.profiles p
+    where p.id = auth.uid()
+      and p.role in ('superadmin', 'admin')
+      and p.estado = 'activo'
+  );
+$$;
+
+create or replace function public.is_superadmin()
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select exists (
+    select 1
+    from public.profiles p
+    where p.id = auth.uid()
+      and p.role = 'superadmin'
+      and p.estado = 'activo'
+  );
+$$;
+
 create or replace function public.is_active_authenticated_user()
 returns boolean
 language sql
 stable
+security definer
+set search_path = public
 as $$
   select exists (
     select 1

@@ -84,6 +84,7 @@ function normalizeProfileRow(uid, data = {}) {
     email: String(data.email || '').trim().toLowerCase() || null,
     display_name: data.nombre || data.displayName || null,
     documento: data.documento || null,
+    role: data.role || 'empleado',
     estado: data.estado || 'activo',
     updated_at: new Date().toISOString()
   };

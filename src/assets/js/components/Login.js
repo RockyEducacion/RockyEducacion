@@ -101,7 +101,7 @@ export const Login = (mount, deps = {}) => {
             renderTab();
             return;
           }
-          qs('#msg', ui).textContent = 'Cuenta creada. Revisa tu correo si aplica y luego inicia sesion. Comunicate con el administrador para que te asigne los permisos correspondientes.';
+          qs('#msg', ui).textContent = 'Cuenta creada. Inicia sesion y comunicate con el administrador para que te asigne los permisos correspondientes.';
           currentTab = 'login';
           renderTab();
         } catch (e) {
