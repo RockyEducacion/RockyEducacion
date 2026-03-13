@@ -103,6 +103,7 @@ create table if not exists public.daily_closures (
   locked boolean not null default true,
   planeados integer not null default 0,
   contratados integer not null default 0,
+  asistencias integer not null default 0,
   ausentismos integer not null default 0,
   pagados integer not null default 0,
   no_contratados integer not null default 0,

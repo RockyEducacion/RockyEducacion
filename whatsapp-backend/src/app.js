@@ -688,12 +688,20 @@ async function registerNovelty(phone, employee, novelty, selectedSede = null, in
 
 async function recomputeDailyMetrics(date) {
   const day = String(date || '').trim();
-  const [{ data: attendance, error: attendanceError }, { data: replacements, error: replacementsError }, sedesRows, employeesRows, cargosRows] = await Promise.all([
+  const [
+    { data: attendance, error: attendanceError },
+    { data: replacements, error: replacementsError },
+    sedesRows,
+    employeesRows,
+    cargosRows,
+    novedadesRows
+  ] = await Promise.all([
     supabaseAdmin.from('attendance').select('*').eq('fecha', day),
     supabaseAdmin.from('import_replacements').select('*').eq('fecha', day),
     selectAllRows('sedes'),
     selectAllRows('employees'),
-    selectAllRows('cargos', 'codigo, alineacion_crud, nombre')
+    selectAllRows('cargos', 'codigo, alineacion_crud, nombre'),
+    selectAllRows('novedades', 'codigo, codigo_novedad, nombre, reemplazo')
   ]);
   if (attendanceError) throw attendanceError;
   if (replacementsError) throw replacementsError;
@@ -702,7 +710,12 @@ async function recomputeDailyMetrics(date) {
   const repRows = Array.isArray(replacements) ? replacements : [];
   const sedes = (sedesRows || []).filter((row) => String(row?.estado || 'activo').trim().toLowerCase() !== 'inactivo');
   const cargoMap = new Map((cargosRows || []).map((row) => [String(row?.codigo || '').trim(), row]));
-  const expected = (employeesRows || []).filter((emp) => {
+  const replacementRules = buildNovedadReplacementRules(novedadesRows || []);
+  const replacementMap = new Map(repRows.map((row) => [metricReplacementKey({
+    fecha: row?.fecha,
+    employeeId: row?.empleado_id || row?.employee_id
+  }), row]));
+  const fallbackExpected = (employeesRows || []).filter((emp) => {
     if (String(emp?.estado || '').trim().toLowerCase() !== 'activo') return false;
     const sedeCodigo = String(emp?.sede_codigo || '').trim();
     const sede = sedes.find((row) => String(row?.codigo || '').trim() === sedeCodigo) || null;
@@ -714,11 +727,11 @@ async function recomputeDailyMetrics(date) {
     const count = Number(sede?.numero_operarios ?? 0);
     return sum + (Number.isFinite(count) && count > 0 ? count : 0);
   }, 0);
+  const expected = fallbackExpected;
   const uniqueDocs = new Set(attRows.map((row) => String(row?.documento || row?.empleado_id || '').trim()).filter(Boolean));
-  const absenteeism = repRows.filter((row) => String(row?.decision || '').trim().toLowerCase() === 'ausentismo').length;
-  const replaced = repRows.filter((row) => String(row?.decision || '').trim().toLowerCase() === 'reemplazo').length;
-  const attendanceCount = attRows.length;
-  const paidServices = Math.max(0, expected - absenteeism + replaced);
+  const attendanceCount = attRows.filter((row) => metricAttendanceCountsAsService(row, replacementMap, replacementRules)).length;
+  const absenteeism = attRows.filter((row) => metricAttendanceCountsAsAbsenteeism(row, replacementMap, replacementRules)).length;
+  const paidServices = attendanceCount;
   const noContracted = Math.max(0, planned - expected);
   const { error } = await supabaseAdmin.from('daily_metrics').upsert({
     id: day,
@@ -765,6 +778,71 @@ function isSedeScheduledForDate(sede, selectedDate) {
   return weekday >= 1 && weekday <= 5;
 }
 
+function buildNovedadReplacementRules(rows = []) {
+  const byCode = new Map();
+  const byName = new Map();
+  (Array.isArray(rows) ? rows : []).forEach((row) => {
+    const code = String(row?.codigo_novedad || row?.codigo || '').trim();
+    const name = normalizeMetricText(String(row?.nombre || '').trim());
+    const replacementRaw = normalizeMetricText(String(row?.reemplazo || '').trim());
+    const requiresReplacement = ['si', 'yes', 'true', '1', 'reemplazo'].includes(replacementRaw);
+    if (code) byCode.set(code, requiresReplacement);
+    if (name) byName.set(name, requiresReplacement);
+  });
+  return { byCode, byName };
+}
+
+function normalizeMetricText(value) {
+  return String(value || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase();
+}
+
+function baseMetricNovedadName(raw) {
+  return String(raw || '').replace(/\s*\(.*\)\s*$/, '').trim();
+}
+
+function metricAttendanceNovedadCode(row = {}) {
+  const explicit = String(row?.novedad_codigo || row?.novedadCodigo || '').trim();
+  if (explicit) return explicit;
+  const raw = String(row?.novedad || '').trim();
+  return /^\d+$/.test(raw) ? raw : '';
+}
+
+function metricAttendanceRequiresReplacement(row = {}, rules = {}) {
+  const code = metricAttendanceNovedadCode(row);
+  if (['1', '7'].includes(code)) return false;
+  if (['2', '3', '4', '5', '8'].includes(code)) return true;
+  if (code && rules?.byCode?.has(code)) return rules.byCode.get(code) === true;
+  const name = normalizeMetricText(baseMetricNovedadName(row?.novedad_nombre || row?.novedadNombre || row?.novedad || ''));
+  if (name && rules?.byName?.has(name)) return rules.byName.get(name) === true;
+  return false;
+}
+
+function metricReplacementKey(row = {}) {
+  return `${String(row?.fecha || '').trim()}_${String(row?.empleado_id || row?.empleadoId || row?.employee_id || row?.employeeId || '').trim()}`;
+}
+
+function metricAttendanceCountsAsService(row = {}, replacementMap = new Map(), rules = {}) {
+  if (!metricAttendanceRequiresReplacement(row, rules)) return true;
+  const replacement = replacementMap.get(metricReplacementKey(row)) || null;
+  if (!replacement) return false;
+  const decision = String(replacement?.decision || '').trim().toLowerCase();
+  const hasSupernumerario = Boolean(replacement?.supernumerario_id || replacement?.supernumerarioId || replacement?.supernumerario_documento || replacement?.supernumerarioDocumento);
+  return decision === 'reemplazo' && hasSupernumerario;
+}
+
+function metricAttendanceCountsAsAbsenteeism(row = {}, replacementMap = new Map(), rules = {}) {
+  if (!metricAttendanceRequiresReplacement(row, rules)) return false;
+  const replacement = replacementMap.get(metricReplacementKey(row)) || null;
+  if (!replacement) return true;
+  const decision = String(replacement?.decision || '').trim().toLowerCase();
+  return decision !== 'reemplazo';
+}
+
 function isEmployeeSupernumerarioByCargoMap(emp, cargoMap = new Map()) {
   const cargoCode = String(emp?.cargo_codigo || '').trim();
   const cargo = cargoMap.get(cargoCode) || null;
@@ -797,6 +875,8 @@ async function closeOperationDay(date) {
     return { date: day, status: 'already_closed' };
   }
 
+  await finalizePendingAbsenteeismForClosure(day);
+
   const { data: metricRow, error: metricError } = await supabaseAdmin
     .from('daily_metrics')
     .select('*')
@@ -814,8 +894,8 @@ async function closeOperationDay(date) {
       locked: true,
       planeados: Number(metrics?.planned || 0),
       contratados: Number(metrics?.expected || 0),
+      asistencias: Number(metrics?.attendance_count || metrics?.attendanceCount || 0),
       ausentismos: Number(metrics?.absenteeism || 0),
-      pagados: Number(metrics?.paid_services || metrics?.paidServices || 0),
       no_contratados: Number(metrics?.no_contracted || metrics?.noContracted || 0),
       closed_by_uid: null,
       closed_by_email: 'cron@system'
@@ -848,6 +928,70 @@ function assertCronAuthorized(req) {
   const expected = `Bearer ${config.cronSecret}`;
   if (header !== expected) {
     throw new Error('unauthorized_cron');
+  }
+}
+
+async function finalizePendingAbsenteeismForClosure(day) {
+  const [
+    { data: attendanceRows, error: attendanceError },
+    { data: replacementRows, error: replacementsError },
+    novedadesRows
+  ] = await Promise.all([
+    supabaseAdmin.from('attendance').select('*').eq('fecha', day),
+    supabaseAdmin.from('import_replacements').select('*').eq('fecha', day),
+    selectAllRows('novedades', 'codigo, codigo_novedad, nombre, reemplazo')
+  ]);
+  if (attendanceError) throw attendanceError;
+  if (replacementsError) throw replacementsError;
+
+  const replacementRules = buildNovedadReplacementRules(novedadesRows || []);
+  const replacementMap = new Map((replacementRows || []).map((row) => [metricReplacementKey(row), row]));
+
+  for (const row of attendanceRows || []) {
+    if (!metricAttendanceRequiresReplacement(row, replacementRules)) continue;
+    const key = metricReplacementKey(row);
+    const existing = replacementMap.get(key);
+    const existingDecision = String(existing?.decision || '').trim().toLowerCase();
+    if (existingDecision === 'reemplazo') continue;
+    if (existingDecision === 'ausentismo') continue;
+
+    const recordId = buildDailyRecordId(day, row?.documento, row?.empleado_id);
+    const { error: replacementError } = await supabaseAdmin.from('import_replacements').upsert({
+      id: recordId,
+      fecha_operacion: day,
+      fecha: day,
+      empleado_id: row?.empleado_id || null,
+      documento: row?.documento || null,
+      nombre: row?.nombre || null,
+      sede_codigo: row?.sede_codigo || null,
+      sede_nombre: row?.sede_nombre || null,
+      novedad_codigo: metricAttendanceNovedadCode(row) || null,
+      novedad_nombre: row?.novedad || null,
+      decision: 'ausentismo',
+      actor_uid: null,
+      actor_email: 'cron@system'
+    }, { onConflict: 'id' });
+    if (replacementError) throw replacementError;
+
+    const { error: absenteeismError } = await supabaseAdmin.from('absenteeism').upsert({
+      id: recordId,
+      fecha: day,
+      empleado_id: row?.empleado_id || null,
+      documento: row?.documento || null,
+      nombre: row?.nombre || null,
+      sede_codigo: row?.sede_codigo || null,
+      sede_nombre: row?.sede_nombre || null,
+      estado: 'confirmado',
+      created_by_uid: null,
+      created_by_email: 'cron@system'
+    }, { onConflict: 'id' });
+    if (absenteeismError) throw absenteeismError;
+
+    const { error: attendanceUpdateError } = await supabaseAdmin
+      .from('attendance')
+      .update({ novedad: '8' })
+      .eq('id', recordId);
+    if (attendanceUpdateError) throw attendanceUpdateError;
   }
 }
 async function findEmployeeByPhone(phone) {

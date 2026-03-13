@@ -31,9 +31,9 @@ export const WhatsAppLive = (mount, deps = {}) => {
           el('small', { className: 'wa-stat__label wa-stat__label--title' }, ['Resumen Operativo']),
           el('div', { className: 'wa-kpis' }, [
             kpiItem('Planeados', 'waPlanned', '0'),
-            kpiItem('Esperados', 'waExpected', '0'),
-            kpiItem('Registros', 'waUnique', '0'),
-            kpiItem('Faltantes', 'waMissing', '0')
+            kpiItem('Contratados', 'waExpected', '0'),
+            kpiItem('Asistencias', 'waUnique', '0'),
+            kpiItem('Ausentismos', 'waMissing', '0')
           ])
         ])
       ])
@@ -759,15 +759,31 @@ export const WhatsAppLive = (mount, deps = {}) => {
       return !isSupernumerarioEmployee(e);
     }).length;
     const plannedLocal = (sedes || []).reduce((acc, s) => {
+      if (!isSedeScheduledForDate(s, today)) return acc;
       const n = parseOperatorCount(s?.numeroOperarios);
       return acc + (Number.isFinite(n) && n > 0 ? n : 0);
     }, 0);
-    const missingLocal = Math.max(0, expectedLocal - registeredLocal);
     const replMap = new Map();
     (statsReplacements || []).forEach((r) => {
       const key = replacementRowKey(r);
       replMap.set(key, r);
     });
+    const attendanceLocal = dayRows.filter((row) => {
+      const key = replacementRowKey({ fecha: row.fecha, empleadoId: row.empleadoId });
+      const repl = replMap.get(key) || null;
+      const kind = classifyRow(row);
+      if (kind === 'replace_yes') {
+        return String(repl?.decision || '').trim() === 'reemplazo' && Boolean(repl?.supernumerarioId || repl?.supernumerarioDocumento || repl?.supernumerarioNombre);
+      }
+      return true;
+    }).length;
+    const absenteeismLocal = dayRows.filter((row) => {
+      const key = replacementRowKey({ fecha: row.fecha, empleadoId: row.empleadoId });
+      const repl = replMap.get(key) || null;
+      const kind = classifyRow(row);
+      if (kind !== 'replace_yes') return false;
+      return String(repl?.decision || '').trim() !== 'reemplazo';
+    }).length;
     const noveltyTotal = dayRows.filter((r) => canAssignReplacement(r)).length;
     const noveltyHandled = dayRows.filter((r) => {
       if (!canAssignReplacement(r)) return false;
@@ -781,8 +797,8 @@ export const WhatsAppLive = (mount, deps = {}) => {
     return {
       planned: plannedLocal,
       expected: expectedLocal,
-      unique: registeredLocal,
-      missing: missingLocal,
+      unique: attendanceLocal,
+      missing: absenteeismLocal,
       noveltyTotal,
       noveltyHandled,
       noveltyPending

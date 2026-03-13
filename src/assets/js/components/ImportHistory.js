@@ -15,7 +15,7 @@ export const ImportHistory = (mount, deps = {}) => {
           el('th', { 'data-sort': 'confirmedBy', style: 'cursor:pointer' }, ['Confirmado por']),
           el('th', { 'data-sort': 'planeados', style: 'cursor:pointer' }, ['Planeados']),
           el('th', { 'data-sort': 'contratados', style: 'cursor:pointer' }, ['Contratados']),
-          el('th', { 'data-sort': 'registrados', style: 'cursor:pointer' }, ['Registrados']),
+          el('th', { 'data-sort': 'registrados', style: 'cursor:pointer' }, ['Asistencias']),
           el('th', { 'data-sort': 'faltan', style: 'cursor:pointer' }, ['Faltan']),
           el('th', { 'data-sort': 'sobran', style: 'cursor:pointer' }, ['Sobran']),
           el('th', { 'data-sort': 'ausentismos', style: 'cursor:pointer' }, ['Ausentismos']),
@@ -65,9 +65,9 @@ export const ImportHistory = (mount, deps = {}) => {
       confirmedBy: String(raw.closedByEmail || raw.closedByUid || raw.source || '-').trim(),
       planeados: Number(raw.planeados || 0),
       contratados: Number(raw.contratados || 0),
-      registrados: Number(raw.registrados || 0),
-      faltan: Number(raw.faltan || 0),
-      sobran: Number(raw.sobran || 0),
+      registrados: Number(raw.asistencias || raw.registrados || 0),
+      faltan: Math.max(0, Number(raw.contratados || 0) - Number(raw.asistencias || raw.registrados || 0)),
+      sobran: 0,
       ausentismos: Number(raw.ausentismos || 0)
     };
   }

@@ -383,8 +383,8 @@ function mapDailyClosureRow(row = {}) {
     locked: row.locked === true,
     planeados: Number(row.planeados || 0),
     contratados: Number(row.contratados || 0),
+    asistencias: Number(row.asistencias || 0),
     ausentismos: Number(row.ausentismos || 0),
-    pagados: Number(row.pagados || 0),
     noContratados: Number(row.no_contratados || 0),
     closedByUid: row.closed_by_uid || null,
     closedByEmail: row.closed_by_email || null,
@@ -408,6 +408,64 @@ function mapIncapacidadRow(row = {}) {
     createdAt: row.created_at || null,
     updatedAt: row.updated_at || null
   };
+}
+
+function buildNovedadReplacementRules(rows = []) {
+  const byCode = new Map();
+  const byName = new Map();
+  (Array.isArray(rows) ? rows : []).forEach((row) => {
+    const code = String(row?.codigoNovedad || row?.codigo || '').trim();
+    const name = normalizeMetricText(String(row?.nombre || '').trim());
+    const replacementRaw = normalizeMetricText(String(row?.reemplazo || '').trim());
+    const requiresReplacement = ['si', 'yes', 'true', '1', 'reemplazo'].includes(replacementRaw);
+    if (code) byCode.set(code, requiresReplacement);
+    if (name) byName.set(name, requiresReplacement);
+  });
+  return { byCode, byName };
+}
+
+function normalizeMetricText(value) {
+  return String(value || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase();
+}
+
+function baseMetricNovedadName(raw) {
+  return String(raw || '').replace(/\s*\(.*\)\s*$/, '').trim();
+}
+
+function metricAttendanceRequiresReplacement(row = {}, rules = {}) {
+  const code = String(row?.novedadCodigo || (/^\d+$/.test(String(row?.novedad || '').trim()) ? String(row?.novedad || '').trim() : '')).trim();
+  if (['1', '7'].includes(code)) return false;
+  if (['2', '3', '4', '5', '8'].includes(code)) return true;
+  if (code && rules?.byCode?.has(code)) return rules.byCode.get(code) === true;
+  const name = normalizeMetricText(baseMetricNovedadName(row?.novedadNombre || row?.novedad || ''));
+  if (name && rules?.byName?.has(name)) return rules.byName.get(name) === true;
+  return false;
+}
+
+function metricReplacementKey(row = {}) {
+  return `${String(row?.fecha || '').trim()}_${String(row?.empleadoId || row?.employeeId || '').trim()}`;
+}
+
+function metricAttendanceCountsAsService(row = {}, replacementMap = new Map(), rules = {}) {
+  if (!metricAttendanceRequiresReplacement(row, rules)) return true;
+  const replacement = replacementMap.get(metricReplacementKey(row)) || null;
+  if (!replacement) return false;
+  const decision = String(replacement?.decision || '').trim().toLowerCase();
+  const hasSupernumerario = Boolean(replacement?.supernumerarioId || replacement?.supernumerarioDocumento || replacement?.supernumerarioNombre);
+  return decision === 'reemplazo' && hasSupernumerario;
+}
+
+function metricAttendanceCountsAsAbsenteeism(row = {}, replacementMap = new Map(), rules = {}) {
+  if (!metricAttendanceRequiresReplacement(row, rules)) return false;
+  const replacement = replacementMap.get(metricReplacementKey(row)) || null;
+  if (!replacement) return true;
+  const decision = String(replacement?.decision || '').trim().toLowerCase();
+  return decision !== 'reemplazo';
 }
 
 async function getCurrentAuditFields() {
@@ -586,19 +644,22 @@ async function upsertSupervisorProfileFromEmployee(employee, override = {}) {
 async function recomputeDailyMetrics(fecha) {
   const day = String(fecha || '').trim();
   if (!day) return null;
-  const [{ data: attendance }, { data: replacements }, { data: closures }, sedesRows, employeesRows, cargosRows] = await Promise.all([
+  const [{ data: attendance }, { data: replacements }, { data: closures }, sedesRows, employeesRows, cargosRows, novedadesRows] = await Promise.all([
     supabase.from('attendance').select('*').eq('fecha', day),
     supabase.from('import_replacements').select('*').eq('fecha', day),
     supabase.from('daily_closures').select('*').eq('fecha', day).maybeSingle(),
     selectAllRows('sedes', { select: '*' }),
     selectAllRows('employees', { select: '*' }),
-    selectAllRows('cargos', { select: 'codigo, alineacion_crud, nombre' })
+    selectAllRows('cargos', { select: 'codigo, alineacion_crud, nombre' }),
+    selectAllRows('novedades', { select: 'codigo, codigo_novedad, nombre, reemplazo' })
   ]);
   const attRows = (attendance || []).map(mapAttendanceRow);
   const repRows = (replacements || []).map(mapImportReplacementRow);
   const sedes = (sedesRows || []).filter((s) => String(s?.estado || 'activo').trim().toLowerCase() !== 'inactivo');
   const cargoMap = new Map((cargosRows || []).map((row) => [String(row.codigo || '').trim(), row]));
-  const expected = (employeesRows || []).filter((emp) => {
+  const replacementRules = buildNovedadReplacementRules((novedadesRows || []).map(mapNovedadRow));
+  const replacementMap = new Map(repRows.map((row) => [metricReplacementKey(row), row]));
+  const fallbackExpected = (employeesRows || []).filter((emp) => {
     if (String(emp?.estado || '').trim().toLowerCase() !== 'activo') return false;
     const sedeCodigo = String(emp?.sedeCodigo || emp?.sede_codigo || '').trim();
     const sede = sedes.find((row) => String(row?.codigo || '').trim() === sedeCodigo) || null;
@@ -610,11 +671,11 @@ async function recomputeDailyMetrics(fecha) {
     const n = Number(sede?.numero_operarios ?? 0);
     return acc + (Number.isFinite(n) && n > 0 ? n : 0);
   }, 0);
+  const expected = fallbackExpected;
   const uniqueDocs = new Set(attRows.map((row) => String(row.documento || row.empleadoId || '')).filter(Boolean));
-  const absenteeism = repRows.filter((row) => row.decision === 'ausentismo').length;
-  const replaced = repRows.filter((row) => row.decision === 'reemplazo').length;
-  const attendanceCount = attRows.length;
-  const paidServices = Math.max(0, expected - absenteeism + replaced);
+  const attendanceCount = attRows.filter((row) => metricAttendanceCountsAsService(row, replacementMap, replacementRules)).length;
+  const absenteeism = attRows.filter((row) => metricAttendanceCountsAsAbsenteeism(row, replacementMap, replacementRules)).length;
+  const paidServices = attendanceCount;
   const noContracted = Math.max(0, planned - expected);
   const payload = {
     id: day,
@@ -2474,6 +2535,7 @@ export async function closeOperationDayManual(fecha) {
   if (await isOperationDayClosed(day)) {
     return { ok: true, results: [{ date: day, status: 'already_closed' }] };
   }
+  await finalizePendingAbsenteeismForClosure(day);
   const metrics = mapDailyMetricsRow((await recomputeDailyMetrics(day)) || {});
   const audit = await getCurrentAuditFields();
   const { error } = await supabase.from('daily_closures').upsert({
@@ -2483,8 +2545,8 @@ export async function closeOperationDayManual(fecha) {
     locked: true,
     planeados: metrics.planned || 0,
     contratados: metrics.expected || 0,
+    asistencias: metrics.attendanceCount || 0,
     ausentismos: metrics.absenteeism || 0,
-    pagados: metrics.paidServices || 0,
     no_contratados: metrics.noContracted || 0,
     closed_by_uid: audit.created_by_uid,
     closed_by_email: audit.created_by_email
@@ -2494,6 +2556,72 @@ export async function closeOperationDayManual(fecha) {
   await recomputeDailyMetrics(day);
   await notifyTableReload('daily_closures');
   return { ok: true, results: [{ date: day, status: 'closed' }] };
+}
+
+async function finalizePendingAbsenteeismForClosure(day) {
+  const audit = await getCurrentAuditFields();
+  const [{ data: attendanceRows, error: attendanceError }, { data: replacementRows, error: replacementsError }, novedadesRows] = await Promise.all([
+    supabase.from('attendance').select('*').eq('fecha', day),
+    supabase.from('import_replacements').select('*').eq('fecha', day),
+    selectAllRows('novedades', { select: 'codigo, codigo_novedad, nombre, reemplazo' })
+  ]);
+  if (attendanceError) throw attendanceError;
+  if (replacementsError) throw replacementsError;
+
+  const replacementRules = buildNovedadReplacementRules((novedadesRows || []).map(mapNovedadRow));
+  const replacementMap = new Map(((replacementRows || []).map((row) => {
+    const mapped = mapImportReplacementRow(row);
+    return [metricReplacementKey(mapped), mapped];
+  })));
+
+  for (const raw of attendanceRows || []) {
+    const row = mapAttendanceRow(raw);
+    if (!metricAttendanceRequiresReplacement(row, replacementRules)) continue;
+    const key = metricReplacementKey(row);
+    const existing = replacementMap.get(key);
+    if (existing && String(existing?.decision || '').trim().toLowerCase() !== 'reemplazo' && String(existing?.decision || '').trim()) {
+      continue;
+    }
+    if (existing && String(existing?.decision || '').trim().toLowerCase() === 'reemplazo') continue;
+
+    const recordId = buildDailyRecordId(day, row.documento, row.empleadoId);
+    const { error: replacementError } = await supabase.from('import_replacements').upsert({
+      id: recordId,
+      fecha_operacion: day,
+      fecha: day,
+      empleado_id: row.empleadoId || null,
+      documento: row.documento || null,
+      nombre: row.nombre || null,
+      sede_codigo: row.sedeCodigo || null,
+      sede_nombre: row.sedeNombre || null,
+      novedad_codigo: row.novedadCodigo || null,
+      novedad_nombre: row.novedadNombre || row.novedad || null,
+      decision: 'ausentismo',
+      actor_uid: audit.created_by_uid,
+      actor_email: audit.created_by_email
+    }, { onConflict: 'id' });
+    if (replacementError) throw replacementError;
+
+    const { error: absenteeismError } = await supabase.from('absenteeism').upsert({
+      id: recordId,
+      fecha: day,
+      empleado_id: row.empleadoId || null,
+      documento: row.documento || null,
+      nombre: row.nombre || null,
+      sede_codigo: row.sedeCodigo || null,
+      sede_nombre: row.sedeNombre || null,
+      estado: 'confirmado',
+      created_by_uid: audit.created_by_uid,
+      created_by_email: audit.created_by_email
+    }, { onConflict: 'id' });
+    if (absenteeismError) throw absenteeismError;
+
+    const { error: attendanceUpdateError } = await supabase
+      .from('attendance')
+      .update({ novedad: '8' })
+      .eq('id', recordId);
+    if (attendanceUpdateError) throw attendanceUpdateError;
+  }
 }
 
 export { supabase };
