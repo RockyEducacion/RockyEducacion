@@ -908,6 +908,8 @@ async function closeOperationDay(date) {
     .eq('fecha', day);
   if (metricCloseError) throw metricCloseError;
 
+  await propagateIncapacitiesToNextDay(day);
+
   return { date: day, status: 'closed' };
 }
 
@@ -994,6 +996,116 @@ async function finalizePendingAbsenteeismForClosure(day) {
     if (attendanceUpdateError) throw attendanceUpdateError;
   }
 }
+
+function addDaysToIsoDate(value, days = 1) {
+  const iso = String(value || '').trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(iso)) return null;
+  const [year, month, day] = iso.split('-').map((n) => Number(n));
+  const utc = new Date(Date.UTC(year, (month || 1) - 1, day || 1));
+  utc.setUTCDate(utc.getUTCDate() + Number(days || 0));
+  const y = utc.getUTCFullYear();
+  const m = String(utc.getUTCMonth() + 1).padStart(2, '0');
+  const d = String(utc.getUTCDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
+async function isOperationDayClosed(day) {
+  const iso = String(day || '').trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(iso)) return false;
+  const { data, error } = await supabaseAdmin
+    .from('daily_closures')
+    .select('locked,status')
+    .eq('fecha', iso)
+    .maybeSingle();
+  if (error) throw error;
+  if (!data) return false;
+  return data.locked === true || String(data.status || '').trim().toLowerCase() === 'closed';
+}
+
+function incapacitySourceToNoveltyCode(source) {
+  const raw = String(source || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .trim()
+    .toLowerCase();
+  if (raw.includes('accidente laboral')) return '2';
+  if (raw.includes('enfermedad general')) return '3';
+  if (raw.includes('calamidad')) return '4';
+  if (raw.includes('licencia no remunerada')) return '5';
+  return '3';
+}
+
+async function propagateIncapacitiesToNextDay(day) {
+  const nextDay = addDaysToIsoDate(day, 1);
+  if (!nextDay) return;
+  if (await isOperationDayClosed(nextDay)) return;
+
+  const { data: incapRows, error: incapError } = await supabaseAdmin
+    .from('incapacitados')
+    .select('*')
+    .eq('estado', 'activo')
+    .lte('fecha_inicio', nextDay)
+    .gte('fecha_fin', nextDay);
+  if (incapError) throw incapError;
+
+  for (const incap of incapRows || []) {
+    const employeeId = incap?.employee_id || null;
+    if (!employeeId) continue;
+
+    const { data: employee, error: employeeError } = await supabaseAdmin
+      .from('employees')
+      .select('*')
+      .eq('id', employeeId)
+      .maybeSingle();
+    if (employeeError) throw employeeError;
+    if (!employee) continue;
+
+    const documento = normalizeDocument(employee?.documento);
+    if (!documento) continue;
+
+    const { data: existingAttendance, error: existingAttendanceError } = await supabaseAdmin
+      .from('attendance')
+      .select('id')
+      .eq('fecha', nextDay)
+      .eq('documento', documento)
+      .limit(1)
+      .maybeSingle();
+    if (existingAttendanceError) throw existingAttendanceError;
+    if (existingAttendance?.id) continue;
+
+    const noveltyCode = incapacitySourceToNoveltyCode(incap?.source);
+    const attendanceId = buildDailyRecordId(nextDay, documento, employee.id);
+    const { error: attendanceError } = await supabaseAdmin.from('attendance').upsert({
+      id: attendanceId,
+      fecha: nextDay,
+      empleado_id: employee.id,
+      documento,
+      nombre: employee.nombre || null,
+      sede_codigo: employee.sede_codigo || null,
+      sede_nombre: employee.sede_nombre || null,
+      asistio: false,
+      novedad: noveltyCode
+    }, { onConflict: 'id' });
+    if (attendanceError) throw attendanceError;
+
+    const { error: absenteeismError } = await supabaseAdmin.from('absenteeism').upsert({
+      id: attendanceId,
+      fecha: nextDay,
+      empleado_id: employee.id,
+      documento,
+      nombre: employee.nombre || null,
+      sede_codigo: employee.sede_codigo || null,
+      sede_nombre: employee.sede_nombre || null,
+      estado: 'programado_incapacidad',
+      created_by_uid: null,
+      created_by_email: 'cron@system'
+    }, { onConflict: 'id' });
+    if (absenteeismError) throw absenteeismError;
+  }
+
+  await recomputeDailyMetrics(nextDay);
+}
+
 async function findEmployeeByPhone(phone) {
   const normalized = normalizePhone(phone);
   if (!normalized) return null;

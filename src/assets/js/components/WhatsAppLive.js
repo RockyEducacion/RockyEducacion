@@ -3,6 +3,7 @@ import { showInfoModal } from '../utils/infoModal.js';
 
 export const WhatsAppLive = (mount, deps = {}) => {
   const today = todayBogota();
+  const closureDay = addDaysToIsoDate(today, -1) || today;
   const ui = el('section', { className: 'main-card' }, [
     el('section', { className: 'wa-header' }, [
       el('div', { className: 'wa-header__left' }, [
@@ -904,13 +905,13 @@ export const WhatsAppLive = (mount, deps = {}) => {
       msg.textContent = 'Cierre manual no disponible en este entorno.';
       return;
     }
-    const alreadyClosed = await deps.isOperationDayClosed?.(today);
+    const alreadyClosed = await deps.isOperationDayClosed?.(closureDay);
     if (alreadyClosed) {
-      msg.textContent = `La fecha ${today} ya esta cerrada.`;
+      msg.textContent = `La fecha ${closureDay} ya esta cerrada.`;
       return;
     }
     const ok = globalThis.confirm?.(
-      `Se cerrara el dia ${today}. Este cierre bloquea cambios posteriores para esa fecha. Deseas continuar?`
+      `Se cerrara el dia ${closureDay}. Este cierre bloquea cambios posteriores para esa fecha. Deseas continuar?`
     );
     if (!ok) return;
     btnManualClose.disabled = true;
@@ -918,11 +919,11 @@ export const WhatsAppLive = (mount, deps = {}) => {
     btnManualClose.textContent = 'Cerrando...';
     msg.textContent = 'Ejecutando cierre diario manual...';
     try {
-      const res = await deps.closeOperationDayManual(today);
+      const res = await deps.closeOperationDayManual(closureDay);
       const r = Array.isArray(res?.results) ? res.results[0] : null;
       const status = String(r?.status || 'ok').trim();
       if (status === 'closed' || status === 'already_closed') {
-        msg.textContent = `Consulta OK. Cierre diario ${status === 'closed' ? 'realizado' : 'ya existente'} para ${today}.`;
+        msg.textContent = `Consulta OK. Cierre diario ${status === 'closed' ? 'realizado' : 'ya existente'} para ${closureDay}.`;
       } else {
         msg.textContent = `Cierre ejecutado con estado: ${status}.`;
       }
@@ -1086,6 +1087,18 @@ function todayBogota() {
     day: '2-digit'
   });
   return fmt.format(new Date());
+}
+
+function addDaysToIsoDate(value, days = 1) {
+  const iso = String(value || '').trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(iso)) return null;
+  const [year, month, day] = iso.split('-').map((n) => Number(n));
+  const utc = new Date(Date.UTC(year, (month || 1) - 1, day || 1));
+  utc.setUTCDate(utc.getUTCDate() + Number(days || 0));
+  const y = utc.getUTCFullYear();
+  const m = String(utc.getUTCMonth() + 1).padStart(2, '0');
+  const d = String(utc.getUTCDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
 }
 
 function parseOperatorCount(value) {
