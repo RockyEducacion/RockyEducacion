@@ -7,34 +7,48 @@ export const WhatsAppLive = (mount, deps = {}) => {
   const ui = el('section', { className: 'main-card' }, [
     el('section', { className: 'wa-header' }, [
       el('div', { className: 'wa-header__left' }, [
-        el('h2', {}, ['Registro Diario']),
-        el('div', { className: 'wa-filters' }, [
-          el('div', { className: 'wa-field' }, [
-            el('label', { className: 'label' }, ['Fecha']),
-            el('input', { className: 'input wa-input', type: 'date', value: today, disabled: true })
+        el('div', { className: 'wa-header__top' }, [
+          el('h2', {}, ['Registro Diario']),
+          el('div', { className: 'wa-date-pill' }, [
+            el('span', { className: 'wa-date-pill__label' }, ['Fecha']),
+            el('strong', { className: 'wa-date-pill__value' }, [today])
+          ])
+        ]),
+        el('div', { className: 'wa-filters wa-filters--wide' }, [
+          el('div', { className: 'wa-field wa-field--search' }, [
+            el('label', { className: 'label' }, ['Buscar']),
+            el('input', { id: 'waSearch', className: 'input wa-input', placeholder: 'Cedula, nombre, novedad o reemplazo...' })
           ]),
-          el('div', { style: 'display:grid;grid-template-columns:minmax(0,1fr) minmax(220px,.8fr);gap:.6rem;align-items:end;min-width:0;' }, [
-            el('div', { className: 'wa-field wa-field--search' }, [
-              el('label', { className: 'label' }, ['Buscar']),
-              el('input', { id: 'waSearch', className: 'input wa-input', placeholder: 'Cedula, nombre, novedad o reemplazo...' })
-            ]),
-            el('div', { className: 'wa-field' }, [
-              el('label', { className: 'label' }, ['Filtro']),
-              el('select', { id: 'waNoveltyFilter', className: 'input wa-input' }, [
-                el('option', { value: 'all' }, ['Todas'])
-              ])
+          el('div', { className: 'wa-field' }, [
+            el('label', { className: 'label' }, ['Filtro']),
+            el('select', { id: 'waNoveltyFilter', className: 'input wa-input' }, [
+              el('option', { value: 'all' }, ['Todas'])
             ])
           ])
         ])
       ]),
-      el('div', { className: 'wa-stats wa-stats--summary' }, [
-        el('article', { className: 'wa-stat card wa-stat--wide' }, [
-          el('small', { className: 'wa-stat__label wa-stat__label--title' }, ['Resumen Operativo']),
-          el('div', { className: 'wa-kpis' }, [
-            kpiItem('Planeados', 'waPlanned', '0'),
-            kpiItem('Contratados', 'waExpected', '0'),
-            kpiItem('Asistencias', 'waUnique', '0'),
-            kpiItem('Ausentismos', 'waMissing', '0')
+      el('div', { className: 'wa-header__right' }, [
+        el('div', { className: 'wa-stats wa-stats--summary wa-stats--summary-full' }, [
+          el('article', { className: 'wa-stat card wa-stat--wide wa-stat--summary-compact' }, [
+            el('small', { className: 'wa-stat__label wa-stat__label--title' }, ['Resumen Operativo']),
+            el('div', { className: 'wa-summary-groups' }, [
+              el('div', { className: 'wa-summary-group' }, [
+                el('small', { className: 'text-muted wa-summary-group__title' }, ['Planeacion']),
+                el('div', { className: 'wa-kpis wa-kpis--compact wa-kpis--three' }, [
+                  kpiItem('Planeados', 'waPlanned', '0'),
+                  kpiItem('Contratados', 'waExpected', '0'),
+                  kpiItem('Registros', 'waRegistered', '0')
+                ])
+              ]),
+              el('div', { className: 'wa-summary-group' }, [
+                el('small', { className: 'text-muted wa-summary-group__title' }, ['Operacion']),
+                el('div', { className: 'wa-kpis wa-kpis--compact wa-kpis--three' }, [
+                  kpiItem('Asistencias', 'waUnique', '0'),
+                  kpiItem('Pendientes', 'waPending', '0'),
+                  kpiItem('Ausentismo', 'waMissing', '0')
+                ])
+              ])
+            ])
           ])
         ])
       ])
@@ -109,6 +123,7 @@ export const WhatsAppLive = (mount, deps = {}) => {
   let unDailyMetrics = null;
   let unDashboardAttendance = null;
   let unDashboardReplacements = null;
+  let refreshTimer = null;
   let sortKey = 'hora';
   let sortDir = -1;
   let usingDashboardDocs = false;
@@ -379,6 +394,38 @@ export const WhatsAppLive = (mount, deps = {}) => {
     }
   }
 
+  async function refreshCurrentDaySnapshot({ silent = true } = {}) {
+    if (!deps.listAttendanceRange && !deps.listImportReplacementsRange) return;
+    if (!silent) msg.textContent = 'Actualizando registro diario...';
+    try {
+      const [att, repl] = await Promise.all([
+        deps.listAttendanceRange?.(today, today) || [],
+        deps.listImportReplacementsRange?.(today, today) || []
+      ]);
+      attendance = att || [];
+      replacements = repl || [];
+      statsAttendance = attendance;
+      statsReplacements = replacements;
+      render();
+    } catch (err) {
+      if (!silent) msg.textContent = `Error cargando registro diario: ${err?.message || err}`;
+    }
+  }
+
+  function stopRefreshTimer() {
+    if (!refreshTimer) return;
+    clearInterval(refreshTimer);
+    refreshTimer = null;
+  }
+
+  function startRefreshTimer() {
+    stopRefreshTimer();
+    if (!deps.listAttendanceRange && !deps.listImportReplacementsRange) return;
+    refreshTimer = setInterval(() => {
+      refreshCurrentDaySnapshot({ silent: true });
+    }, 5000);
+  }
+
   function applyFilters(rows) {
     const term = String(searchInput.value || '').trim().toLowerCase();
     const selectedType = String(noveltyFilter?.value || 'all').trim();
@@ -578,9 +625,9 @@ export const WhatsAppLive = (mount, deps = {}) => {
         const novedadStyle = novedadTextStyleByClass(rowClass);
         const diasVal = incapacidadDaysForRow(r);
         const diasTxt = diasVal != null ? String(diasVal) : '-';
+        const replacementText = displayReplacementText(r, repl, rowClass, opts);
 
         if (isSuperRow) {
-          const sedeTxt = sedeNameByCode(r.sedeCodigo, r.sedeNombre || '');
           return el('tr', { style: rowStyleByClass(rowClass) }, [
             el('td', {}, [r.fecha || '-']),
             el('td', {}, [r.hora || '-']),
@@ -588,7 +635,7 @@ export const WhatsAppLive = (mount, deps = {}) => {
             el('td', {}, [r.nombre || '-']),
             el('td', {}, [el('span', { style: novedadStyle }, [novedadText])]),
             el('td', {}, [diasTxt]),
-            el('td', {}, [el('span', { style: 'color:#1d4ed8;' }, [`REEMPLAZO EN SEDE: ${sedeTxt}`])]),
+            el('td', {}, [el('span', { style: 'color:#1d4ed8;' }, [replacementText])]),
             el('td', {}, [infoButtonForRow(r)])
           ]);
         }
@@ -601,7 +648,7 @@ export const WhatsAppLive = (mount, deps = {}) => {
             el('td', {}, [r.nombre || '-']),
             el('td', {}, [el('span', { style: novedadStyle }, [novedadText])]),
             el('td', {}, [diasTxt]),
-            el('td', {}, [el('span', { className: 'text-muted' }, ['No aplica'])]),
+            el('td', {}, [el('span', { className: 'text-muted' }, [replacementText])]),
             el('td', {}, [infoButtonForRow(r)])
           ]);
         }
@@ -614,15 +661,12 @@ export const WhatsAppLive = (mount, deps = {}) => {
             el('td', {}, [r.nombre || '-']),
             el('td', {}, [el('span', { style: novedadStyle }, [novedadText])]),
             el('td', {}, [diasTxt]),
-            el('td', {}, [el('span', { style: 'color:#b91c1c;' }, ['Ausentismo confirmado'])]),
+            el('td', {}, [el('span', { style: 'color:#b91c1c;' }, [replacementText])]),
             el('td', {}, [infoButtonForRow(r)])
           ]);
         }
 
         if (repl && String(repl.decision || '').trim() === 'reemplazo') {
-          const repName = String(repl.supernumerarioNombre || '').trim();
-          const repDoc = String(repl.supernumerarioDocumento || '').trim();
-          const repTxt = repName && repDoc ? `${repName} (${repDoc})` : repName || repDoc || 'Reemplazo confirmado';
           return el('tr', { style: rowStyleByClass(rowClass) }, [
             el('td', {}, [r.fecha || '-']),
             el('td', {}, [r.hora || '-']),
@@ -630,7 +674,7 @@ export const WhatsAppLive = (mount, deps = {}) => {
             el('td', {}, [r.nombre || '-']),
             el('td', {}, [el('span', { style: novedadStyle }, [novedadText])]),
             el('td', {}, [diasTxt]),
-            el('td', {}, [el('span', { style: 'color:#15803d;' }, [repTxt])]),
+            el('td', {}, [el('span', { style: 'color:#15803d;' }, [replacementText])]),
             el('td', {}, [infoButtonForRow(r)])
           ]);
         }
@@ -695,7 +739,9 @@ export const WhatsAppLive = (mount, deps = {}) => {
 
     qs('#waPlanned', ui).textContent = String(stats.planned);
     qs('#waExpected', ui).textContent = String(stats.expected);
+    qs('#waRegistered', ui).textContent = String(stats.registered);
     qs('#waUnique', ui).textContent = String(stats.unique);
+    qs('#waPending', ui).textContent = String(stats.pending);
     qs('#waMissing', ui).textContent = String(stats.missing);
     qs('#waNoveltyTotal', ui).textContent = String(stats.noveltyTotal);
     qs('#waNoveltyHandled', ui).textContent = String(stats.noveltyHandled);
@@ -734,10 +780,32 @@ export const WhatsAppLive = (mount, deps = {}) => {
     if (key === 'novedad') return String(displayNovedad(row) || row.novedadNombre || row.novedad || '').toLowerCase();
     if (key === 'dias') return Number(incapacidadDaysForRow(row) || 0);
     if (key === 'reemplazo') {
-      const repl = replMap.get(replacementRowKey(row)) || {};
-      return String(repl.supernumerarioNombre || repl.supernumerarioDocumento || repl.decision || '').toLowerCase();
+      const repl = replMap.get(replacementRowKey(row)) || null;
+      const rowClass = classifyRow(row);
+      const opts = canAssignReplacement(row) ? optionsForRow(row) : [];
+      return normalize(displayReplacementText(row, repl, rowClass, opts));
     }
     return '';
+  }
+
+  function displayReplacementText(row, repl = null, rowClass = classifyRow(row), options = []) {
+    if (rowClass === 'super_replacement') {
+      const sedeTxt = sedeNameByCode(row.sedeCodigo, row.sedeNombre || '');
+      return `REEMPLAZO EN SEDE: ${sedeTxt}`;
+    }
+    if (!canAssignReplacement(row)) return 'No aplica';
+
+    const decision = String(repl?.decision || '').trim().toLowerCase();
+    if (decision === 'ausentismo') return 'Ausentismo confirmado';
+    if (decision === 'reemplazo') {
+      const repName = String(repl?.supernumerarioNombre || '').trim();
+      const repDoc = String(repl?.supernumerarioDocumento || '').trim();
+      return repName && repDoc ? `${repName} (${repDoc})` : repName || repDoc || 'Reemplazo confirmado';
+    }
+
+    const first = Array.isArray(options) ? options[0] : null;
+    if (first) return `Pendiente: ${String(first.nombre || '').trim()} (${String(first.documento || '-').trim()})`;
+    return 'Confirmar ausentismo';
   }
 
   function updateSortIndicators() {
@@ -751,16 +819,28 @@ export const WhatsAppLive = (mount, deps = {}) => {
 
   function calculateStats() {
     const dayRows = (statsAttendance || []).filter((r) => String(r.fecha || '').trim() === today);
-    const registeredLocal = dayRows.length;
+    const activeSedes = (sedes || []).filter((s) => String(s?.estado || 'activo').trim().toLowerCase() !== 'inactivo');
     const expectedLocal = (employees || []).filter((e) => {
       if (String(e?.estado || '').trim().toLowerCase() !== 'activo') return false;
       const sedeCodigo = String(e?.sedeCodigo || '').trim();
-      const sede = (sedes || []).find((row) => String(row?.codigo || '').trim() === sedeCodigo) || null;
+      const sede = activeSedes.find((row) => String(row?.codigo || '').trim() === sedeCodigo) || null;
       if (!isSedeScheduledForDate(sede, today)) return false;
-      return !isSupernumerarioEmployee(e);
+      return !isSupernumerarioEmployee(e, supernumerarios);
     }).length;
-    const plannedLocal = (sedes || []).reduce((acc, s) => {
+    const expectedBase = (employees || []).filter((e) => {
+      if (String(e?.estado || '').trim().toLowerCase() !== 'activo') return false;
+      const sedeCodigo = String(e?.sedeCodigo || '').trim();
+      if (!sedeCodigo) return false;
+      const sede = activeSedes.find((row) => String(row?.codigo || '').trim() === sedeCodigo) || null;
+      if (!sede) return false;
+      return !isSupernumerarioEmployee(e, supernumerarios);
+    }).length;
+    const plannedLocal = activeSedes.reduce((acc, s) => {
       if (!isSedeScheduledForDate(s, today)) return acc;
+      const n = parseOperatorCount(s?.numeroOperarios);
+      return acc + (Number.isFinite(n) && n > 0 ? n : 0);
+    }, 0);
+    const plannedBase = activeSedes.reduce((acc, s) => {
       const n = parseOperatorCount(s?.numeroOperarios);
       return acc + (Number.isFinite(n) && n > 0 ? n : 0);
     }, 0);
@@ -769,7 +849,9 @@ export const WhatsAppLive = (mount, deps = {}) => {
       const key = replacementRowKey(r);
       replMap.set(key, r);
     });
+    const registeredLocal = dayRows.filter((row) => !isSupernumerarioAttendance(row)).length;
     const attendanceLocal = dayRows.filter((row) => {
+      if (isSupernumerarioAttendance(row)) return false;
       const key = replacementRowKey({ fecha: row.fecha, empleadoId: row.empleadoId });
       const repl = replMap.get(key) || null;
       const kind = classifyRow(row);
@@ -779,6 +861,7 @@ export const WhatsAppLive = (mount, deps = {}) => {
       return true;
     }).length;
     const absenteeismLocal = dayRows.filter((row) => {
+      if (isSupernumerarioAttendance(row)) return false;
       const key = replacementRowKey({ fecha: row.fecha, empleadoId: row.empleadoId });
       const repl = replMap.get(key) || null;
       const kind = classifyRow(row);
@@ -795,11 +878,21 @@ export const WhatsAppLive = (mount, deps = {}) => {
       return decision === 'reemplazo' || decision === 'ausentismo';
     }).length;
     const noveltyPending = Math.max(0, noveltyTotal - noveltyHandled);
+    const plannedMetric = dailyMetrics ? Number(dailyMetrics.planned || 0) : null;
+    const expectedMetric = dailyMetrics ? Number(dailyMetrics.expected || 0) : null;
+    const expected = expectedMetric != null && expectedMetric > 0 ? expectedMetric : (expectedLocal > 0 ? expectedLocal : expectedBase);
+    const registered = registeredLocal;
+    const attendance = Math.min(registered, attendanceLocal);
+    const absenteeism = Math.min(Math.max(0, registered - attendance), absenteeismLocal);
+    const pending = Math.max(0, expected - registered);
+
     return {
-      planned: plannedLocal,
-      expected: expectedLocal,
-      unique: attendanceLocal,
-      missing: absenteeismLocal,
+      planned: plannedMetric != null && plannedMetric > 0 ? plannedMetric : (plannedLocal > 0 ? plannedLocal : plannedBase),
+      expected,
+      registered,
+      unique: attendance,
+      pending,
+      missing: absenteeism,
       noveltyTotal,
       noveltyHandled,
       noveltyPending
@@ -812,6 +905,7 @@ export const WhatsAppLive = (mount, deps = {}) => {
     unDailyMetrics?.();
     unDashboardAttendance?.();
     unDashboardReplacements?.();
+    stopRefreshTimer();
     unDashboardAttendance = null;
     unDashboardReplacements = null;
     attendance = [];
@@ -855,20 +949,13 @@ export const WhatsAppLive = (mount, deps = {}) => {
         },
         () => {}
       );
+      startRefreshTimer();
+      refreshCurrentDaySnapshot({ silent: true });
       return;
     }
     if (modeHint) modeHint.textContent = 'Modo de respaldo';
-    Promise.all([
-      deps.listAttendanceRange?.(today, today) || [],
-      deps.listImportReplacementsRange?.(today, today) || []
-    ])
-      .then(([att, repl]) => {
-        attendance = att || [];
-        replacements = repl || [];
-        statsAttendance = attendance;
-        statsReplacements = replacements;
-        render();
-      })
+    startRefreshTimer();
+    refreshCurrentDaySnapshot({ silent: false })
       .catch((err) => {
         msg.textContent = `Error cargando registro diario: ${err?.message || err}`;
       });
@@ -981,6 +1068,7 @@ export const WhatsAppLive = (mount, deps = {}) => {
     unEmployees?.();
     unSedes?.();
     unIncapacitados?.();
+    stopRefreshTimer();
   };
 };
 
@@ -1034,14 +1122,14 @@ function isEmployeeActiveTodayStrict(emp, selectedDate) {
   return isPersonActiveForDate(emp, selectedDate);
 }
 
-function isSupernumerarioEmployee(emp) {
+function isSupernumerarioEmployee(emp, supernumerariosRows = []) {
   const doc = String(emp?.documento || '').trim();
   if (doc) {
-    return (supernumerarios || []).some((s) => String(s?.documento || '').trim() === doc);
+    return (supernumerariosRows || []).some((s) => String(s?.documento || '').trim() === doc);
   }
   const id = String(emp?.id || '').trim();
   if (!id) return false;
-  return (supernumerarios || []).some((s) => String(s?.id || '').trim() === id);
+  return (supernumerariosRows || []).some((s) => String(s?.id || '').trim() === id);
 }
 
 function isPersonActiveForDate(person, selectedDate) {

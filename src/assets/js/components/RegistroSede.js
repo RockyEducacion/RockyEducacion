@@ -106,6 +106,8 @@ export const RegistroSede = (mount, deps = {}) => {
   let replByEmpDate = new Map();
   let replacementSuperByDateDoc = new Set();
   let novedadRules = { byCode: new Map(), byName: new Map() };
+  let employeeByDoc = new Map();
+  let employeeById = new Map();
   let depSortKey = 'dependenciaNombre';
   let depSortDir = 1;
   let sedeSortKey = 'sedeNombre';
@@ -176,14 +178,15 @@ export const RegistroSede = (mount, deps = {}) => {
     const date = todayBogota();
     msg.textContent = 'Consultando...';
     try {
-      const [sedeStatus, attendance, replacements, sedes, novedades, employees, supernumerarios] = await Promise.all([
+      const [sedeStatus, attendance, replacements, sedes, novedades, employees, supernumerarios, dayClosed] = await Promise.all([
         deps.listSedeStatusRange?.(date, date) || [],
         deps.listAttendanceRange?.(date, date) || [],
         deps.listImportReplacementsRange?.(date, date) || [],
         loadSedesSnapshot(),
         loadNovedadesSnapshot(),
         loadEmployeesSnapshot(),
-        loadSupernumerariosSnapshot()
+        loadSupernumerariosSnapshot(),
+        deps.isOperationDayClosed?.(date) || false
       ]);
       novedadRules = buildNovedadReplacementRules(novedades || []);
 
@@ -208,25 +211,29 @@ export const RegistroSede = (mount, deps = {}) => {
         }
       });
 
-      attendanceByKey = new Map();
-      (attendance || []).forEach((a) => {
-        const key = `${a.fecha || ''}|${a.sedeCodigo || ''}`;
-        if (!attendanceByKey.has(key)) attendanceByKey.set(key, []);
-        attendanceByKey.get(key).push(a);
-      });
-
       const statusBySede = new Map((sedeStatus || []).map((s) => [String(s.sedeCodigo || ''), s]));
+      const activeSedeCodes = new Set(
+        (sedes || [])
+          .filter((s) => String(s.estado || 'activo').trim().toLowerCase() !== 'inactivo')
+          .map((s) => String(s.codigo || '').trim())
+          .filter(Boolean)
+      );
       const superDocs = new Set(
         (supernumerarios || [])
-          .filter((s) => isEmployeeExpectedForDate(s, date, sedes))
+          .filter((s) => isEmployeeAssignedToActiveSede(s, activeSedeCodes))
           .map((s) => String(s.documento || '').trim())
           .filter(Boolean)
       );
       const contratadosBySede = new Map();
       const contractedMapBySede = new Map();
+      employeeByDoc = new Map();
+      employeeById = new Map();
       (employees || []).forEach((e) => {
-        if (!isEmployeeExpectedForDate(e, date, sedes)) return;
         const doc = String(e.documento || '').trim();
+        const id = String(e.id || '').trim();
+        if (doc) employeeByDoc.set(doc, e);
+        if (id) employeeById.set(id, e);
+        if (!isEmployeeAssignedToActiveSede(e, activeSedeCodes)) return;
         if (doc && superDocs.has(doc)) return;
         const sedeCode = String(e.sedeCodigo || '').trim();
         if (!sedeCode) return;
@@ -241,12 +248,27 @@ export const RegistroSede = (mount, deps = {}) => {
       });
       contractedEmployeesBySede = new Map(Array.from(contractedMapBySede.entries()).map(([k, m]) => [k, Array.from(m.values())]));
 
+      attendanceByKey = new Map();
+      (attendance || []).forEach((a) => {
+        const effectiveSedeCode = resolveAttendanceSedeCode(a, {
+          dayClosed,
+          activeSedeCodes,
+          employeeByDoc,
+          employeeById,
+          superDocs
+        });
+        if (!effectiveSedeCode) return;
+        const key = `${a.fecha || ''}|${effectiveSedeCode}`;
+        if (!attendanceByKey.has(key)) attendanceByKey.set(key, []);
+        attendanceByKey.get(key).push({ ...a, sedeCodigo: effectiveSedeCode });
+      });
+
       sedeDailyRows = (sedes || [])
         .filter((s) => String(s.estado || 'activo').trim().toLowerCase() !== 'inactivo')
         .map((s) => {
           const sedeCode = String(s.codigo || '').trim();
           const key = `${date}|${sedeCode}`;
-          const atts = attendanceByKey.get(key) || [];
+          const atts = dedupeAttendanceRows(attendanceByKey.get(key) || []);
           const status = statusBySede.get(sedeCode) || {};
           const planeadosRaw = s.numeroOperarios ?? status.operariosPlaneados ?? status.operariosEsperados ?? 0;
           const planeados = parseOperatorCount(planeadosRaw);
@@ -440,7 +462,7 @@ export const RegistroSede = (mount, deps = {}) => {
     const detailRows = [];
     rows.forEach((d) => {
       const key = `${d.fecha}|${d.sedeCodigo}`;
-      const atts = attendanceByKey.get(key) || [];
+      const atts = dedupeAttendanceRows(attendanceByKey.get(key) || []);
       const contracted = contractedEmployeesBySede.get(d.sedeCodigo) || [];
       const registeredDocs = new Set(
         atts
@@ -481,7 +503,8 @@ export const RegistroSede = (mount, deps = {}) => {
         });
       });
 
-      const noContratados = Math.max(0, Number(d.planeados || 0) - Number(d.contratados || 0));
+      const effectiveCoverage = Math.max(Number(d.contratados || 0), atts.length);
+      const noContratados = Math.max(0, Number(d.planeados || 0) - effectiveCoverage);
       for (let i = 0; i < noContratados; i += 1) {
         detailRows.push({
           fecha: d.fecha,
@@ -621,6 +644,35 @@ function parseOperatorCount(value) {
   return Number.isFinite(n) ? n : 0;
 }
 
+function dedupeAttendanceRows(rows = []) {
+  const unique = new Map();
+  (Array.isArray(rows) ? rows : []).forEach((row, idx) => {
+    const documento = String(row?.documento || '').trim();
+    const empleadoId = String(row?.empleadoId || '').trim();
+    const fallback = `${String(row?.nombre || '').trim()}|${String(row?.sedeCodigo || '').trim()}|${String(row?.fecha || '').trim()}|${idx}`;
+    const key = documento || empleadoId || fallback;
+    if (!key) return;
+    if (!unique.has(key)) unique.set(key, row);
+  });
+  return Array.from(unique.values());
+}
+
+function resolveAttendanceSedeCode(attendanceRow = {}, context = {}) {
+  const rawSedeCode = String(attendanceRow?.sedeCodigo || '').trim();
+  if (context?.dayClosed) return rawSedeCode || null;
+
+  const documento = String(attendanceRow?.documento || '').trim();
+  if (documento && context?.superDocs?.has(documento)) return null;
+
+  const empleadoId = String(attendanceRow?.empleadoId || '').trim();
+  const employee = (empleadoId && context?.employeeById?.get(empleadoId))
+    || (documento && context?.employeeByDoc?.get(documento))
+    || null;
+  if (!employee) return null;
+  if (!isEmployeeAssignedToActiveSede(employee, context?.activeSedeCodes || new Set())) return null;
+  return String(employee?.sedeCodigo || '').trim() || null;
+}
+
 function isEmployeeExpectedForDate(emp, selectedDate, sedeRows = []) {
   if (!selectedDate) return false;
   const ingreso = toISODate(emp?.fechaIngreso);
@@ -634,6 +686,18 @@ function isEmployeeExpectedForDate(emp, selectedDate, sedeRows = []) {
   const sede = (sedeRows || []).find((row) => String(row?.codigo || '').trim() === sedeCodigo) || null;
   if (!isSedeScheduledForDate(sede, selectedDate)) return false;
   return true;
+}
+
+function isEmployeeAssignedToActiveSede(emp, activeSedeCodes = new Set()) {
+  const sedeCodigo = String(emp?.sedeCodigo || '').trim();
+  if (!sedeCodigo) return false;
+  if (activeSedeCodes.size && !activeSedeCodes.has(sedeCodigo)) return false;
+  const ingreso = toISODate(emp?.fechaIngreso);
+  if (!ingreso) return false;
+  const retiro = toISODate(emp?.fechaRetiro);
+  if (retiro) return false;
+  const estado = String(emp?.estado || '').trim().toLowerCase();
+  return estado !== 'inactivo';
 }
 
 function isSedeScheduledForDate(sede, selectedDate) {

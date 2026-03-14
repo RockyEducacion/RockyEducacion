@@ -3,7 +3,7 @@
   "crons": [
     {
       "path": "/api/cron/close-daily-operation",
-      "schedule": "59 4 * * *"
+      "schedule": "10 5 * * *"
     }
   ],
   "rewrites": [

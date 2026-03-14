@@ -61,7 +61,7 @@ app.get('/health', (_req, res) => {
 app.get(['/cron/close-daily-operation', '/api/cron/close-daily-operation'], async (req, res) => {
   try {
     assertCronAuthorized(req);
-    const day = currentDate();
+    const day = addDaysToIsoDate(currentDate(), -1) || currentDate();
     const result = await closeOperationDay(day);
     res.json({ ok: true, ...result });
   } catch (error) {
