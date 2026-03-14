@@ -850,13 +850,14 @@ async function insertEmployeeRecord({
   notifyEmployeesReload = true,
   historySource = 'create_employee'
 }) {
+  const normalizedPhone = normalizeStoredPhone(telefono);
   const { data, error } = await supabase
     .from('employees')
     .insert({
       codigo: codigo || null,
       documento: String(documento || '').trim() || null,
       nombre: nombre || null,
-      telefono: telefono || null,
+      telefono: normalizedPhone,
       cargo_codigo: cargoCodigo || null,
       cargo_nombre: cargoNombre || null,
       sede_codigo: sedeCodigo || null,
@@ -1615,7 +1616,7 @@ export async function createEmployee({ codigo, documento, nombre, telefono, carg
   return data.id;
 }
 
-function normalizeBulkPhone(value) {
+function normalizeStoredPhone(value) {
   const digits = String(value || '').replace(/\D+/g, '').trim();
   if (!digits) return null;
   if (digits.startsWith('57') && digits.length >= 12) return digits.slice(0, 12);
@@ -1682,7 +1683,7 @@ export async function createEmployeesBulk(rows = [], options = {}) {
         codigo,
         documento: String(row.documento || '').trim() || null,
         nombre: row.nombre || null,
-        telefono: normalizeBulkPhone(row.telefono),
+        telefono: normalizeStoredPhone(row.telefono),
         cargo_codigo: row.cargoCodigo || null,
         cargo_nombre: row.cargoNombre || null,
         sede_codigo: row.sedeCodigo || null,
@@ -1739,7 +1740,7 @@ export async function updateEmployee(id, data = {}) {
   if (typeof data.codigo === 'string') patch.codigo = data.codigo;
   if (typeof data.documento === 'string') patch.documento = data.documento;
   if (typeof data.nombre === 'string') patch.nombre = data.nombre;
-  if (typeof data.telefono === 'string') patch.telefono = data.telefono;
+  if (typeof data.telefono === 'string') patch.telefono = normalizeStoredPhone(data.telefono);
   if (typeof data.cargoCodigo === 'string') patch.cargo_codigo = data.cargoCodigo;
   if (typeof data.cargoNombre === 'string') patch.cargo_nombre = data.cargoNombre;
   if (typeof data.sedeCodigo === 'string') {
@@ -1902,7 +1903,7 @@ export async function createSupernumerariosBulk(rows = []) {
       codigo,
       documento: String(row.documento || '').trim(),
       nombre: row.nombre || null,
-      telefono: normalizeBulkPhone(row.telefono),
+      telefono: normalizeStoredPhone(row.telefono),
       cargoCodigo: row.cargoCodigo || null,
       cargoNombre: row.cargoNombre || null,
       sedeCodigo: row.sedeCodigo || null,
