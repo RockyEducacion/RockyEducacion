@@ -12,7 +12,8 @@ export const Reports = (mount, deps = {}) => {
 
   const reports = [
     { id: 'employees_current', title: 'Empleados', subtitle: 'Vigentes con cedula, nombre, cargo, zona, dependencia y sede' },
-    { id: 'daily_registry', title: 'Registro diario', subtitle: 'Fecha, hora, cedula, nombre, sede, novedad y reemplazo/ausentismo' }
+    { id: 'daily_registry', title: 'Registro diario', subtitle: 'Fecha, hora, cedula, nombre, sede, novedad y reemplazo/ausentismo' },
+    { id: 'hiring_by_sede', title: 'Contratacion por Sedes', subtitle: 'Dependencia, zona, sede, planeados y contratados por sede' }
   ];
 
   const cards = reports.map((r) =>
@@ -26,6 +27,7 @@ export const Reports = (mount, deps = {}) => {
   let selectedReportId = '';
   let generatedEmployeesRows = [];
   let generatedDailyRows = [];
+  let generatedHiringRows = [];
   let running = false;
   let selectedDailyDate = new Date().toISOString().slice(0, 10);
 
@@ -54,6 +56,14 @@ export const Reports = (mount, deps = {}) => {
     } catch {
       return '-';
     }
+  }
+
+  function normalizeCargoAlignment(value) {
+    const normalized = String(value || '').trim().toLowerCase();
+    if (['supernumerario', 'supervisor', 'empleado'].includes(normalized)) return normalized;
+    if (normalized.includes('supernumer')) return 'supernumerario';
+    if (normalized.includes('supervisor')) return 'supervisor';
+    return 'empleado';
   }
 
   function streamOnce(factory, timeoutMs = 15000) {
@@ -166,6 +176,44 @@ export const Reports = (mount, deps = {}) => {
     return out.map(({ _ts, ...row }) => row);
   }
 
+  function normalizeHiringRows(sedeRows = [], employeeRows = [], cargoRows = []) {
+    const cargoByCode = new Map((cargoRows || []).map((c) => [String(c.codigo || '').trim(), c]).filter(([k]) => Boolean(k)));
+    const todayISO = new Date().toISOString().slice(0, 10);
+    const contractedBySede = new Map();
+
+    (employeeRows || []).forEach((emp) => {
+      if (!isCurrentEmployee(emp, todayISO)) return;
+      const cargoCode = String(emp.cargoCodigo || '').trim();
+      const cargo = cargoByCode.get(cargoCode) || null;
+      const alignment = normalizeCargoAlignment(cargo?.alineacionCrud || cargo?.alineacion_crud || emp.cargoNombre || '');
+      if (alignment === 'supernumerario') return;
+      const sedeCode = String(emp.sedeCodigo || '').trim();
+      if (!sedeCode) return;
+      contractedBySede.set(sedeCode, (contractedBySede.get(sedeCode) || 0) + 1);
+    });
+
+    return (sedeRows || [])
+      .filter((sede) => String(sede?.estado || 'activo').trim().toLowerCase() !== 'inactivo')
+      .map((sede) => {
+        const sedeCode = String(sede.codigo || '').trim();
+        const planned = Number(sede.numeroOperarios ?? 0);
+        return {
+          dependencia: String(sede.dependenciaNombre || sede.dependenciaCodigo || '-').trim() || '-',
+          zona: String(sede.zonaNombre || sede.zonaCodigo || '-').trim() || '-',
+          sede: String(sede.nombre || sede.codigo || '-').trim() || '-',
+          empleadosPlaneados: Number.isFinite(planned) && planned > 0 ? planned : 0,
+          empleadosContratados: Number(contractedBySede.get(sedeCode) || 0)
+        };
+      })
+      .sort((a, b) => {
+        const byDependency = String(a.dependencia || '').localeCompare(String(b.dependencia || ''));
+        if (byDependency !== 0) return byDependency;
+        const byZone = String(a.zona || '').localeCompare(String(b.zona || ''));
+        if (byZone !== 0) return byZone;
+        return String(a.sede || '').localeCompare(String(b.sede || ''));
+      });
+  }
+
   function renderEmployeesRows(rows = []) {
     if (!rows.length) return [el('tr', {}, [el('td', { colSpan: 6, className: 'text-muted' }, ['Sin empleados vigentes para mostrar.'])])];
     return rows.map((r) => el('tr', {}, [el('td', {}, [r.cedula]), el('td', {}, [r.nombre]), el('td', {}, [r.cargo]), el('td', {}, [r.zona]), el('td', {}, [r.dependencia]), el('td', {}, [r.sede])]));
@@ -174,6 +222,19 @@ export const Reports = (mount, deps = {}) => {
   function renderDailyRows(rows = []) {
     if (!rows.length) return [el('tr', {}, [el('td', { colSpan: 7, className: 'text-muted' }, ['Sin registros para la fecha seleccionada.'])])];
     return rows.map((r) => el('tr', {}, [el('td', {}, [r.fecha]), el('td', {}, [r.hora]), el('td', {}, [r.cedula]), el('td', {}, [r.nombre]), el('td', {}, [r.sede]), el('td', {}, [r.novedad]), el('td', {}, [r.reemplazoAusentismo])]));
+  }
+
+  function renderHiringRows(rows = []) {
+    if (!rows.length) return [el('tr', {}, [el('td', { colSpan: 5, className: 'text-muted' }, ['Sin sedes activas para mostrar.'])])];
+    return rows.map((r) =>
+      el('tr', {}, [
+        el('td', {}, [r.dependencia]),
+        el('td', {}, [r.zona]),
+        el('td', {}, [r.sede]),
+        el('td', {}, [String(r.empleadosPlaneados)]),
+        el('td', {}, [String(r.empleadosContratados)])
+      ])
+    );
   }
 
   async function generateEmployeesReport() {
@@ -235,6 +296,44 @@ export const Reports = (mount, deps = {}) => {
       setMessage(`Reporte generado para ${date}. Registros: ${generatedDailyRows.length}`);
     } catch (e) {
       setMessage(`Error al generar reporte diario: ${e?.message || e}`);
+    } finally {
+      running = false;
+      if (btnGenerate) {
+        btnGenerate.disabled = false;
+        btnGenerate.textContent = 'Generar reporte';
+      }
+    }
+  }
+
+  async function generateHiringReport() {
+    if (running) return;
+    running = true;
+    const btnGenerate = qs('#btnGenerateHiring', ui);
+    const btnExport = qs('#btnExportHiring', ui);
+    try {
+      if (btnGenerate) {
+        btnGenerate.disabled = true;
+        btnGenerate.textContent = 'Generando...';
+      }
+      const [rawSedes, rawEmployees, rawCargos] = await Promise.all([
+        streamOnce((ok, fail) => deps.streamSedes?.(ok, fail)),
+        streamOnce((ok, fail) => deps.streamEmployees?.(ok, fail)),
+        streamOnce((ok, fail) => deps.streamCargos?.(ok, fail))
+      ]);
+      generatedHiringRows = normalizeHiringRows(rawSedes, rawEmployees, rawCargos);
+      const totals = generatedHiringRows.reduce((acc, row) => {
+        acc.planeados += Number(row.empleadosPlaneados || 0);
+        acc.contratados += Number(row.empleadosContratados || 0);
+        return acc;
+      }, { planeados: 0, contratados: 0 });
+      const totalNode = qs('#hiringTotal', ui);
+      if (totalNode) totalNode.textContent = `Sedes: ${generatedHiringRows.length} | Planeados: ${totals.planeados} | Contratados: ${totals.contratados}`;
+      const tbody = qs('#hiringTbody', ui);
+      if (tbody) tbody.replaceChildren(...renderHiringRows(generatedHiringRows));
+      if (btnExport) btnExport.disabled = generatedHiringRows.length === 0;
+      setMessage(`Reporte generado. Sedes: ${generatedHiringRows.length}`);
+    } catch (e) {
+      setMessage(`Error al generar reporte de contratacion: ${e?.message || e}`);
     } finally {
       running = false;
       if (btnGenerate) {
@@ -307,6 +406,41 @@ export const Reports = (mount, deps = {}) => {
     }
   }
 
+  async function exportHiringExcel() {
+    try {
+      if (!generatedHiringRows.length) throw new Error('Primero genera el reporte.');
+      const btn = qs('#btnExportHiring', ui);
+      if (btn) {
+        btn.disabled = true;
+        btn.textContent = 'Generando...';
+      }
+      const mod = await import('https://cdn.jsdelivr.net/npm/xlsx@0.18.5/+esm');
+      const ws = mod.utils.json_to_sheet(
+        generatedHiringRows.map((r) => ({
+          Dependencia: r.dependencia,
+          Zona: r.zona,
+          'Nombre Sede': r.sede,
+          'Empleados Planeados': r.empleadosPlaneados,
+          'Empleados Contratados': r.empleadosContratados
+        }))
+      );
+      ws['!cols'] = [{ wch: 28 }, { wch: 24 }, { wch: 32 }, { wch: 20 }, { wch: 22 }];
+      const wb = mod.utils.book_new();
+      mod.utils.book_append_sheet(wb, ws, 'Contratacion por sedes');
+      const date = new Date().toISOString().slice(0, 10);
+      mod.writeFile(wb, `reporte_contratacion_por_sedes_${date}.xlsx`);
+      setMessage(`Excel generado correctamente. Sedes: ${generatedHiringRows.length}`);
+    } catch (e) {
+      setMessage(`Error al generar Excel: ${e?.message || e}`);
+    } finally {
+      const btn = qs('#btnExportHiring', ui);
+      if (btn) {
+        btn.disabled = generatedHiringRows.length === 0;
+        btn.textContent = 'Generar Excel';
+      }
+    }
+  }
+
   function renderEmployeesPanel() {
     const content = el('section', {}, [
       el('div', { className: 'form-row' }, [
@@ -348,10 +482,31 @@ export const Reports = (mount, deps = {}) => {
     qs('#btnExportDaily', ui)?.addEventListener('click', exportDailyExcel);
   }
 
+  function renderHiringPanel() {
+    const content = el('section', {}, [
+      el('div', { className: 'form-row' }, [
+        el('div', {}, [el('h3', { style: 'margin:0;' }, ['Reporte: Contratacion por Sedes'])]),
+        el('button', { id: 'btnGenerateHiring', className: 'btn', type: 'button' }, ['Generar reporte']),
+        el('button', { id: 'btnExportHiring', className: 'btn btn--primary', type: 'button', disabled: true }, ['Generar Excel'])
+      ]),
+      el('p', { id: 'hiringTotal', className: 'text-muted mt-2' }, ['Genera el reporte para ver resultados.']),
+      el('div', { className: 'table-wrap mt-2' }, [
+        el('table', { className: 'table' }, [
+          el('thead', {}, [el('tr', {}, [el('th', {}, ['Dependencia']), el('th', {}, ['Zona']), el('th', {}, ['Nombre Sede']), el('th', {}, ['Empleados Planeados']), el('th', {}, ['Empleados Contratados'])])]),
+          el('tbody', { id: 'hiringTbody' }, [el('tr', {}, [el('td', { colSpan: 5, className: 'text-muted' }, ['Sin generar.'])])])
+        ])
+      ])
+    ]);
+    qs('#reportContent', ui).replaceChildren(content);
+    qs('#btnGenerateHiring', ui)?.addEventListener('click', generateHiringReport);
+    qs('#btnExportHiring', ui)?.addEventListener('click', exportHiringExcel);
+  }
+
   function openReport(reportId) {
     selectedReportId = String(reportId || '');
     generatedEmployeesRows = [];
     generatedDailyRows = [];
+    generatedHiringRows = [];
     ui.querySelectorAll('.report-card').forEach((n) => n.classList.toggle('is-active', n.dataset.id === selectedReportId));
     if (selectedReportId === 'employees_current') {
       renderEmployeesPanel();
@@ -360,6 +515,11 @@ export const Reports = (mount, deps = {}) => {
     }
     if (selectedReportId === 'daily_registry') {
       renderDailyPanel();
+      setMessage(' ');
+      return;
+    }
+    if (selectedReportId === 'hiring_by_sede') {
+      renderHiringPanel();
       setMessage(' ');
       return;
     }
