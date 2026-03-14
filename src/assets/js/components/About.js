@@ -10,7 +10,7 @@ export const About = (mount) => {
       el('div', { className: 'contact-grid mt-2' }, [
         el('article', { className: 'contact-card' }, [
           el('h3', { className: 'contact-card__title' }, ['Informacion corporativa']),
-          el('p', { className: 'contact-card__row' }, [el('strong', {}, ['Version: ']), 'RockyEDU v1.2.3']),
+          el('p', { className: 'contact-card__row' }, [el('strong', {}, ['Version: ']), 'RockyEDU v2.1.1']),
           el('p', { className: 'contact-card__row' }, [el('strong', {}, ['Titularidad: ']), 'CAPCOL S.A.S.']),
           el('p', { className: 'contact-card__row' }, [el('strong', {}, ['NIT: ']), '900.939.656-7']),
           el('p', { className: 'contact-card__row' }, [el('strong', {}, ['Derechos: ']), 'Todos los derechos reservados'])

@@ -190,6 +190,10 @@
     .grid-2 { grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); }
     .grid-3 { grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); }
     .grid-logos { grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); align-items: stretch; }
+    .activities-grid { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+    .activities-grid .panel { padding: 18px 14px; }
+    .activities-grid .panel h3 { font-size: .98rem; line-height: 1.2; margin-bottom: 8px; }
+    .activities-grid .panel .muted { font-size: .9rem; line-height: 1.42; }
 
     .panel {
       border: 1px solid var(--line);
@@ -243,6 +247,7 @@
     }
 
     .platform-link:hover { background: #e8f4ff; border-color: #95c1e7; }
+    .platform-meta { margin: 2px 0 0; font-size: .94rem; line-height: 1.45; color: var(--muted); }
 
     .banner {
       margin-top: 16px;
@@ -417,6 +422,7 @@
       .hero { grid-template-columns: 1fr; }
       .hero-side { grid-template-columns: repeat(3, minmax(0, 1fr)); }
       .banner { grid-template-columns: 1fr; }
+      .activities-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
     }
 
     @media (max-width: 760px) {
@@ -427,6 +433,10 @@
       .hero-side { grid-template-columns: 1fr; }
       .section { padding: 18px; }
       .form-grid { grid-template-columns: 1fr; }
+      .activities-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    }
+    @media (max-width: 560px) {
+      .activities-grid { grid-template-columns: 1fr; }
     }
   </style>
 </head>
@@ -526,7 +536,7 @@
       <h2 class="section-title">Principales Actividades</h2>
       <p class="section-intro">Servicios clave para ejecución de proyectos de alto impacto.</p>
 
-      <div class="grid-2">
+      <div class="grid-2 activities-grid">
         <article class="panel"><span class="badge">Operación</span><h3>Logística de eventos masivos y elecciones</h3><p class="muted">Planeación, coordinación y despliegue logístico para jornadas masivas en Colombia.</p></article>
         <article class="panel"><span class="badge">Movilidad</span><h3>Transporte de pasajeros</h3><p class="muted">Gestion de rutas, control operativo y seguimiento para movilidad segura y eficiente.</p></article>
         <article class="panel"><span class="badge">Infraestructura</span><h3>Proyectos de construcción</h3><p class="muted">Acompañamiento a planeación y ejecución de obras con enfoque en cumplimiento y trazabilidad.</p></article>
@@ -543,19 +553,29 @@
         <article class="panel">
           <span class="badge">Plataforma</span>
           <h3>RockyEDU</h3>
+          <p class="platform-meta">Secretaría de Educación de Medellín</p>
           <a class="platform-link" href="app.html">Ingresar a RockyEDU</a>
         </article>
 
         <article class="panel">
           <span class="badge">Plataforma</span>
           <h3>RockyRAM</h3>
+          <p class="platform-meta">Rama Judicial Antioquia</p>
           <a class="platform-link" href="/rockyram">Ingresar a RockyRAM</a>
         </article>
 
         <article class="panel">
           <span class="badge">Plataforma</span>
           <h3>RockyMED</h3>
+          <p class="platform-meta">Alcaldía de Medellín</p>
           <a class="platform-link" href="/rockymed">Ingresar a RockyMED</a>
+        </article>
+
+        <article class="panel">
+          <span class="badge">Plataforma</span>
+          <h3>RockySEN</h3>
+          <p class="platform-meta">Servicio Nacional de Aprendizaje Antioquia</p>
+          <a class="platform-link" href="/rockysen">Ingresar a RockySEN</a>
         </article>
       </div>
     </section>
