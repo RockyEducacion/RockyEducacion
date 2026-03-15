@@ -560,6 +560,20 @@ function isEmployeeSupernumerario(emp, cargoMap = new Map()) {
   return alignment === 'supernumerario';
 }
 
+function isEmployeeAssignedToActiveSedeOnDate(emp, selectedDate, activeSedeCodes = new Set()) {
+  if (!selectedDate) return false;
+  const ingreso = toISODate(emp?.fechaIngreso || emp?.fecha_ingreso);
+  if (!ingreso || ingreso > selectedDate) return false;
+  const retiro = toISODate(emp?.fechaRetiro || emp?.fecha_retiro);
+  const estado = String(emp?.estado || '').trim().toLowerCase();
+  if (estado === 'inactivo') return Boolean(retiro && retiro >= selectedDate);
+  if (retiro && retiro < selectedDate) return false;
+  const sedeCodigo = String(emp?.sedeCodigo || emp?.sede_codigo || '').trim();
+  if (!sedeCodigo) return false;
+  if (activeSedeCodes.size && !activeSedeCodes.has(sedeCodigo)) return false;
+  return true;
+}
+
 async function getCargoCrudAlignmentByCode(cargoCodigo, cargoNombre = null) {
   const code = String(cargoCodigo || '').trim();
   const inferByName = (name) => {
@@ -656,18 +670,21 @@ async function recomputeDailyMetrics(fecha) {
   const attRows = (attendance || []).map(mapAttendanceRow);
   const repRows = (replacements || []).map(mapImportReplacementRow);
   const sedes = (sedesRows || []).filter((s) => String(s?.estado || 'activo').trim().toLowerCase() !== 'inactivo');
+  const activeSedeCodes = new Set(
+    sedes
+      .map((row) => String(row?.codigo || '').trim())
+      .filter(Boolean)
+  );
   const cargoMap = new Map((cargosRows || []).map((row) => [String(row.codigo || '').trim(), row]));
   const replacementRules = buildNovedadReplacementRules((novedadesRows || []).map(mapNovedadRow));
   const replacementMap = new Map(repRows.map((row) => [metricReplacementKey(row), row]));
   const fallbackExpected = (employeesRows || []).filter((emp) => {
     if (String(emp?.estado || '').trim().toLowerCase() !== 'activo') return false;
     const sedeCodigo = String(emp?.sedeCodigo || emp?.sede_codigo || '').trim();
-    const sede = sedes.find((row) => String(row?.codigo || '').trim() === sedeCodigo) || null;
-    if (!isSedeScheduledForDate(sede, day)) return false;
+    if (!sedeCodigo || !activeSedeCodes.has(sedeCodigo)) return false;
     return !isEmployeeSupernumerario(emp, cargoMap);
   }).length;
   const planned = sedes.reduce((acc, sede) => {
-    if (!isSedeScheduledForDate(sede, day)) return acc;
     const n = Number(sede?.numero_operarios ?? 0);
     return acc + (Number.isFinite(n) && n > 0 ? n : 0);
   }, 0);
@@ -694,6 +711,90 @@ async function recomputeDailyMetrics(fecha) {
   if (error) throw error;
   await notifyTableReload('daily_metrics');
   return data;
+}
+
+async function recomputeSedeStatusSnapshot(fecha) {
+  const day = String(fecha || '').trim();
+  if (!day) return;
+  const [{ data: attendance }, { data: replacements }, sedesRows, employeesRows, cargosRows, novedadesRows] = await Promise.all([
+    supabase.from('attendance').select('*').eq('fecha', day),
+    supabase.from('import_replacements').select('*').eq('fecha', day),
+    selectAllRows('sedes', { select: '*' }),
+    selectAllRows('employees', { select: '*' }),
+    selectAllRows('cargos', { select: 'codigo, alineacion_crud, nombre' }),
+    selectAllRows('novedades', { select: 'codigo, codigo_novedad, nombre, reemplazo' })
+  ]);
+  const attRows = (attendance || []).map(mapAttendanceRow);
+  const repRows = (replacements || []).map(mapImportReplacementRow);
+  const sedes = (sedesRows || []).filter((s) => String(s?.estado || 'activo').trim().toLowerCase() !== 'inactivo');
+  const activeSedeCodes = new Set(sedes.map((row) => String(row?.codigo || '').trim()).filter(Boolean));
+  const cargoMap = new Map((cargosRows || []).map((row) => [String(row.codigo || '').trim(), row]));
+  const replacementRules = buildNovedadReplacementRules((novedadesRows || []).map(mapNovedadRow));
+  const replacementMap = new Map(repRows.map((row) => [metricReplacementKey(row), row]));
+  const replacementSuperDocs = new Set(
+    repRows
+      .filter((row) => String(row?.decision || '').trim().toLowerCase() === 'reemplazo')
+      .map((row) => `${String(row?.fecha || '').trim()}|${String(row?.supernumerarioDocumento || '').trim()}`)
+      .filter((value) => !value.endsWith('|'))
+  );
+  const employeeById = new Map();
+  const employeeByDoc = new Map();
+  const contractedBySede = new Map();
+
+  (employeesRows || []).forEach((emp) => {
+    const empId = String(emp?.id || '').trim();
+    const doc = String(emp?.documento || '').trim();
+    if (empId) employeeById.set(empId, emp);
+    if (doc) employeeByDoc.set(doc, emp);
+    if (!isEmployeeAssignedToActiveSedeOnDate(emp, day, activeSedeCodes)) return;
+    if (isEmployeeSupernumerario(emp, cargoMap)) return;
+    const sedeCode = String(emp?.sedeCodigo || emp?.sede_codigo || '').trim();
+    if (!contractedBySede.has(sedeCode)) contractedBySede.set(sedeCode, new Set());
+    contractedBySede.get(sedeCode).add(doc || empId);
+  });
+
+  const registeredBySede = new Map();
+  const novSinReemplazoBySede = new Map();
+  attRows.forEach((row) => {
+    const doc = String(row?.documento || '').trim();
+    if (doc && replacementSuperDocs.has(`${String(row?.fecha || '').trim()}|${doc}`)) return;
+    const empId = String(row?.empleadoId || '').trim();
+    const employee = (empId && employeeById.get(empId)) || (doc && employeeByDoc.get(doc)) || null;
+    const sedeCode = String(employee?.sedeCodigo || employee?.sede_codigo || row?.sedeCodigo || '').trim();
+    if (!sedeCode || !activeSedeCodes.has(sedeCode)) return;
+    if (!registeredBySede.has(sedeCode)) registeredBySede.set(sedeCode, new Set());
+    registeredBySede.get(sedeCode).add(doc || empId || String(row?.id || '').trim());
+    const repl = replacementMap.get(metricReplacementKey(row)) || null;
+    const hasReplacement = String(repl?.decision || '').trim().toLowerCase() === 'reemplazo';
+    if (row?.asistio === false && metricAttendanceRequiresReplacement(row, replacementRules) && !hasReplacement) {
+      novSinReemplazoBySede.set(sedeCode, Number(novSinReemplazoBySede.get(sedeCode) || 0) + 1);
+    }
+  });
+
+  const payload = sedes.map((sede) => {
+    const sedeCode = String(sede?.codigo || '').trim();
+    const planned = Number(sede?.numero_operarios ?? 0) || 0;
+    const contracted = Number(contractedBySede.get(sedeCode)?.size || 0);
+    const registered = Number(registeredBySede.get(sedeCode)?.size || 0);
+    const noContracted = Math.max(0, planned - contracted);
+    const noRegistrado = Math.max(0, contracted - registered);
+    const novSinReemplazo = Number(novSinReemplazoBySede.get(sedeCode) || 0);
+    const operariosPresentes = Math.max(0, planned - noContracted - noRegistrado - novSinReemplazo);
+    return {
+      id: `${day}_${sedeCode}`,
+      fecha: day,
+      sede_codigo: sedeCode,
+      sede_nombre: sede?.nombre || sedeCode || null,
+      operarios_esperados: contracted,
+      operarios_presentes: operariosPresentes,
+      faltantes: noRegistrado
+    };
+  });
+
+  if (!payload.length) return;
+  const { error } = await supabase.from('sede_status').upsert(payload, { onConflict: 'id' });
+  if (error) throw error;
+  await notifyTableReload('sede_status');
 }
 
 function addDaysToIsoDate(value, days = 1) {
@@ -2537,6 +2638,7 @@ export async function closeOperationDayManual(fecha) {
     return { ok: true, results: [{ date: day, status: 'already_closed' }] };
   }
   await finalizePendingAbsenteeismForClosure(day);
+  await recomputeSedeStatusSnapshot(day);
   const metrics = mapDailyMetricsRow((await recomputeDailyMetrics(day)) || {});
   const audit = await getCurrentAuditFields();
   const { error } = await supabase.from('daily_closures').upsert({
@@ -2554,6 +2656,7 @@ export async function closeOperationDayManual(fecha) {
   }, { onConflict: 'id' });
   if (error) throw error;
   await propagateIncapacitiesToNextDay(day);
+  await recomputeSedeStatusSnapshot(day);
   await recomputeDailyMetrics(day);
   await notifyTableReload('daily_closures');
   return { ok: true, results: [{ date: day, status: 'closed' }] };
@@ -2617,11 +2720,6 @@ async function finalizePendingAbsenteeismForClosure(day) {
     }, { onConflict: 'id' });
     if (absenteeismError) throw absenteeismError;
 
-    const { error: attendanceUpdateError } = await supabase
-      .from('attendance')
-      .update({ novedad: '8' })
-      .eq('id', recordId);
-    if (attendanceUpdateError) throw attendanceUpdateError;
   }
 }
 

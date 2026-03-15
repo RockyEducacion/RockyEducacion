@@ -157,14 +157,12 @@ export const Absenteeism=(mount,deps={})=>{
     }
     msg.textContent='Consultando...';
     try{
-      const [sedeStatus, attendance, replacements, sedes, novedades, employees, supernumerarios]=await Promise.all([
+      const [sedeStatus, attendance, replacements, sedes, novedades]=await Promise.all([
         deps.listSedeStatusRange?.(date,date) || [],
         deps.listAttendanceRange?.(date,date) || [],
         deps.listImportReplacementsRange?.(date,date) || [],
         loadSedesSnapshot(),
-        loadNovedadesSnapshot(),
-        loadEmployeesSnapshot(),
-        loadSupernumerariosSnapshot()
+        loadNovedadesSnapshot()
       ]);
       novedadRules=buildNovedadReplacementRules(novedades||[]);
 
@@ -198,41 +196,31 @@ export const Absenteeism=(mount,deps={})=>{
       });
 
       const statusBySede=new Map((sedeStatus||[]).map((s)=> [String(s.sedeCodigo||''), s]));
-      const superDocs=new Set(
-        (supernumerarios||[])
-          .filter((s)=> isEmployeeExpectedForDate(s,date,sedes))
-          .map((s)=> String(s.documento||'').trim())
-          .filter(Boolean)
-      );
-      const contratadosBySede=new Map();
-      (employees||[]).forEach((e)=>{
-        if(!isEmployeeExpectedForDate(e,date,sedes)) return;
-        const doc=String(e.documento||'').trim();
-        if(doc && superDocs.has(doc)) return;
-        const sedeCode=String(e.sedeCodigo||'').trim();
-        if(!sedeCode) return;
-        contratadosBySede.set(sedeCode, Number(contratadosBySede.get(sedeCode)||0)+1);
-      });
+      const historicalSedeCodes=new Set([
+        ...(sedeStatus||[]).map((s)=> String(s.sedeCodigo||'').trim()).filter(Boolean),
+        ...Array.from(attendanceByKey.keys()).map((key)=> String(key.split('|')[1]||'').trim()).filter(Boolean)
+      ]);
 
-      sedeDailyRows=(sedes||[])
-        .filter((s)=> String(s.estado||'activo').trim().toLowerCase()!=='inactivo')
-        .map((s)=>{
-        const sedeCode=String(s.codigo||'').trim();
+      sedeDailyRows=Array.from(historicalSedeCodes)
+        .map((sedeCode)=>{
+        const sedeCatalog=(sedes||[]).find((s)=> String(s.codigo||'').trim()===sedeCode) || null;
         const key=`${date}|${sedeCode}`;
         const atts=attendanceByKey.get(key)||[];
         const status=statusBySede.get(sedeCode)||{};
-        const planeadosRaw=s.numeroOperarios ?? status.operariosPlaneados ?? status.operariosEsperados ?? 0;
+        const planeadosRaw=sedeCatalog?.numeroOperarios ?? status.operariosPlaneados ?? status.operariosEsperados ?? 0;
         const planeados=parseOperatorCount(planeadosRaw);
-        const contratados=Number(contratadosBySede.get(sedeCode)||0);
+        const contratadosSnapshot=parseOperatorCount(status.operariosEsperados ?? 0);
+        const contratados=contratadosSnapshot>0 ? contratadosSnapshot : planeados;
         const noContratado=Math.max(0, planeados-contratados);
+        const noRegistrado=parseOperatorCount(status.faltantes ?? 0);
         const novSinReemplazo=atts.filter((a)=>{
           if(a.asistio===true) return false;
           const rep=replByEmpDate.get(`${a.fecha||''}|${a.empleadoId||''}`);
           if(rep && rep.decision==='reemplazo') return false;
           return attendanceRequiresReplacementForSummary(a,novedadRules);
         }).length;
-        const ausentismoTotal=noContratado+novSinReemplazo;
-        const totalPagar=Math.max(0, planeados-noContratado-novSinReemplazo);
+        const ausentismoTotal=noRegistrado+novSinReemplazo;
+        const totalPagar=Math.max(0, planeados-noContratado-ausentismoTotal);
         const meta=sedeMetaByCode.get(sedeCode)||{};
         const dependenciaCodigo=String(meta.dependenciaCodigo||'').trim();
         const dependenciaNombre=String(meta.dependenciaNombre||'').trim()||'Sin dependencia';
@@ -240,13 +228,14 @@ export const Absenteeism=(mount,deps={})=>{
         return {
           fecha:date,
           sedeCodigo:sedeCode,
-          sedeNombre:String(s.nombre||sedeCode||'-'),
+          sedeNombre:String(status.sedeNombre||sedeCatalog?.nombre||sedeCode||'-'),
           dependenciaCodigo,
           dependenciaNombre,
           dependenciaKey,
           planeados,
           contratados,
           noContratado,
+          noRegistrado,
           novSinReemplazo,
           ausentismoTotal,
           totalPagar
@@ -263,6 +252,7 @@ export const Absenteeism=(mount,deps={})=>{
             planeados:0,
             contratados:0,
             noContratado:0,
+            noRegistrado:0,
             novSinReemplazo:0,
             ausentismoTotal:0,
             totalPagar:0
@@ -272,6 +262,7 @@ export const Absenteeism=(mount,deps={})=>{
         t.planeados+=r.planeados;
         t.contratados+=r.contratados;
         t.noContratado+=r.noContratado;
+        t.noRegistrado+=Number(r.noRegistrado||0);
         t.novSinReemplazo+=r.novSinReemplazo;
         t.ausentismoTotal+=r.ausentismoTotal;
         t.totalPagar+=r.totalPagar;
@@ -326,6 +317,7 @@ export const Absenteeism=(mount,deps={})=>{
         planeados:0,
         contratados:0,
         noContratado:0,
+        noRegistrado:0,
         novSinReemplazo:0,
         ausentismoTotal:0,
         totalPagar:0
@@ -334,6 +326,7 @@ export const Absenteeism=(mount,deps={})=>{
       t.planeados+=r.planeados;
       t.contratados+=r.contratados;
       t.noContratado+=r.noContratado;
+      t.noRegistrado+=Number(r.noRegistrado||0);
       t.novSinReemplazo+=r.novSinReemplazo;
       t.ausentismoTotal+=r.ausentismoTotal;
       t.totalPagar+=r.totalPagar;
@@ -402,6 +395,15 @@ export const Absenteeism=(mount,deps={})=>{
           estado:'No contratado'
         });
       }
+      for(let i=0;i<Number(d.noRegistrado||0);i++){
+        detailRows.push({
+          fecha:d.fecha,
+          sede:d.sedeNombre,
+          documento:'-',
+          nombre:`No registrado ${i+1}`,
+          estado:'Ausentismo (sin registro / novedad 8)'
+        });
+      }
     });
 
     detailRowsCache=detailRows;
@@ -446,6 +448,15 @@ export const Absenteeism=(mount,deps={})=>{
           documento:'-',
           nombre:`No contratado ${i+1}`,
           estado:'No contratado'
+        });
+      }
+      for(let i=0;i<Number(d.noRegistrado||0);i++){
+        detailRows.push({
+          fecha:d.fecha,
+          sede:d.sedeNombre,
+          documento:'-',
+          nombre:`No registrado ${i+1}`,
+          estado:'Ausentismo (sin registro / novedad 8)'
         });
       }
     });
