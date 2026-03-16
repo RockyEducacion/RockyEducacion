@@ -812,7 +812,7 @@ async function recomputeSedeStatusSnapshot(date) {
     if (doc && replacementSuperDocs.has(`${String(row?.fecha || '').trim()}|${doc}`)) return;
     const empId = String(row?.empleado_id || row?.empleadoId || '').trim();
     const employee = (empId && employeeById.get(empId)) || (doc && employeeByDoc.get(doc)) || null;
-    const sedeCode = String(employee?.sede_codigo || row?.sede_codigo || '').trim();
+    const sedeCode = String(row?.sede_codigo || employee?.sede_codigo || '').trim();
     if (!sedeCode || !activeSedeCodes.has(sedeCode)) return;
     if (!registeredBySede.has(sedeCode)) registeredBySede.set(sedeCode, new Set());
     registeredBySede.get(sedeCode).add(doc || empId || String(row?.id || '').trim());
@@ -826,8 +826,10 @@ async function recomputeSedeStatusSnapshot(date) {
   const payload = sedes.map((sede) => {
     const sedeCode = String(sede?.codigo || '').trim();
     const planned = Number(sede?.numero_operarios ?? 0) || 0;
-    const contracted = Number(contractedBySede.get(sedeCode)?.size || 0);
+    const baseContracted = Number(contractedBySede.get(sedeCode)?.size || 0);
     const registered = Number(registeredBySede.get(sedeCode)?.size || 0);
+    const externalRegistered = Math.max(0, registered - baseContracted);
+    const contracted = Math.min(planned, baseContracted + externalRegistered);
     const noContracted = Math.max(0, planned - contracted);
     const noRegistrado = Math.max(0, contracted - registered);
     const novSinReemplazo = Number(novSinReemplazoBySede.get(sedeCode) || 0);
@@ -977,6 +979,14 @@ async function closeOperationDay(date) {
   }
 
   const day = String(date).trim();
+  await insertSystemAuditLog({
+    actorEmail: 'cron@system',
+    targetType: 'daily_closure',
+    targetId: day,
+    action: 'cron_close_started',
+    note: `Inicio de cierre automatico para ${day}.`
+  });
+
   const { data: existingClosure, error: existingClosureError } = await supabaseAdmin
     .from('daily_closures')
     .select('*')
@@ -985,44 +995,107 @@ async function closeOperationDay(date) {
   if (existingClosureError) throw existingClosureError;
 
   if (existingClosure?.locked === true || String(existingClosure?.status || '').trim().toLowerCase() === 'closed') {
+    await insertSystemAuditLog({
+      actorEmail: 'cron@system',
+      targetType: 'daily_closure',
+      targetId: day,
+      action: 'cron_close_skipped',
+      before: existingClosure,
+      note: `El cierre automatico de ${day} se omitio porque ya estaba cerrado.`
+    });
     return { date: day, status: 'already_closed' };
   }
 
-  await finalizePendingAbsenteeismForClosure(day);
-  await recomputeSedeStatusSnapshot(day);
+  try {
+    await finalizePendingAbsenteeismForClosure(day);
+    await insertSystemAuditLog({
+      actorEmail: 'cron@system',
+      targetType: 'daily_closure',
+      targetId: day,
+      action: 'cron_close_stage_finalize_absenteeism',
+      note: `Se consolidaron ausentismos pendientes para ${day}.`
+    });
 
-  const { data: metricRow, error: metricError } = await supabaseAdmin
-    .from('daily_metrics')
-    .select('*')
-    .eq('fecha', day)
-    .maybeSingle();
-  if (metricError) throw metricError;
+    await recomputeSedeStatusSnapshot(day);
+    await insertSystemAuditLog({
+      actorEmail: 'cron@system',
+      targetType: 'daily_closure',
+      targetId: day,
+      action: 'cron_close_stage_sede_status',
+      note: `Se recalculo sede_status para ${day}.`
+    });
 
-  const metrics = metricRow || (await recomputeAndFetchDailyMetrics(day));
-  const { error: closureError } = await supabaseAdmin
-    .from('daily_closures')
-    .upsert({
-      id: day,
-      fecha: day,
-      status: 'closed',
-      locked: true,
-      planeados: Number(metrics?.planned || 0),
-      contratados: Number(metrics?.expected || 0),
-      asistencias: Number(metrics?.attendance_count || metrics?.attendanceCount || 0),
-      ausentismos: Number(metrics?.absenteeism || 0),
-      no_contratados: Number(metrics?.no_contracted || metrics?.noContracted || 0),
-      closed_by_uid: null,
-      closed_by_email: 'cron@system'
-    }, { onConflict: 'id' });
-  if (closureError) throw closureError;
+    // Always recompute metrics before closing so the snapshot is not based on stale partial rows.
+    const metrics = await recomputeAndFetchDailyMetrics(day);
+    await insertSystemAuditLog({
+      actorEmail: 'cron@system',
+      targetType: 'daily_closure',
+      targetId: day,
+      action: 'cron_close_stage_metrics',
+      after: metrics,
+      note: `Se recalcularon daily_metrics para ${day}.`
+    });
 
-  const { error: metricCloseError } = await supabaseAdmin
-    .from('daily_metrics')
-    .update({ closed: true })
-    .eq('fecha', day);
-  if (metricCloseError) throw metricCloseError;
+    const { error: closureError } = await supabaseAdmin
+      .from('daily_closures')
+      .upsert({
+        id: day,
+        fecha: day,
+        status: 'closed',
+        locked: true,
+        planeados: Number(metrics?.planned || 0),
+        contratados: Number(metrics?.expected || 0),
+        asistencias: Number(metrics?.attendance_count || metrics?.attendanceCount || 0),
+        ausentismos: Number(metrics?.absenteeism || 0),
+        no_contratados: Number(metrics?.no_contracted || metrics?.noContracted || 0),
+        closed_by_uid: null,
+        closed_by_email: 'cron@system'
+      }, { onConflict: 'id' });
+    if (closureError) throw closureError;
 
-  await propagateIncapacitiesToNextDay(day);
+    await insertSystemAuditLog({
+      actorEmail: 'cron@system',
+      targetType: 'daily_closure',
+      targetId: day,
+      action: 'cron_close_stage_closure_saved',
+      after: metrics,
+      note: `Se guardo daily_closures para ${day}.`
+    });
+
+    const { error: metricCloseError } = await supabaseAdmin
+      .from('daily_metrics')
+      .update({ closed: true })
+      .eq('fecha', day);
+    if (metricCloseError) throw metricCloseError;
+
+    await insertSystemAuditLog({
+      actorEmail: 'cron@system',
+      targetType: 'daily_closure',
+      targetId: day,
+      action: 'cron_close_stage_metrics_closed',
+      note: `Se marco daily_metrics como cerrado para ${day}.`
+    });
+
+    await propagateIncapacitiesToNextDay(day);
+    await insertSystemAuditLog({
+      actorEmail: 'cron@system',
+      targetType: 'daily_closure',
+      targetId: day,
+      action: 'cron_close_completed',
+      note: `El cierre automatico de ${day} finalizo correctamente.`
+    });
+  } catch (error) {
+    await insertSystemAuditLog({
+      actorEmail: 'cron@system',
+      targetType: 'daily_closure',
+      targetId: day,
+      action: 'cron_close_failed',
+      before: existingClosure,
+      after: serializeErrorForAudit(error),
+      note: `Fallo el cierre automatico de ${day}.`
+    });
+    throw error;
+  }
 
   return { date: day, status: 'closed' };
 }
@@ -1036,6 +1109,48 @@ async function recomputeAndFetchDailyMetrics(date) {
     .maybeSingle();
   if (error) throw error;
   return data || null;
+}
+
+async function insertSystemAuditLog({
+  actorEmail = 'cron@system',
+  targetType = null,
+  targetId = null,
+  action = null,
+  before = null,
+  after = null,
+  note = null
+} = {}) {
+  if (!action) return;
+  try {
+    const { error } = await supabaseAdmin
+      .from('audit_logs')
+      .insert({
+        actor_uid: null,
+        actor_email: actorEmail,
+        target_type: targetType,
+        target_id: targetId == null ? null : String(targetId),
+        action,
+        before_data: before,
+        after_data: after,
+        note
+      });
+    if (error) {
+      console.error('No se pudo guardar audit_logs del sistema:', error);
+    }
+  } catch (error) {
+    console.error('Fallo insertando audit_logs del sistema:', error);
+  }
+}
+
+function serializeErrorForAudit(error) {
+  if (!error) return null;
+  return {
+    message: String(error?.message || error),
+    code: error?.code || null,
+    details: error?.details || null,
+    hint: error?.hint || null,
+    name: error?.name || null
+  };
 }
 
 function assertCronAuthorized(req) {

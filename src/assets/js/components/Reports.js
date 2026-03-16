@@ -13,7 +13,8 @@ export const Reports = (mount, deps = {}) => {
   const reports = [
     { id: 'employees_current', title: 'Empleados', subtitle: 'Vigentes con cedula, nombre, cargo, zona, dependencia y sede' },
     { id: 'daily_registry', title: 'Registro diario', subtitle: 'Fecha, hora, cedula, nombre, sede, novedad y reemplazo/ausentismo' },
-    { id: 'hiring_by_sede', title: 'Contratacion por Sedes', subtitle: 'Dependencia, zona, sede, planeados y contratados por sede' }
+    { id: 'hiring_by_sede', title: 'Contratacion por Sedes', subtitle: 'Dependencia, zona, sede, planeados y contratados por sede' },
+    { id: 'daily_absenteeism', title: 'Ausentismo diario', subtitle: 'Dependencia, zona, sede, planeados, contratados, ausentismo y total a pagar' }
   ];
 
   const cards = reports.map((r) =>
@@ -28,8 +29,10 @@ export const Reports = (mount, deps = {}) => {
   let generatedEmployeesRows = [];
   let generatedDailyRows = [];
   let generatedHiringRows = [];
+  let generatedAbsenteeismRows = [];
   let running = false;
   let selectedDailyDate = new Date().toISOString().slice(0, 10);
+  let selectedAbsenteeismDate = new Date().toISOString().slice(0, 10);
 
   function setMessage(text) {
     qs('#msg', ui).textContent = text || ' ';
@@ -214,6 +217,125 @@ export const Reports = (mount, deps = {}) => {
       });
   }
 
+  function normalizeText(value) {
+    return String(value || '')
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .toLowerCase();
+  }
+
+  function parseOperatorCount(value) {
+    if (value == null) return 0;
+    if (typeof value === 'number') return Number.isFinite(value) ? Math.trunc(value) : 0;
+    const raw = String(value).trim();
+    if (!raw) return 0;
+    const digits = raw.replace(/[^\d]/g, '');
+    if (!digits) return 0;
+    const parsed = Number(digits);
+    return Number.isFinite(parsed) ? parsed : 0;
+  }
+
+  function buildNovedadReplacementRules(rows = []) {
+    const byCode = new Map();
+    const byName = new Map();
+    (rows || []).forEach((row) => {
+      const code = String(row.codigoNovedad || row.codigo || '').trim();
+      const name = normalizeText(String(row.nombre || '').trim());
+      const replacement = normalizeText(String(row.reemplazo || '').trim());
+      const requiresReplacement = ['si', 'yes', 'true', '1', 'reemplazo'].includes(replacement);
+      if (code) byCode.set(code, requiresReplacement);
+      if (name) byName.set(name, requiresReplacement);
+    });
+    return { byCode, byName };
+  }
+
+  function baseNovedadName(raw) {
+    return String(raw || '').replace(/\s*\(.*\)\s*$/, '').trim();
+  }
+
+  function attendanceRequiresReplacement(att = {}, rules = {}) {
+    const code = String(att.novedadCodigo || (/^\d+$/.test(String(att.novedad || '').trim()) ? String(att.novedad || '').trim() : '')).trim();
+    if (['1', '7'].includes(code)) return false;
+    if (['2', '3', '4', '5', '8'].includes(code)) return true;
+    if (code && rules?.byCode?.has(code)) return rules.byCode.get(code) === true;
+    const name = normalizeText(baseNovedadName(att.novedadNombre || att.novedad || ''));
+    if (name && rules?.byName?.has(name)) return rules.byName.get(name) === true;
+    return false;
+  }
+
+  function normalizeAbsenteeismRows(fecha, sedeStatusRows = [], attendanceRows = [], replacementsRows = [], sedeRows = [], novedadRows = []) {
+    const statusBySede = new Map((sedeStatusRows || []).map((row) => [String(row.sedeCodigo || '').trim(), row]).filter(([key]) => Boolean(key)));
+    const sedeByCode = new Map((sedeRows || []).map((row) => [String(row.codigo || '').trim(), row]).filter(([key]) => Boolean(key)));
+    const rules = buildNovedadReplacementRules(novedadRows);
+    const replacementByEmployee = new Map();
+    const replacementSuperByDateDoc = new Set();
+
+    (replacementsRows || []).forEach((row) => {
+      const employeeKey = `${row.fecha || ''}|${row.empleadoId || ''}`;
+      if (String(row.empleadoId || '').trim()) replacementByEmployee.set(employeeKey, row);
+      if (String(row.decision || '').trim().toLowerCase() === 'reemplazo') {
+        const superDoc = String(row.supernumerarioDocumento || '').trim();
+        if (superDoc) replacementSuperByDateDoc.add(`${row.fecha || ''}|${superDoc}`);
+      }
+    });
+
+    const attendanceBySede = new Map();
+    (attendanceRows || []).forEach((row) => {
+      const attDoc = String(row.documento || '').trim();
+      if (attDoc && replacementSuperByDateDoc.has(`${row.fecha || ''}|${attDoc}`)) return;
+      const sedeCode = String(row.sedeCodigo || '').trim();
+      if (!sedeCode) return;
+      if (!attendanceBySede.has(sedeCode)) attendanceBySede.set(sedeCode, []);
+      attendanceBySede.get(sedeCode).push(row);
+    });
+
+    const historicalSedeCodes = new Set([
+      ...(sedeStatusRows || []).map((row) => String(row.sedeCodigo || '').trim()).filter(Boolean),
+      ...(attendanceRows || []).map((row) => String(row.sedeCodigo || '').trim()).filter(Boolean)
+    ]);
+
+    return Array.from(historicalSedeCodes)
+      .map((sedeCode) => {
+        const status = statusBySede.get(sedeCode) || {};
+        const sede = sedeByCode.get(sedeCode) || {};
+        const attendance = attendanceBySede.get(sedeCode) || [];
+        const planeados = parseOperatorCount(sede.numeroOperarios ?? status.operariosPlaneados ?? status.operariosEsperados ?? 0);
+        const contratadosSnapshot = parseOperatorCount(status.operariosEsperados ?? 0);
+        const contratados = contratadosSnapshot > 0 ? contratadosSnapshot : planeados;
+        const noContratado = Math.max(0, planeados - contratados);
+        const noRegistrado = parseOperatorCount(status.faltantes ?? 0);
+        const novSinReemplazo = attendance.filter((att) => {
+          if (att.asistio === true) return false;
+          const replacement = replacementByEmployee.get(`${att.fecha || ''}|${att.empleadoId || ''}`);
+          if (replacement && String(replacement.decision || '').trim().toLowerCase() === 'reemplazo') return false;
+          return attendanceRequiresReplacement(att, rules);
+        }).length;
+        const ausentismoTotal = noRegistrado + novSinReemplazo;
+        const totalPagar = Math.max(0, planeados - noContratado - ausentismoTotal);
+        return {
+          fecha,
+          dependencia: String(sede.dependenciaNombre || sede.dependenciaCodigo || '-').trim() || '-',
+          zona: String(sede.zonaNombre || sede.zonaCodigo || '-').trim() || '-',
+          sede: String(status.sedeNombre || sede.nombre || sedeCode || '-').trim() || '-',
+          planeados,
+          contratados,
+          noContratado,
+          novedadSinReemplazo: novSinReemplazo,
+          totalAusentismo: ausentismoTotal,
+          totalPagar
+        };
+      })
+      .sort((a, b) => {
+        const byDependency = String(a.dependencia || '').localeCompare(String(b.dependencia || ''));
+        if (byDependency !== 0) return byDependency;
+        const byZone = String(a.zona || '').localeCompare(String(b.zona || ''));
+        if (byZone !== 0) return byZone;
+        return String(a.sede || '').localeCompare(String(b.sede || ''));
+      });
+  }
+
   function renderEmployeesRows(rows = []) {
     if (!rows.length) return [el('tr', {}, [el('td', { colSpan: 6, className: 'text-muted' }, ['Sin empleados vigentes para mostrar.'])])];
     return rows.map((r) => el('tr', {}, [el('td', {}, [r.cedula]), el('td', {}, [r.nombre]), el('td', {}, [r.cargo]), el('td', {}, [r.zona]), el('td', {}, [r.dependencia]), el('td', {}, [r.sede])]));
@@ -233,6 +355,22 @@ export const Reports = (mount, deps = {}) => {
         el('td', {}, [r.sede]),
         el('td', {}, [String(r.empleadosPlaneados)]),
         el('td', {}, [String(r.empleadosContratados)])
+      ])
+    );
+  }
+
+  function renderAbsenteeismRows(rows = []) {
+    if (!rows.length) return [el('tr', {}, [el('td', { colSpan: 8, className: 'text-muted' }, ['Sin datos para la fecha seleccionada.'])])];
+    return rows.map((r) =>
+      el('tr', {}, [
+        el('td', {}, [r.dependencia]),
+        el('td', {}, [r.zona]),
+        el('td', {}, [r.sede]),
+        el('td', {}, [String(r.planeados)]),
+        el('td', {}, [String(r.contratados)]),
+        el('td', {}, [String(r.noContratado)]),
+        el('td', {}, [String(r.totalAusentismo)]),
+        el('td', {}, [String(r.totalPagar)])
       ])
     );
   }
@@ -343,6 +481,62 @@ export const Reports = (mount, deps = {}) => {
     }
   }
 
+  async function generateAbsenteeismReport() {
+    const date = String(qs('#absenteeismDate', ui)?.value || '').trim();
+    if (!date) {
+      setMessage('Selecciona una fecha valida para generar el reporte.');
+      return;
+    }
+    if (running) return;
+    running = true;
+    selectedAbsenteeismDate = date;
+    const btnGenerate = qs('#btnGenerateAbsenteeism', ui);
+    const btnExport = qs('#btnExportAbsenteeism', ui);
+    try {
+      if (btnGenerate) {
+        btnGenerate.disabled = true;
+        btnGenerate.textContent = 'Generando...';
+      }
+      const dayClosed = await deps.isOperationDayClosed?.(date);
+      if (!dayClosed) throw new Error('La fecha seleccionada no esta cerrada.');
+      const [sedeStatusRows, attendanceRows, replacementsRows, sedeRows, novedadRows] = await Promise.all([
+        deps.listSedeStatusRange?.(date, date) || [],
+        deps.listAttendanceRange?.(date, date) || [],
+        deps.listImportReplacementsRange?.(date, date) || [],
+        streamOnce((ok, fail) => deps.streamSedes?.(ok, fail)),
+        streamOnce((ok, fail) => deps.streamNovedades?.(ok, fail))
+      ]);
+      generatedAbsenteeismRows = normalizeAbsenteeismRows(date, sedeStatusRows, attendanceRows, replacementsRows, sedeRows, novedadRows);
+      const totals = generatedAbsenteeismRows.reduce(
+        (acc, row) => {
+          acc.planeados += Number(row.planeados || 0);
+          acc.contratados += Number(row.contratados || 0);
+          acc.noContratado += Number(row.noContratado || 0);
+          acc.ausentismo += Number(row.totalAusentismo || 0);
+          acc.totalPagar += Number(row.totalPagar || 0);
+          return acc;
+        },
+        { planeados: 0, contratados: 0, noContratado: 0, ausentismo: 0, totalPagar: 0 }
+      );
+      const totalNode = qs('#absenteeismTotal', ui);
+      if (totalNode) {
+        totalNode.textContent = `Sedes: ${generatedAbsenteeismRows.length} | Planeados: ${totals.planeados} | Contratados: ${totals.contratados} | No contratado: ${totals.noContratado} | Ausentismo: ${totals.ausentismo} | Total a pagar: ${totals.totalPagar}`;
+      }
+      const tbody = qs('#absenteeismTbody', ui);
+      if (tbody) tbody.replaceChildren(...renderAbsenteeismRows(generatedAbsenteeismRows));
+      if (btnExport) btnExport.disabled = generatedAbsenteeismRows.length === 0;
+      setMessage(`Reporte generado para ${date}. Sedes: ${generatedAbsenteeismRows.length}`);
+    } catch (e) {
+      setMessage(`Error al generar reporte de ausentismo: ${e?.message || e}`);
+    } finally {
+      running = false;
+      if (btnGenerate) {
+        btnGenerate.disabled = false;
+        btnGenerate.textContent = 'Generar reporte';
+      }
+    }
+  }
+
   async function exportEmployeesExcel() {
     try {
       if (!generatedEmployeesRows.length) throw new Error('Primero genera el reporte.');
@@ -441,6 +635,45 @@ export const Reports = (mount, deps = {}) => {
     }
   }
 
+  async function exportAbsenteeismExcel() {
+    try {
+      if (!generatedAbsenteeismRows.length) throw new Error('Primero genera el reporte.');
+      const btn = qs('#btnExportAbsenteeism', ui);
+      if (btn) {
+        btn.disabled = true;
+        btn.textContent = 'Generando...';
+      }
+      const mod = await import('https://cdn.jsdelivr.net/npm/xlsx@0.18.5/+esm');
+      const ws = mod.utils.json_to_sheet(
+        generatedAbsenteeismRows.map((r) => ({
+          Fecha: r.fecha,
+          Dependencia: r.dependencia,
+          Zona: r.zona,
+          'Nombre Sede': r.sede,
+          Planeados: r.planeados,
+          Contratados: r.contratados,
+          'No contratado': r.noContratado,
+          'Novedad sin reemplazo': r.novedadSinReemplazo,
+          'Total ausentismo': r.totalAusentismo,
+          'Total a pagar': r.totalPagar
+        }))
+      );
+      ws['!cols'] = [{ wch: 12 }, { wch: 28 }, { wch: 24 }, { wch: 32 }, { wch: 12 }, { wch: 12 }, { wch: 14 }, { wch: 22 }, { wch: 18 }, { wch: 16 }];
+      const wb = mod.utils.book_new();
+      mod.utils.book_append_sheet(wb, ws, 'Ausentismo diario');
+      mod.writeFile(wb, `reporte_ausentismo_diario_${selectedAbsenteeismDate}.xlsx`);
+      setMessage(`Excel generado correctamente para ${selectedAbsenteeismDate}. Sedes: ${generatedAbsenteeismRows.length}`);
+    } catch (e) {
+      setMessage(`Error al generar Excel: ${e?.message || e}`);
+    } finally {
+      const btn = qs('#btnExportAbsenteeism', ui);
+      if (btn) {
+        btn.disabled = generatedAbsenteeismRows.length === 0;
+        btn.textContent = 'Generar Excel';
+      }
+    }
+  }
+
   function renderEmployeesPanel() {
     const content = el('section', {}, [
       el('div', { className: 'form-row' }, [
@@ -502,11 +735,33 @@ export const Reports = (mount, deps = {}) => {
     qs('#btnExportHiring', ui)?.addEventListener('click', exportHiringExcel);
   }
 
+  function renderAbsenteeismPanel() {
+    const content = el('section', {}, [
+      el('div', { className: 'form-row' }, [
+        el('div', {}, [el('h3', { style: 'margin:0;' }, ['Reporte: Ausentismo diario'])]),
+        el('div', {}, [el('label', { className: 'label' }, ['Fecha']), el('input', { id: 'absenteeismDate', className: 'input', type: 'date', value: selectedAbsenteeismDate, style: 'max-width:180px' })]),
+        el('button', { id: 'btnGenerateAbsenteeism', className: 'btn', type: 'button' }, ['Generar reporte']),
+        el('button', { id: 'btnExportAbsenteeism', className: 'btn btn--primary', type: 'button', disabled: true }, ['Generar Excel'])
+      ]),
+      el('p', { id: 'absenteeismTotal', className: 'text-muted mt-2' }, ['Selecciona una fecha cerrada y genera el reporte.']),
+      el('div', { className: 'table-wrap mt-2' }, [
+        el('table', { className: 'table' }, [
+          el('thead', {}, [el('tr', {}, [el('th', {}, ['Dependencia']), el('th', {}, ['Zona']), el('th', {}, ['Nombre Sede']), el('th', {}, ['Planeados']), el('th', {}, ['Contratados']), el('th', {}, ['No contratado']), el('th', {}, ['Total ausentismo']), el('th', {}, ['Total a pagar'])])]),
+          el('tbody', { id: 'absenteeismTbody' }, [el('tr', {}, [el('td', { colSpan: 8, className: 'text-muted' }, ['Sin generar.'])])])
+        ])
+      ])
+    ]);
+    qs('#reportContent', ui).replaceChildren(content);
+    qs('#btnGenerateAbsenteeism', ui)?.addEventListener('click', generateAbsenteeismReport);
+    qs('#btnExportAbsenteeism', ui)?.addEventListener('click', exportAbsenteeismExcel);
+  }
+
   function openReport(reportId) {
     selectedReportId = String(reportId || '');
     generatedEmployeesRows = [];
     generatedDailyRows = [];
     generatedHiringRows = [];
+    generatedAbsenteeismRows = [];
     ui.querySelectorAll('.report-card').forEach((n) => n.classList.toggle('is-active', n.dataset.id === selectedReportId));
     if (selectedReportId === 'employees_current') {
       renderEmployeesPanel();
@@ -520,6 +775,11 @@ export const Reports = (mount, deps = {}) => {
     }
     if (selectedReportId === 'hiring_by_sede') {
       renderHiringPanel();
+      setMessage(' ');
+      return;
+    }
+    if (selectedReportId === 'daily_absenteeism') {
+      renderAbsenteeismPanel();
       setMessage(' ');
       return;
     }

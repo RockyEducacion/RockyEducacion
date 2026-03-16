@@ -760,7 +760,7 @@ async function recomputeSedeStatusSnapshot(fecha) {
     if (doc && replacementSuperDocs.has(`${String(row?.fecha || '').trim()}|${doc}`)) return;
     const empId = String(row?.empleadoId || '').trim();
     const employee = (empId && employeeById.get(empId)) || (doc && employeeByDoc.get(doc)) || null;
-    const sedeCode = String(employee?.sedeCodigo || employee?.sede_codigo || row?.sedeCodigo || '').trim();
+    const sedeCode = String(row?.sedeCodigo || employee?.sedeCodigo || employee?.sede_codigo || '').trim();
     if (!sedeCode || !activeSedeCodes.has(sedeCode)) return;
     if (!registeredBySede.has(sedeCode)) registeredBySede.set(sedeCode, new Set());
     registeredBySede.get(sedeCode).add(doc || empId || String(row?.id || '').trim());
@@ -774,8 +774,10 @@ async function recomputeSedeStatusSnapshot(fecha) {
   const payload = sedes.map((sede) => {
     const sedeCode = String(sede?.codigo || '').trim();
     const planned = Number(sede?.numero_operarios ?? 0) || 0;
-    const contracted = Number(contractedBySede.get(sedeCode)?.size || 0);
+    const baseContracted = Number(contractedBySede.get(sedeCode)?.size || 0);
     const registered = Number(registeredBySede.get(sedeCode)?.size || 0);
+    const externalRegistered = Math.max(0, registered - baseContracted);
+    const contracted = Math.min(planned, baseContracted + externalRegistered);
     const noContracted = Math.max(0, planned - contracted);
     const noRegistrado = Math.max(0, contracted - registered);
     const novSinReemplazo = Number(novSinReemplazoBySede.get(sedeCode) || 0);

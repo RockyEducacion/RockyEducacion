@@ -75,6 +75,7 @@ export const Absenteeism=(mount,deps={})=>{
   let attendanceByKey=new Map();
   let replByEmpDate=new Map();
   let replacementSuperByDateDoc=new Set();
+  let contractedEmployeesBySede=new Map();
   let novedadRules={ byCode:new Map(), byName:new Map() };
   let totalsRows=[];
   let detailRowsCache=[];
@@ -157,12 +158,13 @@ export const Absenteeism=(mount,deps={})=>{
     }
     msg.textContent='Consultando...';
     try{
-      const [sedeStatus, attendance, replacements, sedes, novedades]=await Promise.all([
+      const [sedeStatus, attendance, replacements, sedes, novedades, employees]=await Promise.all([
         deps.listSedeStatusRange?.(date,date) || [],
         deps.listAttendanceRange?.(date,date) || [],
         deps.listImportReplacementsRange?.(date,date) || [],
         loadSedesSnapshot(),
-        loadNovedadesSnapshot()
+        loadNovedadesSnapshot(),
+        loadEmployeesSnapshot()
       ]);
       novedadRules=buildNovedadReplacementRules(novedades||[]);
 
@@ -200,6 +202,20 @@ export const Absenteeism=(mount,deps={})=>{
         ...(sedeStatus||[]).map((s)=> String(s.sedeCodigo||'').trim()).filter(Boolean),
         ...Array.from(attendanceByKey.keys()).map((key)=> String(key.split('|')[1]||'').trim()).filter(Boolean)
       ]);
+      contractedEmployeesBySede=new Map();
+      (employees||[]).forEach((emp)=>{
+        if(!isEmployeeAssignedForDate(emp,date)) return;
+        if(isEmployeeMarkedAsSupernumerario(emp)) return;
+        const sedeCode=String(emp.sedeCodigo||'').trim();
+        const doc=String(emp.documento||'').trim();
+        if(!sedeCode) return;
+        if(!contractedEmployeesBySede.has(sedeCode)) contractedEmployeesBySede.set(sedeCode, []);
+        if(doc && contractedEmployeesBySede.get(sedeCode).some((row)=> String(row.documento||'').trim()===doc)) return;
+        contractedEmployeesBySede.get(sedeCode).push({
+          documento: doc || '-',
+          nombre: String(emp.nombre||'-').trim() || '-'
+        });
+      });
 
       sedeDailyRows=Array.from(historicalSedeCodes)
         .map((sedeCode)=>{
@@ -366,6 +382,15 @@ export const Absenteeism=(mount,deps={})=>{
     depDaily.forEach((d)=>{
       const key=`${d.fecha}|${d.sedeCodigo}`;
       const atts=attendanceByKey.get(key)||[];
+      const contracted=contractedEmployeesBySede.get(d.sedeCodigo)||[];
+      const contractedDocs=new Set(contracted.map((c)=> String(c.documento||'').trim()).filter(Boolean));
+      const registeredDocs=new Set(atts.map((a)=> String(a.documento||'').trim()).filter(Boolean));
+      const externalCoverageDocs=new Set(
+        atts
+          .map((a)=> String(a.documento||'').trim())
+          .filter((doc)=> doc && contractedDocs.size && !contractedDocs.has(doc))
+          .slice(0, Number(d.noContratado||0))
+      );
       atts.forEach((a)=>{
         const rep=replByEmpDate.get(`${a.fecha||''}|${a.empleadoId||''}`);
         let estado='Trabajo';
@@ -377,6 +402,10 @@ export const Absenteeism=(mount,deps={})=>{
           estado=attendanceRequiresReplacementForSummary(a,novedadRules)
             ? 'Ausentismo'
             : `Novedad: ${a.novedadNombre||a.novedad||'-'}`;
+        }
+        const doc=String(a.documento||'').trim();
+        if(doc && contractedDocs.size && !contractedDocs.has(doc) && !externalCoverageDocs.has(doc)){
+          estado=estado==='Trabajo' ? 'Sobrante' : `Sobrante - ${estado}`;
         }
         detailRows.push({
           fecha:d.fecha,
@@ -395,7 +424,17 @@ export const Absenteeism=(mount,deps={})=>{
           estado:'No contratado'
         });
       }
-      for(let i=0;i<Number(d.noRegistrado||0);i++){
+      const missingEmployees=contracted.filter((c)=> !registeredDocs.has(String(c.documento||'').trim()));
+      missingEmployees.forEach((c)=>{
+        detailRows.push({
+          fecha:d.fecha,
+          sede:d.sedeNombre,
+          documento:c.documento||'-',
+          nombre:c.nombre||'-',
+          estado:'Ausentismo (sin registro / novedad 8)'
+        });
+      });
+      for(let i=missingEmployees.length;i<Number(d.noRegistrado||0);i++){
         detailRows.push({
           fecha:d.fecha,
           sede:d.sedeNombre,
@@ -421,6 +460,15 @@ export const Absenteeism=(mount,deps={})=>{
     sedeRows.forEach((d)=>{
       const key=`${d.fecha}|${d.sedeCodigo}`;
       const atts=attendanceByKey.get(key)||[];
+      const contracted=contractedEmployeesBySede.get(d.sedeCodigo)||[];
+      const contractedDocs=new Set(contracted.map((c)=> String(c.documento||'').trim()).filter(Boolean));
+      const registeredDocs=new Set(atts.map((a)=> String(a.documento||'').trim()).filter(Boolean));
+      const externalCoverageDocs=new Set(
+        atts
+          .map((a)=> String(a.documento||'').trim())
+          .filter((doc)=> doc && contractedDocs.size && !contractedDocs.has(doc))
+          .slice(0, Number(d.noContratado||0))
+      );
       atts.forEach((a)=>{
         const rep=replByEmpDate.get(`${a.fecha||''}|${a.empleadoId||''}`);
         let estado='Trabajo';
@@ -432,6 +480,10 @@ export const Absenteeism=(mount,deps={})=>{
           estado=attendanceRequiresReplacementForSummary(a,novedadRules)
             ? 'Ausentismo'
             : `Novedad: ${a.novedadNombre||a.novedad||'-'}`;
+        }
+        const doc=String(a.documento||'').trim();
+        if(doc && contractedDocs.size && !contractedDocs.has(doc) && !externalCoverageDocs.has(doc)){
+          estado=estado==='Trabajo' ? 'Sobrante' : `Sobrante - ${estado}`;
         }
         detailRows.push({
           fecha:d.fecha,
@@ -450,7 +502,17 @@ export const Absenteeism=(mount,deps={})=>{
           estado:'No contratado'
         });
       }
-      for(let i=0;i<Number(d.noRegistrado||0);i++){
+      const missingEmployees=contracted.filter((c)=> !registeredDocs.has(String(c.documento||'').trim()));
+      missingEmployees.forEach((c)=>{
+        detailRows.push({
+          fecha:d.fecha,
+          sede:d.sedeNombre,
+          documento:c.documento||'-',
+          nombre:c.nombre||'-',
+          estado:'Ausentismo (sin registro / novedad 8)'
+        });
+      });
+      for(let i=missingEmployees.length;i<Number(d.noRegistrado||0);i++){
         detailRows.push({
           fecha:d.fecha,
           sede:d.sedeNombre,
@@ -682,6 +744,22 @@ function parseOperatorCount(value){
   if(!digits) return 0;
   const n=Number(digits);
   return Number.isFinite(n)? n:0;
+}
+
+function isEmployeeAssignedForDate(emp,selectedDate){
+  if(!selectedDate) return false;
+  const ingreso=toISODate(emp?.fechaIngreso);
+  if(!ingreso || ingreso>selectedDate) return false;
+  const retiro=toISODate(emp?.fechaRetiro);
+  const estado=String(emp?.estado||'').trim().toLowerCase();
+  if(estado==='inactivo') return Boolean(retiro && retiro>=selectedDate);
+  if(retiro && retiro<selectedDate) return false;
+  return Boolean(String(emp?.sedeCodigo||'').trim());
+}
+
+function isEmployeeMarkedAsSupernumerario(emp){
+  const raw=String(emp?.cargoNombre||emp?.cargo_nombre||'').trim().toLowerCase();
+  return raw.includes('supernumer');
 }
 
 function isEmployeeExpectedForDate(emp,selectedDate,sedeRows=[]){
