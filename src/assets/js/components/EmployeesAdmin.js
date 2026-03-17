@@ -234,17 +234,17 @@ export const EmployeesAdmin=(mount,deps={})=>{
   async function openCargoHistoryModal(e){
     const employeeId=String(e?.id||'').trim();
     if(!employeeId || typeof deps.streamEmployeeCargoHistory!=='function'){
-      showInfoModal('Historial de cargos',['No hay historial disponible para este empleado.']);
+      showInfoModal('Historial del empleado',['No hay historial disponible para este empleado.']);
       return;
     }
-    showInfoModal(`Historial de cargos - ${e?.nombre||'-'}`,['Cargando...']);
+    showInfoModal(`Historial del empleado - ${e?.nombre||'-'}`,['Cargando...']);
     let done=false;
     const un=deps.streamEmployeeCargoHistory(employeeId,(rows)=>{
       if(done) return;
       done=true;
       const list=Array.isArray(rows)? rows:[];
       if(!list.length){
-        showInfoModal(`Historial de cargos - ${e?.nombre||'-'}`,['Sin registros.']);
+        showInfoModal(`Historial del empleado - ${e?.nombre||'-'}`,['Sin registros.']);
         un?.();
         return;
       }
@@ -252,15 +252,16 @@ export const EmployeesAdmin=(mount,deps={})=>{
         const ingreso=formatDate(row.fechaIngreso);
         const retiro=row.fechaRetiro ? formatDate(row.fechaRetiro) : 'Activo';
         const cargo=row.cargoNombre||row.cargoCodigo||'-';
-        return `${idx+1}. ${cargo} | Ingreso: ${ingreso} | Retiro: ${retiro}`;
+        const sede=row.sedeNombre||row.sedeCodigo||'-';
+        return `${idx+1}. Cargo: ${cargo} | Sede: ${sede} | Ingreso: ${ingreso} | Retiro: ${retiro}`;
       });
-      showInfoModal(`Historial de cargos - ${e?.nombre||'-'}`,lines);
+      showInfoModal(`Historial del empleado - ${e?.nombre||'-'}`,lines);
       un?.();
     });
     setTimeout(()=>{
       if(done) return;
       done=true;
-      showInfoModal(`Historial de cargos - ${e?.nombre||'-'}`,['No se pudo cargar el historial. Intenta de nuevo.']);
+      showInfoModal(`Historial del empleado - ${e?.nombre||'-'}`,['No se pudo cargar el historial. Intenta de nuevo.']);
       un?.();
     },5000);
   }
@@ -274,13 +275,16 @@ export const EmployeesAdmin=(mount,deps={})=>{
       const target=e.estado==='activo'?'inactivo':'activo';
       try{
         let retiroDate=null;
+        let ingresoDate=null;
         const suggested=toInputDate(new Date()) || '';
         const modal=await showActionModal({
           title:`${target==='inactivo'?'Desactivar':'Activar'} empleado`,
           message:`Empleado: ${e.nombre||'-'}`,
           confirmText:target==='inactivo'?'Desactivar':'Activar',
           fields:[
-            ...(target==='inactivo' ? [{ id:'retiroDate', label:'Fecha de retiro', type:'date', required:true, value:suggested }] : []),
+            ...(target==='inactivo'
+              ? [{ id:'retiroDate', label:'Fecha de retiro', type:'date', required:true, value:suggested }]
+              : [{ id:'ingresoDate', label:'Nueva fecha de ingreso', type:'date', required:true, value:suggested }]),
             { id:'detail', label:'Detalle', type:'textarea', required:true, placeholder:'Escribe el motivo o detalle de esta accion' }
           ]
         });
@@ -290,9 +294,14 @@ export const EmployeesAdmin=(mount,deps={})=>{
           if(!/^\d{4}-\d{2}-\d{2}$/.test(retiro)) return alert('Fecha invalida. Usa formato AAAA-MM-DD.');
           retiroDate=new Date(`${retiro}T00:00:00`);
           if(Number.isNaN(retiroDate.getTime())) return alert('Fecha invalida.');
+        }else{
+          const ingreso=String(modal.values.ingresoDate||'').trim();
+          if(!/^\d{4}-\d{2}-\d{2}$/.test(ingreso)) return alert('Fecha invalida. Usa formato AAAA-MM-DD.');
+          ingresoDate=new Date(`${ingreso}T00:00:00`);
+          if(Number.isNaN(ingresoDate.getTime())) return alert('Fecha invalida.');
         }
-        await deps.setEmployeeStatus?.(e.id,target,retiroDate);
-        await deps.addAuditLog?.({ targetType:'employee', targetId:e.id, action: target==='activo'?'activate_employee':'deactivate_employee', before:{estado:e.estado, fechaRetiro:e.fechaRetiro||null}, after:{estado:target, fechaRetiro:retiroDate||null}, note: modal.values.detail||null });
+        await deps.setEmployeeStatus?.(e.id,target,{ fechaRetiro:retiroDate, fechaIngreso:ingresoDate });
+        await deps.addAuditLog?.({ targetType:'employee', targetId:e.id, action: target==='activo'?'activate_employee':'deactivate_employee', before:{estado:e.estado, fechaIngreso:e.fechaIngreso||null, fechaRetiro:e.fechaRetiro||null}, after:{estado:target, fechaIngreso:ingresoDate||e.fechaIngreso||null, fechaRetiro:retiroDate||null}, note: modal.values.detail||null });
       }catch(err){ alert('Error: '+(err?.message||err)); }
     });
     const btnInfo=el('button',{className:'btn btn--icon',title:'Ver informacion','aria-label':'Ver informacion'},['\u24D8']);
@@ -336,12 +345,21 @@ export const EmployeesAdmin=(mount,deps={})=>{
       if(!newCargoCode) return alert('Selecciona un cargo.');
       if(!newSedeCode) return alert('Selecciona una sede.');
       if(!newIngreso) return alert('Selecciona la fecha de ingreso.');
+      if(e.estado==='activo' && newRetiro) return alert('Un empleado activo no debe tener fecha de retiro.');
       if(e.estado==='inactivo' && !newRetiro) return alert('Para empleados inactivos, la fecha de retiro es obligatoria.');
+      const sedeChanged=newSedeCode!==String(e.sedeCodigo||'');
+      const suggestedTransferEnd=toInputDate(new Date()) || '';
       const modal=await showActionModal({
         title:'Confirmar modificacion',
         message:`Empleado: ${e.nombre||'-'}`,
         confirmText:'Guardar cambios',
-        fields:[{ id:'detail', label:'Detalle de la modificacion', type:'textarea', required:true, placeholder:'Describe brevemente el cambio realizado' }]
+        fields:[
+          ...(sedeChanged ? [
+            { id:'historyRetiroDate', label:'Fecha de retiro en sede anterior', type:'date', required:true, value:suggestedTransferEnd },
+            { id:'historyIngresoDate', label:'Fecha de ingreso en nueva sede', type:'date', required:true, value:newIngreso || suggestedTransferEnd }
+          ] : []),
+          { id:'detail', label:'Detalle de la modificacion', type:'textarea', required:true, placeholder:'Describe brevemente el cambio realizado' }
+        ]
       });
       if(!modal.confirmed) return;
       try{
@@ -349,6 +367,10 @@ export const EmployeesAdmin=(mount,deps={})=>{
         if(newDoc!==e.documento){ const dupDoc=await deps.findEmployeeByDocument?.(newDoc); if(dupDoc && dupDoc.id!==e.id) return alert('Ya existe un empleado con ese documento.'); }
         const newCargo=cargoList.find(c=>c.codigo===newCargoCode);
         const newSede=sedeList.find(s=>s.codigo===newSedeCode);
+        const historyRetiroDate=sedeChanged ? String(modal.values.historyRetiroDate||'').trim() : '';
+        const historyIngresoDate=sedeChanged ? String(modal.values.historyIngresoDate||'').trim() : newIngreso;
+        if(sedeChanged && !/^\d{4}-\d{2}-\d{2}$/.test(historyRetiroDate)) return alert('La fecha de retiro de la sede anterior es obligatoria.');
+        if(!/^\d{4}-\d{2}-\d{2}$/.test(historyIngresoDate)) return alert('La fecha de ingreso es obligatoria.');
         await deps.updateEmployee?.(e.id,{
           codigo:newCode,
           documento:newDoc,
@@ -358,10 +380,11 @@ export const EmployeesAdmin=(mount,deps={})=>{
           cargoNombre:newCargo?.nombre||null,
           sedeCodigo:newSedeCode,
           sedeNombre:newSede?.nombre||null,
-          fechaIngreso: new Date(`${newIngreso}T00:00:00`),
-          fechaRetiro: newRetiro ? new Date(`${newRetiro}T00:00:00`) : null
+          fechaIngreso: new Date(`${historyIngresoDate}T00:00:00`),
+          fechaRetiro: newRetiro ? new Date(`${newRetiro}T00:00:00`) : null,
+          historialFechaRetiro: sedeChanged ? new Date(`${historyRetiroDate}T00:00:00`) : null
         });
-        await deps.addAuditLog?.({ targetType:'employee', targetId:e.id, action:'update_employee', before:{ codigo:e.codigo, documento:e.documento, nombre:e.nombre, sedeCodigo:e.sedeCodigo, fechaRetiro:e.fechaRetiro||null }, after:{ codigo:newCode, documento:newDoc, nombre:newName, sedeCodigo:newSedeCode, fechaRetiro:newRetiro||null }, note: modal.values.detail||null });
+        await deps.addAuditLog?.({ targetType:'employee', targetId:e.id, action:'update_employee', before:{ codigo:e.codigo, documento:e.documento, nombre:e.nombre, sedeCodigo:e.sedeCodigo, fechaIngreso:e.fechaIngreso||null, fechaRetiro:e.fechaRetiro||null }, after:{ codigo:newCode, documento:newDoc, nombre:newName, sedeCodigo:newSedeCode, fechaIngreso:historyIngresoDate||null, fechaRetiro:newRetiro||null, historialFechaRetiro:sedeChanged?historyRetiroDate:null }, note: modal.values.detail||null });
       }catch(err){ alert('Error: '+(err?.message||err)); }
     });
     btnCancel.addEventListener('click',()=> render());

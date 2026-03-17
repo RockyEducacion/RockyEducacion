@@ -265,6 +265,8 @@ function mapCargoHistoryRow(row = {}) {
     documento: row.documento || null,
     cargoCodigo: row.cargo_codigo || null,
     cargoNombre: row.cargo_nombre || null,
+    sedeCodigo: row.sede_codigo || null,
+    sedeNombre: row.sede_nombre || null,
     fechaIngreso: row.fecha_ingreso || null,
     fechaRetiro: row.fecha_retiro || null,
     source: row.source || null,
@@ -595,6 +597,8 @@ async function appendEmployeeCargoHistory({
   documento,
   cargoCodigo,
   cargoNombre,
+  sedeCodigo = null,
+  sedeNombre = null,
   fechaIngreso,
   fechaRetiro = null,
   source = 'manual'
@@ -606,6 +610,8 @@ async function appendEmployeeCargoHistory({
     documento: documento || null,
     cargo_codigo: cargoCodigo || null,
     cargo_nombre: cargoNombre || null,
+    sede_codigo: sedeCodigo || null,
+    sede_nombre: sedeNombre || null,
     fecha_ingreso: fechaIngreso || null,
     fecha_retiro: fechaRetiro || null,
     source
@@ -618,6 +624,20 @@ async function appendEmployeeCargoHistoryBulk(rows = [], notifyReload = true) {
   const items = Array.isArray(rows) ? rows.filter((row) => row?.employee_id) : [];
   if (!items.length) return;
   const { error } = await supabase.from('employee_cargo_history').insert(items);
+  if (error) throw error;
+  if (notifyReload) {
+    await notifyTableReload('employee_cargo_history');
+  }
+}
+
+async function closeActiveEmployeeHistory(employeeId, fechaRetiro, notifyReload = true) {
+  const empId = String(employeeId || '').trim();
+  if (!empId || !fechaRetiro) return;
+  const { error } = await supabase
+    .from('employee_cargo_history')
+    .update({ fecha_retiro: fechaRetiro })
+    .eq('employee_id', empId)
+    .is('fecha_retiro', null);
   if (error) throw error;
   if (notifyReload) {
     await notifyTableReload('employee_cargo_history');
@@ -985,6 +1005,8 @@ async function insertEmployeeRecord({
     documento: data.documento,
     cargoCodigo: data.cargo_codigo,
     cargoNombre: data.cargo_nombre,
+    sedeCodigo: data.sede_codigo,
+    sedeNombre: data.sede_nombre,
     fechaIngreso: data.fecha_ingreso,
     source: historySource
   });
@@ -1806,7 +1828,7 @@ export async function createEmployeesBulk(rows = [], options = {}) {
     const { data: insertedRows, error: insertError } = await supabase
       .from('employees')
       .insert(payloads)
-      .select('id, codigo, documento, cargo_codigo, cargo_nombre, fecha_ingreso');
+      .select('id, codigo, documento, cargo_codigo, cargo_nombre, sede_codigo, sede_nombre, fecha_ingreso');
     if (insertError) throw insertError;
     await appendEmployeeCargoHistoryBulk((insertedRows || []).map((row) => ({
       employee_id: row.id,
@@ -1814,6 +1836,8 @@ export async function createEmployeesBulk(rows = [], options = {}) {
       documento: row.documento || null,
       cargo_codigo: row.cargo_codigo || null,
       cargo_nombre: row.cargo_nombre || null,
+      sede_codigo: row.sede_codigo || null,
+      sede_nombre: row.sede_nombre || null,
       fecha_ingreso: row.fecha_ingreso || null,
       fecha_retiro: null,
       source: 'bulk_create_employee'
@@ -1857,19 +1881,36 @@ export async function updateEmployee(id, data = {}) {
   if (data.fechaRetiro !== undefined) patch.fecha_retiro = data.fechaRetiro || null;
   const { data: updated, error } = await supabase.from('employees').update(patch).eq('id', id).select('*').single();
   if (error) throw error;
+  const currentIngreso = toISODate(currentRow.fecha_ingreso);
+  const updatedIngreso = toISODate(updated.fecha_ingreso);
+  const currentSede = String(currentRow.sede_codigo || '').trim();
+  const updatedSede = String(updated.sede_codigo || '').trim();
   const cargoChanged =
-    patch.cargo_codigo !== undefined &&
-    String(patch.cargo_codigo || '') !== String(currentRow.cargo_codigo || '');
-  if (cargoChanged) {
+    String(updated.cargo_codigo || '') !== String(currentRow.cargo_codigo || '');
+  const sedeChanged = updatedSede !== currentSede;
+  const ingresoChanged = updatedIngreso !== currentIngreso;
+  const requiresNewHistoryEntry =
+    String(updated.estado || 'activo').trim().toLowerCase() === 'activo' &&
+    (cargoChanged || sedeChanged || ingresoChanged);
+  if (requiresNewHistoryEntry) {
+    const historyRetiro =
+      data.historialFechaRetiro ||
+      data.fechaHistorialRetiro ||
+      data.assignmentFechaRetiro ||
+      updated.updated_at ||
+      new Date().toISOString();
+    await closeActiveEmployeeHistory(updated.id, historyRetiro, false);
     await appendEmployeeCargoHistory({
       employeeId: updated.id,
       employeeCodigo: updated.codigo,
       documento: updated.documento,
       cargoCodigo: updated.cargo_codigo,
       cargoNombre: updated.cargo_nombre,
+      sedeCodigo: updated.sede_codigo,
+      sedeNombre: updated.sede_nombre,
       fechaIngreso: updated.fecha_ingreso || new Date().toISOString(),
-      fechaRetiro: updated.fecha_retiro || null,
-      source: 'cargo_change'
+      fechaRetiro: null,
+      source: sedeChanged ? 'sede_change' : (cargoChanged ? 'cargo_change' : 'employee_update')
     });
   }
   if (await getCargoCrudAlignmentByCode(updated.cargo_codigo, updated.cargo_nombre) === 'supervisor') {
@@ -1878,7 +1919,15 @@ export async function updateEmployee(id, data = {}) {
   await notifyTableReload('employees');
 }
 
-export async function setEmployeeStatus(id, estado, fechaRetiro = null) {
+export async function setEmployeeStatus(id, estado, options = null) {
+  const current = await supabase.from('employees').select('*').eq('id', id).single();
+  if (current.error) throw current.error;
+  const currentRow = current.data;
+  const opts = options && typeof options === 'object' && !(options instanceof Date)
+    ? options
+    : { fechaRetiro: options || null };
+  const fechaRetiro = opts.fechaRetiro || null;
+  const fechaIngreso = opts.fechaIngreso || null;
   const audit = await getCurrentAuditFields();
   const patch = {
     estado,
@@ -1887,11 +1936,35 @@ export async function setEmployeeStatus(id, estado, fechaRetiro = null) {
     last_modified_by_email: audit.created_by_email,
     last_modified_at: new Date().toISOString()
   };
+  if (estado === 'activo' && String(currentRow.estado || '').trim().toLowerCase() !== 'activo') {
+    patch.fecha_ingreso = fechaIngreso || new Date().toISOString();
+    patch.fecha_retiro = null;
+  }
   const { data, error } = await supabase.from('employees').update(patch).eq('id', id).select('*').single();
   if (error) throw error;
+  const previousEstado = String(currentRow.estado || '').trim().toLowerCase();
+  const nextEstado = String(estado || '').trim().toLowerCase();
+  if (previousEstado !== 'inactivo' && nextEstado === 'inactivo') {
+    await closeActiveEmployeeHistory(data.id, patch.fecha_retiro, true);
+  }
+  if (previousEstado === 'inactivo' && nextEstado === 'activo') {
+    await appendEmployeeCargoHistory({
+      employeeId: data.id,
+      employeeCodigo: data.codigo,
+      documento: data.documento,
+      cargoCodigo: data.cargo_codigo,
+      cargoNombre: data.cargo_nombre,
+      sedeCodigo: data.sede_codigo,
+      sedeNombre: data.sede_nombre,
+      fechaIngreso: data.fecha_ingreso || new Date().toISOString(),
+      fechaRetiro: null,
+      source: 'reactivate_employee'
+    });
+  }
   if (await getCargoCrudAlignmentByCode(data.cargo_codigo, data.cargo_nombre) === 'supervisor') {
     await upsertSupervisorProfileFromEmployee(mapEmployeeRow(data), {
       estado,
+      fechaIngreso: patch.fecha_ingreso,
       fechaRetiro: patch.fecha_retiro
     });
   }

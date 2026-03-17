@@ -976,6 +976,27 @@ function normalizeCargoAlignment(value) {
   return 'empleado';
 }
 
+function toISODate(value) {
+  if (!value) return null;
+  if (typeof value === 'string') {
+    const v = value.trim();
+    if (/^\d{4}-\d{2}-\d{2}$/.test(v)) return v;
+    const dt = new Date(v);
+    if (!Number.isNaN(dt.getTime())) return dt.toISOString().slice(0, 10);
+    return null;
+  }
+  if (typeof value?.toDate === 'function') {
+    const dt = value.toDate();
+    if (!Number.isNaN(dt.getTime())) return dt.toISOString().slice(0, 10);
+    return null;
+  }
+  if (value instanceof Date) {
+    if (!Number.isNaN(value.getTime())) return value.toISOString().slice(0, 10);
+    return null;
+  }
+  return null;
+}
+
 async function closeOperationDay(date) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(String(date || '').trim())) {
     throw new Error('invalid_date');
