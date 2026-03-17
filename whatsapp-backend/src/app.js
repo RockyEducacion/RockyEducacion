@@ -34,7 +34,8 @@ const NOVELTIES = {
   SICKNESS: { code: '3', label: 'Enfermedad General', absenteeism: true, requiresDates: true },
   CALAMITY: { code: '4', label: 'Calamidad', absenteeism: true, requiresDates: true },
   UNPAID_LEAVE: { code: '5', label: 'Licencia No Remunerada', absenteeism: true, requiresDates: false },
-  COMPENSATORY: { code: '7', label: 'Compensatorio', absenteeism: false, requiresDates: false }
+  COMPENSATORY: { code: '7', label: 'Compensatorio', absenteeism: false, requiresDates: false },
+  VACATIONS: { code: '9', label: 'Vacaciones', absenteeism: true, requiresDates: true }
 };
 
 const MENU_IDS = {
@@ -49,7 +50,8 @@ const MENU_IDS = {
   NOVELTY_SICKNESS: 'novelty_3',
   NOVELTY_ACCIDENT: 'novelty_2',
   NOVELTY_CALAMITY: 'novelty_4',
-  NOVELTY_UNPAID: 'novelty_5'
+  NOVELTY_UNPAID: 'novelty_5',
+  NOVELTY_VACATIONS: 'novelty_9'
 };
 
 const NO_REGISTERED_MESSAGE = 'No estás registrado en nuestra base de datos, por favor comunícate con tu supervisor.';
@@ -411,7 +413,8 @@ async function handleActionSelection(phone, session, parsed) {
         { id: MENU_IDS.NOVELTY_SICKNESS, title: 'Enfermedad General' },
         { id: MENU_IDS.NOVELTY_ACCIDENT, title: 'Accidente Laboral' },
         { id: MENU_IDS.NOVELTY_CALAMITY, title: 'Calamidad' },
-        { id: MENU_IDS.NOVELTY_UNPAID, title: 'Licencia No Remunerada' }
+        { id: MENU_IDS.NOVELTY_UNPAID, title: 'Licencia No Remunerada' },
+        { id: MENU_IDS.NOVELTY_VACATIONS, title: 'Vacaciones' }
       ]
     }]);
     return;
@@ -916,7 +919,7 @@ function metricAttendanceNovedadCode(row = {}) {
 function metricAttendanceRequiresReplacement(row = {}, rules = {}) {
   const code = metricAttendanceNovedadCode(row);
   if (['1', '7'].includes(code)) return false;
-  if (['2', '3', '4', '5', '8'].includes(code)) return true;
+  if (['2', '3', '4', '5', '8', '9'].includes(code)) return true;
   if (code && rules?.byCode?.has(code)) return rules.byCode.get(code) === true;
   const name = normalizeMetricText(baseMetricNovedadName(row?.novedad_nombre || row?.novedadNombre || row?.novedad || ''));
   if (name && rules?.byName?.has(name)) return rules.byName.get(name) === true;
@@ -1256,6 +1259,7 @@ function incapacitySourceToNoveltyCode(source) {
   if (raw.includes('enfermedad general')) return '3';
   if (raw.includes('calamidad')) return '4';
   if (raw.includes('licencia no remunerada')) return '5';
+  if (raw.includes('vacaciones')) return '9';
   return '3';
 }
 
@@ -1506,6 +1510,7 @@ function mapNovelty(parsed) {
   if (normalizedId === normalizeKey(MENU_IDS.NOVELTY_ACCIDENT) || normalizedValue === 'accidentelaboral') return NOVELTIES.ACCIDENT;
   if (normalizedId === normalizeKey(MENU_IDS.NOVELTY_CALAMITY) || normalizedValue === 'calamidad') return NOVELTIES.CALAMITY;
   if (normalizedId === normalizeKey(MENU_IDS.NOVELTY_UNPAID) || normalizedValue === 'licencianoremunerada') return NOVELTIES.UNPAID_LEAVE;
+  if (normalizedId === normalizeKey(MENU_IDS.NOVELTY_VACATIONS) || normalizedValue === 'vacaciones') return NOVELTIES.VACATIONS;
   return null;
 }
 

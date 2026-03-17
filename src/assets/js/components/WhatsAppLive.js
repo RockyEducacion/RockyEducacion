@@ -151,7 +151,7 @@ export const WhatsAppLive = (mount, deps = {}) => {
     const code = attendanceNovedadCode(row);
     if ((!raw && !code) || code === '1' || raw === '1') return row.asistio ? 'replace_no' : 'none';
     if (code === '7') return 'replace_no';
-    if (['2', '3', '4', '5', '8'].includes(code)) return 'replace_yes';
+    if (['2', '3', '4', '5', '8', '9'].includes(code)) return 'replace_yes';
     const rawNorm = normalize(raw);
     if (rawNorm.startsWith('otra sede')) return 'otra_sede';
 
@@ -260,13 +260,14 @@ export const WhatsAppLive = (mount, deps = {}) => {
     if (['1', '7'].includes(targetCode)) {
       return { nombre: targetCode === '1' ? 'TRABAJANDO' : 'COMPENSATORIO', reemplazo: false };
     }
-    if (['2', '3', '4', '5', '8'].includes(targetCode)) {
+    if (['2', '3', '4', '5', '8', '9'].includes(targetCode)) {
       const labels = {
         '2': 'ACCIDENTE LABORAL',
         '3': 'ENFERMEDAD GENERAL',
         '4': 'CALAMIDAD',
         '5': 'LICENCIA NO REMUNERADA',
-        '8': 'NOVEDAD'
+        '8': 'NOVEDAD',
+        '9': 'VACACIONES'
       };
       return { nombre: labels[targetCode] || targetCode, reemplazo: true };
     }
@@ -303,6 +304,7 @@ export const WhatsAppLive = (mount, deps = {}) => {
     if (t.includes('incapacidad')) return 'replace_yes';
     if (t.includes('accidente laboral')) return 'replace_yes';
     if (t.includes('calamidad')) return 'replace_yes';
+    if (t.includes('vacaciones')) return 'replace_yes';
     if (t.includes('permiso no remunerado')) return 'replace_yes';
     if (t.includes('compensatorio')) return 'replace_no';
     return null;

@@ -440,7 +440,7 @@ function baseMetricNovedadName(raw) {
 function metricAttendanceRequiresReplacement(row = {}, rules = {}) {
   const code = String(row?.novedadCodigo || (/^\d+$/.test(String(row?.novedad || '').trim()) ? String(row?.novedad || '').trim() : '')).trim();
   if (['1', '7'].includes(code)) return false;
-  if (['2', '3', '4', '5', '8'].includes(code)) return true;
+  if (['2', '3', '4', '5', '8', '9'].includes(code)) return true;
   if (code && rules?.byCode?.has(code)) return rules.byCode.get(code) === true;
   const name = normalizeMetricText(baseMetricNovedadName(row?.novedadNombre || row?.novedad || ''));
   if (name && rules?.byName?.has(name)) return rules.byName.get(name) === true;

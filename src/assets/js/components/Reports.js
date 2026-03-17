@@ -134,6 +134,19 @@ export const Reports = (mount, deps = {}) => {
       });
   }
 
+  function displayNovedadLabel(row = {}) {
+    const code = String(row.novedadCodigo || (/^\d+$/.test(String(row.novedad || '').trim()) ? String(row.novedad || '').trim() : '')).trim();
+    const raw = String(row.novedadNombre || row.novedad || '-').trim();
+    if (code === '1') return 'Trabajando';
+    if (code === '2') return 'Accidente Laboral';
+    if (code === '3') return 'Enfermedad General';
+    if (code === '4') return 'Calamidad';
+    if (code === '5') return 'Licencia No Remunerada';
+    if (code === '7') return 'Compensatorio';
+    if (code === '9') return 'Vacaciones';
+    return raw || '-';
+  }
+
   function normalizeDailyRegistryRows(fecha, attendanceRows = [], replacementsRows = []) {
     const replacementByEmployeeId = new Map();
     const replacementByDocumento = new Map();
@@ -148,7 +161,7 @@ export const Reports = (mount, deps = {}) => {
       const empId = String(a.empleadoId || '').trim();
       const doc = String(a.documento || '').trim();
       const rep = replacementByEmployeeId.get(empId) || replacementByDocumento.get(doc) || null;
-      const novedad = String(rep?.novedadNombre || a.novedad || '-').trim() || '-';
+      const novedad = rep ? displayNovedadLabel(rep) : displayNovedadLabel(a);
       let decision = '-';
       const rawDecision = String(rep?.decision || '').trim().toLowerCase();
       if (rawDecision === 'reemplazo') {
@@ -258,7 +271,7 @@ export const Reports = (mount, deps = {}) => {
   function attendanceRequiresReplacement(att = {}, rules = {}) {
     const code = String(att.novedadCodigo || (/^\d+$/.test(String(att.novedad || '').trim()) ? String(att.novedad || '').trim() : '')).trim();
     if (['1', '7'].includes(code)) return false;
-    if (['2', '3', '4', '5', '8'].includes(code)) return true;
+    if (['2', '3', '4', '5', '8', '9'].includes(code)) return true;
     if (code && rules?.byCode?.has(code)) return rules.byCode.get(code) === true;
     const name = normalizeText(baseNovedadName(att.novedadNombre || att.novedad || ''));
     if (name && rules?.byName?.has(name)) return rules.byName.get(name) === true;

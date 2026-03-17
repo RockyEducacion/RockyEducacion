@@ -101,7 +101,18 @@ export const RegistroDiarioSupervisor = (mount, deps = {}) => {
   }
 
   function displayNovedad(r = {}) {
-    return String(r.novedadNombre || r.novedad || r.novedadCodigo || r.novelty || '-').trim() || '-';
+    const raw = String(r.novedadNombre || r.novedad || r.novedadCodigo || r.novelty || '-').trim();
+    const code = /^\d+$/.test(String(r.novedadCodigo || r.novedad || '').trim())
+      ? String(r.novedadCodigo || r.novedad || '').trim()
+      : '';
+    if (code === '1') return 'Trabajando';
+    if (code === '2') return 'Accidente Laboral';
+    if (code === '3') return 'Enfermedad General';
+    if (code === '4') return 'Calamidad';
+    if (code === '5') return 'Licencia No Remunerada';
+    if (code === '7') return 'Compensatorio';
+    if (code === '9') return 'Vacaciones';
+    return raw || '-';
   }
 
   function statusOf(row = {}, repl = null) {
