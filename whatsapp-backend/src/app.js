@@ -998,13 +998,14 @@ async function closeOperationDay(date) {
   if (existingClosureError) throw existingClosureError;
 
   if (existingClosure?.locked === true || String(existingClosure?.status || '').trim().toLowerCase() === 'closed') {
+    await runPostClosureTasks(day);
     await insertSystemAuditLog({
       actorEmail: 'cron@system',
       targetType: 'daily_closure',
       targetId: day,
-      action: 'cron_close_skipped',
+      action: 'cron_close_reconciled',
       before: existingClosure,
-      note: `El cierre automatico de ${day} se omitio porque ya estaba cerrado.`
+      note: `El cierre automatico de ${day} ya estaba cerrado; se reconciliaron tareas pendientes de post-cierre.`
     });
     return { date: day, status: 'already_closed' };
   }
@@ -1037,6 +1038,15 @@ async function closeOperationDay(date) {
       action: 'cron_close_stage_metrics',
       after: metrics,
       note: `Se recalcularon daily_metrics para ${day}.`
+    });
+
+    await runPostClosureTasks(day);
+    await insertSystemAuditLog({
+      actorEmail: 'cron@system',
+      targetType: 'daily_closure',
+      targetId: day,
+      action: 'cron_close_stage_post_closure',
+      note: `Se ejecutaron tareas de post-cierre para ${day}.`
     });
 
     const { error: closureError } = await supabaseAdmin
@@ -1078,8 +1088,6 @@ async function closeOperationDay(date) {
       action: 'cron_close_stage_metrics_closed',
       note: `Se marco daily_metrics como cerrado para ${day}.`
     });
-
-    await propagateIncapacitiesToNextDay(day);
     await insertSystemAuditLog({
       actorEmail: 'cron@system',
       targetType: 'daily_closure',
@@ -1101,6 +1109,15 @@ async function closeOperationDay(date) {
   }
 
   return { date: day, status: 'closed' };
+}
+
+async function runPostClosureTasks(day) {
+  const { error: metricCloseError } = await supabaseAdmin
+    .from('daily_metrics')
+    .update({ closed: true })
+    .eq('fecha', day);
+  if (metricCloseError) throw metricCloseError;
+  await propagateIncapacitiesToNextDay(day);
 }
 
 async function recomputeAndFetchDailyMetrics(date) {

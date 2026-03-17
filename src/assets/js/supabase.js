@@ -2637,11 +2637,13 @@ export async function closeOperationDayManual(fecha) {
   const day = String(fecha || '').trim();
   if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) throw new Error('Fecha invalida.');
   if (await isOperationDayClosed(day)) {
+    await runPostClosureTasks(day);
     return { ok: true, results: [{ date: day, status: 'already_closed' }] };
   }
   await finalizePendingAbsenteeismForClosure(day);
   await recomputeSedeStatusSnapshot(day);
   const metrics = mapDailyMetricsRow((await recomputeDailyMetrics(day)) || {});
+  await runPostClosureTasks(day);
   const audit = await getCurrentAuditFields();
   const { error } = await supabase.from('daily_closures').upsert({
     id: day,
@@ -2657,11 +2659,16 @@ export async function closeOperationDayManual(fecha) {
     closed_by_email: audit.created_by_email
   }, { onConflict: 'id' });
   if (error) throw error;
-  await propagateIncapacitiesToNextDay(day);
   await recomputeSedeStatusSnapshot(day);
   await recomputeDailyMetrics(day);
   await notifyTableReload('daily_closures');
   return { ok: true, results: [{ date: day, status: 'closed' }] };
+}
+
+async function runPostClosureTasks(day) {
+  const { error } = await supabase.from('daily_metrics').update({ closed: true }).eq('fecha', day);
+  if (error) throw error;
+  await propagateIncapacitiesToNextDay(day);
 }
 
 async function finalizePendingAbsenteeismForClosure(day) {
