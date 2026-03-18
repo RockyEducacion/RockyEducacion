@@ -80,8 +80,6 @@ const guardWrite=(perm,fn)=> async (...args)=>{
         listDailyMetricsRange:fb.listDailyMetricsRange,
         streamDailyMetricsByDate:fb.streamDailyMetricsByDate,
         streamIncapacitadosByDate:fb.streamIncapacitadosByDate,
-        streamDashboardAttendanceByDate:fb.streamDashboardAttendanceByDate,
-        streamDashboardReplacementsByDate:fb.streamDashboardReplacementsByDate,
         streamImportHistory:fb.streamImportHistory, streamDailyClosures:fb.streamDailyClosures, streamWhatsAppIncoming:fb.streamWhatsAppIncoming,
         streamAttendanceByDate:fb.streamAttendanceByDate, streamAttendanceRecent:fb.streamAttendanceRecent, streamImportReplacementsByDate:fb.streamImportReplacementsByDate
       };

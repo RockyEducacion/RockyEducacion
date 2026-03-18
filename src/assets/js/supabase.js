@@ -2474,14 +2474,6 @@ export function streamIncapacitadosByDate(fecha, onData) {
   };
 }
 
-export function streamDashboardAttendanceByDate(fecha, onData) {
-  return streamAttendanceByDate(fecha, onData);
-}
-
-export function streamDashboardReplacementsByDate(fecha, onData) {
-  return streamImportReplacementsByDate(fecha, onData);
-}
-
 export async function listSedeStatusRange(dateFrom, dateTo) {
   if (!dateFrom || !dateTo) return [];
   const { data, error } = await supabase

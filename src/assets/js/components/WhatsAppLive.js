@@ -121,15 +121,13 @@ export const WhatsAppLive = (mount, deps = {}) => {
   let unSedes = null;
   let unIncapacitados = null;
   let unDailyMetrics = null;
-  let unDashboardAttendance = null;
-  let unDashboardReplacements = null;
   let refreshTimer = null;
   let sortKey = 'hora';
   let sortDir = -1;
-  let usingDashboardDocs = false;
   let lastLegacyBackfillAt = 0;
   let dailyMetrics = null;
   let cardFilter = 'all';
+  const pendingReplacementSelections = new Map();
 
   function replacementRowKey(r = {}) {
     const empId = String(r.empleadoId || r.employeeId || '').trim();
@@ -143,6 +141,24 @@ export const WhatsAppLive = (mount, deps = {}) => {
       map.set(key, r);
     });
     return map;
+  }
+
+  function pendingReplacementSelectionFor(row) {
+    return pendingReplacementSelections.get(replacementRowKey(row)) || '';
+  }
+
+  function setPendingReplacementSelection(row, value) {
+    const key = replacementRowKey(row);
+    const normalized = String(value || '').trim();
+    if (!normalized) {
+      pendingReplacementSelections.delete(key);
+      return;
+    }
+    pendingReplacementSelections.set(key, normalized);
+  }
+
+  function clearPendingReplacementSelection(row) {
+    pendingReplacementSelections.delete(replacementRowKey(row));
   }
 
   function classifyRow(row) {
@@ -585,6 +601,7 @@ export const WhatsAppLive = (mount, deps = {}) => {
         fechaOperacion: row.fecha,
         assignments: [assignment]
       });
+      clearPendingReplacementSelection(row);
       replacements = mergeReplacements(replacements, [assignment]);
       statsReplacements = mergeReplacements(statsReplacements, [assignment]);
       render();
@@ -693,8 +710,14 @@ export const WhatsAppLive = (mount, deps = {}) => {
             ...opts.map((o) => el('option', { value: o.documento }, [`${o.nombre} (${o.documento || '-'})`]))
           ]
         );
-        if (repl?.decision === 'ausentismo') select.value = '__ausentismo__';
-        if (repl?.supernumerarioDocumento) select.value = String(repl.supernumerarioDocumento);
+        const pendingSelection = pendingReplacementSelectionFor(r);
+        if (pendingSelection && [...select.options].some((option) => String(option.value || '').trim() === pendingSelection)) {
+          select.value = pendingSelection;
+        } else if (repl?.decision === 'ausentismo') {
+          select.value = '__ausentismo__';
+        } else if (repl?.supernumerarioDocumento) {
+          select.value = String(repl.supernumerarioDocumento);
+        }
         const selectedLabel = () => select.options[select.selectedIndex]?.text || '';
         select.title = selectedLabel();
         const selectedPreview = el(
@@ -716,6 +739,7 @@ export const WhatsAppLive = (mount, deps = {}) => {
         saveBtn.addEventListener('click', () => saveReplacement(r, select.value, saveBtn, select));
         select.addEventListener('change', () => {
           const label = selectedLabel();
+          setPendingReplacementSelection(r, select.value);
           select.title = label;
           selectedPreview.textContent = label;
         });
@@ -747,9 +771,7 @@ export const WhatsAppLive = (mount, deps = {}) => {
     qs('#waNoveltyTotal', ui).textContent = String(stats.noveltyTotal);
     qs('#waNoveltyHandled', ui).textContent = String(stats.noveltyHandled);
     qs('#waNoveltyPending', ui).textContent = String(stats.noveltyPending);
-    msg.textContent = usingDashboardDocs
-      ? `Total registros del día: ${rows.length}`
-      : `Total registros del día: ${rows.length}`;
+    msg.textContent = `Total registros del día: ${rows.length}`;
     updateCardFilterUI();
     updateSortIndicators();
   }
@@ -904,18 +926,13 @@ export const WhatsAppLive = (mount, deps = {}) => {
     unAttendance?.();
     unReplacements?.();
     unDailyMetrics?.();
-    unDashboardAttendance?.();
-    unDashboardReplacements?.();
     stopRefreshTimer();
-    unDashboardAttendance = null;
-    unDashboardReplacements = null;
     attendance = [];
     replacements = [];
     statsAttendance = [];
     statsReplacements = [];
     dailyMetrics = null;
     lastLegacyBackfillAt = 0;
-    usingDashboardDocs = false;
     if (modeHint) modeHint.textContent = 'Vista completa del día';
     render();
     if (deps.streamDailyMetricsByDate) {
@@ -929,9 +946,9 @@ export const WhatsAppLive = (mount, deps = {}) => {
         () => {}
       );
     }
-    if (deps.streamDashboardAttendanceByDate && deps.streamDashboardReplacementsByDate) {
-      usingDashboardDocs = true;
-      unDashboardAttendance = deps.streamDashboardAttendanceByDate(
+    if (deps.streamAttendanceByDate && deps.streamImportReplacementsByDate) {
+      if (modeHint) modeHint.textContent = 'Vista en vivo';
+      unAttendance = deps.streamAttendanceByDate(
         today,
         (rows) => {
           attendance = rows || [];
@@ -941,7 +958,7 @@ export const WhatsAppLive = (mount, deps = {}) => {
         },
         () => {}
       );
-      unDashboardReplacements = deps.streamDashboardReplacementsByDate(
+      unReplacements = deps.streamImportReplacementsByDate(
         today,
         (rows) => {
           replacements = mergeReplacements(replacements, rows || []);
@@ -950,8 +967,6 @@ export const WhatsAppLive = (mount, deps = {}) => {
         },
         () => {}
       );
-      startRefreshTimer();
-      refreshCurrentDaySnapshot({ silent: true });
       return;
     }
     if (modeHint) modeHint.textContent = 'Modo de respaldo';
@@ -1062,8 +1077,6 @@ export const WhatsAppLive = (mount, deps = {}) => {
     unAttendance?.();
     unReplacements?.();
     unDailyMetrics?.();
-    unDashboardAttendance?.();
-    unDashboardReplacements?.();
     unSupernumerarios?.();
     unNovedades?.();
     unEmployees?.();

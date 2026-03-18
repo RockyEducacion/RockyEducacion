@@ -1,4 +1,5 @@
 import { el, qs } from '../utils/dom.js';
+import { getState } from '../state.js';
 
 export const RegistroDiarioSupervisor = (mount, deps = {}) => {
   const ui = el('section', { className: 'main-card' }, [
@@ -44,6 +45,27 @@ export const RegistroDiarioSupervisor = (mount, deps = {}) => {
   let sortKey = 'hora';
   let sortDir = -1;
 
+  function supervisorZoneCodes() {
+    const profile = getState().userProfile || {};
+    const zones = new Set();
+    const mainZone = String(profile?.zonaCodigo || '').trim();
+    if (mainZone) zones.add(mainZone);
+    (Array.isArray(profile?.zonasPermitidas) ? profile.zonasPermitidas : []).forEach((zone) => {
+      const code = String(zone || '').trim();
+      if (code) zones.add(code);
+    });
+    return zones;
+  }
+
+  function filterRowsBySupervisorZones(rows = []) {
+    const allowedZones = supervisorZoneCodes();
+    if (!allowedZones.size) return [];
+    return (rows || []).filter((row) => {
+      const zone = String(row?.zonaCodigo || '').trim();
+      return Boolean(zone && allowedZones.has(zone));
+    });
+  }
+
   function todayISO() {
     const d = new Date();
     const yyyy = d.getFullYear();
@@ -71,13 +93,13 @@ export const RegistroDiarioSupervisor = (mount, deps = {}) => {
     const docs = new Set();
     const ids = new Set();
     const sedeCodes = new Set();
-    (employees || []).forEach((e) => {
+    filterRowsBySupervisorZones(employees || []).forEach((e) => {
       const doc = String(e?.documento || '').trim();
       const id = String(e?.id || '').trim();
       if (doc) docs.add(doc);
       if (id) ids.add(id);
     });
-    (sedes || []).forEach((s) => {
+    filterRowsBySupervisorZones(sedes || []).forEach((s) => {
       const c = String(s?.codigo || '').trim();
       if (c) sedeCodes.add(c);
     });
@@ -174,8 +196,10 @@ export const RegistroDiarioSupervisor = (mount, deps = {}) => {
       el('td', {}, [displayNovedad(r)]),
       el('td', {}, [statusOf(r, replMap.get(rowKey(r)) || null)])
     ])));
-    const hasEmployeeScope = (employees || []).length > 0;
-    msg.textContent = `Registros visibles: ${rows.length} | Asistencias cargadas: ${(attendance || []).length} | Reemplazos cargados: ${(replacements || []).length} | Empleados scope: ${(employees || []).length} | Sedes scope: ${(sedes || []).length} | Filtro activo: ${hasEmployeeScope ? 'empleados' : 'sedes'}`;
+    const scopedEmployees = filterRowsBySupervisorZones(employees || []);
+    const scopedSedes = filterRowsBySupervisorZones(sedes || []);
+    const hasEmployeeScope = scopedEmployees.length > 0;
+    msg.textContent = `Registros visibles: ${rows.length} | Asistencias cargadas: ${(attendance || []).length} | Reemplazos cargados: ${(replacements || []).length} | Empleados scope: ${scopedEmployees.length} | Sedes scope: ${scopedSedes.length} | Filtro activo: ${hasEmployeeScope ? 'empleados' : 'sedes'}`;
   }
 
   async function loadLegacyIfNeeded(day, token) {
@@ -205,7 +229,7 @@ export const RegistroDiarioSupervisor = (mount, deps = {}) => {
     unAtt?.();
     unRepl?.();
     msg.textContent = 'Cargando registros del día...';
-    unAtt = deps.streamDashboardAttendanceByDate?.(
+    unAtt = deps.streamAttendanceByDate?.(
       day,
       (rows) => {
         attendance = rows || [];
@@ -214,7 +238,7 @@ export const RegistroDiarioSupervisor = (mount, deps = {}) => {
       },
       (err) => { msg.textContent = `Error cargando asistencia: ${err?.message || err}`; }
     ) || (() => {});
-    unRepl = deps.streamDashboardReplacementsByDate?.(
+    unRepl = deps.streamImportReplacementsByDate?.(
       day,
       (rows) => {
         replacements = filterBySupervisorScope(rows || []);
