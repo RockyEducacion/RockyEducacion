@@ -718,7 +718,6 @@ export const WhatsAppLive = (mount, deps = {}) => {
           const label = selectedLabel();
           select.title = label;
           selectedPreview.textContent = label;
-          if (!saveBtn.disabled) saveReplacement(r, select.value, saveBtn, select);
         });
 
         const replacementCell = el('div', { style: 'display:grid;gap:4px;min-width:0;' }, [

@@ -43,6 +43,7 @@ Enfermedad General
 Accidente Laboral
 Calamidad
 Licencia No Remunerada
+Vacaciones
 
 1.1.4.1. Si elige la Opción (Enfermedad General), Guarda Novedad=3 y continúa con la siguiente pregunta:
 
@@ -75,6 +76,14 @@ Fecha de terminación de incapacidad, por favor escribe DD/MM/AAAA:
 (registra el documento y la fecha de inicio en tabla de incapacidades)
 
 1.1.4.4. Si elige opción (Licencia No Remunerada) Guarda Novedad=5
+
+1.1.4.5. Si elige opción (Vacaciones) Guarda Novedad=9 y continúa con la siguiente pregunta:
+
+Selecciona las fechas de vacaciones:
+
+Fecha de inicio de vacaciones, por favor escribe DD/MM/AAAA:
+
+Fecha de terminación de vacaciones, por favor escribe DD/MM/AAAA:
 
 1.1.2. Si elige (No Soy Yo) realiza la siguiente pregunta:
 
@@ -138,6 +147,7 @@ Enfermedad General
 Accidente Laboral
 Calamidad
 Licencia No Remunerada
+Vacaciones
 
 1.2.2.1. Si elige la Opción (Enfermedad General), Guarda Novedad=3 y continúa con la siguiente pregunta:
 
@@ -171,6 +181,13 @@ Fecha de terminación de incapacidad, por favor escribe DD/MM/AAAA:
 
 1.2.2.4. Si elige opción (Licencia No Remunerada) Guarda Novedad=5
 
+1.2.2.5. Si elige opción (Vacaciones) Guarda Novedad=9 y continúa con la siguiente pregunta:
+
+Selecciona las fechas de vacaciones:
+
+Fecha de inicio de vacaciones, por favor escribe DD/MM/AAAA:
+
+Fecha de terminación de vacaciones, por favor escribe DD/MM/AAAA:
 
 1.2.3. Si elige opción (Actualizar Datos) continúa con la siguiente pregunta:
 
