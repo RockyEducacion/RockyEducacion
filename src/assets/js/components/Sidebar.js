@@ -56,6 +56,7 @@ export const Sidebar = () => {
     if (can(PERMS.VIEW_IMPORT_HISTORY)) opLinks.push(navLink('Historial', '/import-history'));
     if (can(PERMS.RUN_PAYROLL)) opLinks.push(navLink('Nomina', '/payroll'));
     if (can(PERMS.MANAGE_ABSENTEEISM)) opLinks.push(navLink('Ausentismo', '/absenteeism'));
+    if (can(PERMS.MANAGE_ABSENTEEISM)) opLinks.push(navLink('Ausentismo Consolidado', '/absenteeism-consolidated'));
     if (opLinks.length) sections.push(section('Operacion', opLinks, 'operacion'));
 
     if (can(PERMS.VIEW_REPORTS)) {
@@ -167,6 +168,7 @@ function getNavIconLabel(route) {
     '/import-history': 'HI',
     '/payroll': 'NO',
     '/absenteeism': 'AU',
+    '/absenteeism-consolidated': 'AC',
     '/reports': 'RP',
     '/upload': 'CD'
   };

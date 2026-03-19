@@ -66,8 +66,8 @@ export const ImportHistory = (mount, deps = {}) => {
       planeados: Number(raw.planeados || 0),
       contratados: Number(raw.contratados || 0),
       registrados: Number(raw.asistencias || raw.registrados || 0),
-      faltan: Math.max(0, Number(raw.contratados || 0) - Number(raw.asistencias || raw.registrados || 0)),
-      sobran: 0,
+      faltan: Number(raw.faltan || Math.max(0, Number(raw.contratados || 0) - Number(raw.asistencias || raw.registrados || 0))),
+      sobran: Number(raw.sobran || 0),
       ausentismos: Number(raw.ausentismos || 0)
     };
   }
@@ -221,7 +221,7 @@ export const ImportHistory = (mount, deps = {}) => {
   });
 
   mount.replaceChildren(ui);
-  const un = deps.streamDailyClosures?.((arr) => {
+  const unClosures = deps.streamDailyClosures?.((arr) => {
     snapshot = (arr || [])
       .filter((r) => r && (r.locked === true || String(r.status || '').trim() === 'closed'))
       .map(toRow);
@@ -232,7 +232,9 @@ export const ImportHistory = (mount, deps = {}) => {
     qs('#msg', ui).textContent = 'No hay conexion para historial de cierres.';
   }
 
-  return () => un?.();
+  return () => {
+    unClosures?.();
+  };
 };
 
 

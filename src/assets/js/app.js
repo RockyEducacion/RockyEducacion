@@ -23,6 +23,7 @@ import { CargueMasivoSedesAdmin } from './components/CargueMasivoSedesAdmin.js';
 import { ImportHistory } from './components/ImportHistory.js';
 import { Payroll } from './components/Payroll.js';
 import { Absenteeism } from './components/Absenteeism.js';
+import { AbsenteeismConsolidated } from './components/AbsenteeismConsolidated.js';
 import { Reports } from './components/Reports.js';
 import { ImportReplacements } from './components/ImportReplacements.js';
 import { CargarDatos } from './components/CargarDatos.js';
@@ -76,6 +77,7 @@ const guardWrite=(perm,fn)=> async (...args)=>{
         confirmImportOperation:fb.confirmImportOperation, saveImportReplacements:fb.saveImportReplacements,
         closeOperationDayManual:fb.closeOperationDayManual,
         isOperationDayClosed:fb.isOperationDayClosed, listClosedOperationDaysRange:fb.listClosedOperationDaysRange, listDailyClosuresRange:fb.listDailyClosuresRange,
+        listDailySedeClosuresRange:fb.listDailySedeClosuresRange,
         listSedeStatusRange:fb.listSedeStatusRange, listAttendanceRange:fb.listAttendanceRange, listImportReplacementsRange:fb.listImportReplacementsRange,
         listDailyMetricsRange:fb.listDailyMetricsRange,
         streamDailyMetricsByDate:fb.streamDailyMetricsByDate,
@@ -146,6 +148,7 @@ const guardWrite=(perm,fn)=> async (...args)=>{
   addRoute('/import-history', ()=> requireAuth(()=> guard(PERMS.VIEW_IMPORT_HISTORY, ()=> ImportHistory(root, deps))));
   addRoute('/payroll', ()=> requireAuth(()=> guard(PERMS.RUN_PAYROLL, ()=> Payroll(root))));
   addRoute('/absenteeism', ()=> requireAuth(()=> guard(PERMS.MANAGE_ABSENTEEISM, ()=> Absenteeism(root, deps))));
+  addRoute('/absenteeism-consolidated', ()=> requireAuth(()=> guard(PERMS.MANAGE_ABSENTEEISM, ()=> AbsenteeismConsolidated(root, deps))));
 
   // Consultor
   addRoute('/reports', ()=> requireAuth(()=> guard(PERMS.VIEW_REPORTS, ()=> Reports(root, deps))));

@@ -387,10 +387,32 @@ function mapDailyClosureRow(row = {}) {
     contratados: Number(row.contratados || 0),
     asistencias: Number(row.asistencias || 0),
     ausentismos: Number(row.ausentismos || 0),
+    faltan: Number(row.faltan || 0),
+    sobran: Number(row.sobran || 0),
     noContratados: Number(row.no_contratados || 0),
     closedByUid: row.closed_by_uid || null,
     closedByEmail: row.closed_by_email || null,
     closedAt: row.closed_at || null,
+    createdAt: row.created_at || null,
+    updatedAt: row.updated_at || null
+  };
+}
+
+function mapDailySedeClosureRow(row = {}) {
+  return {
+    id: row.id,
+    fecha: row.fecha || null,
+    sedeCodigo: row.sede_codigo || null,
+    sedeNombre: row.sede_nombre || null,
+    zonaCodigo: row.zona_codigo || null,
+    zonaNombre: row.zona_nombre || null,
+    dependenciaCodigo: row.dependencia_codigo || null,
+    dependenciaNombre: row.dependencia_nombre || null,
+    planeados: Number(row.planeados || 0),
+    contratados: Number(row.contratados || 0),
+    registrados: Number(row.registrados || 0),
+    faltantes: Number(row.faltantes || 0),
+    sobrantes: Number(row.sobrantes || 0),
     createdAt: row.created_at || null,
     updatedAt: row.updated_at || null
   };
@@ -573,7 +595,210 @@ function isEmployeeAssignedToActiveSedeOnDate(emp, selectedDate, activeSedeCodes
   const sedeCodigo = String(emp?.sedeCodigo || emp?.sede_codigo || '').trim();
   if (!sedeCodigo) return false;
   if (activeSedeCodes.size && !activeSedeCodes.has(sedeCodigo)) return false;
+  const sede = Array.isArray(activeSedeCodes?.rows)
+    ? activeSedeCodes.rows.find((row) => String(row?.codigo || '').trim() === sedeCodigo) || null
+    : null;
+  if (sede && !isSedeScheduledForDate(sede, selectedDate)) return false;
   return true;
+}
+
+function dedupeAttendanceRows(rows = []) {
+  const unique = new Map();
+  (Array.isArray(rows) ? rows : []).forEach((row, idx) => {
+    const documento = String(row?.documento || '').trim();
+    const empleadoId = String(row?.empleadoId || '').trim();
+    const fallback = `${String(row?.nombre || '').trim()}|${String(row?.sedeCodigo || '').trim()}|${String(row?.fecha || '').trim()}|${idx}`;
+    const key = documento || empleadoId || fallback;
+    if (!key) return;
+    if (!unique.has(key)) unique.set(key, row);
+  });
+  return Array.from(unique.values());
+}
+
+function resolveAttendanceSedeCode(attendanceRow = {}, context = {}) {
+  const rawSedeCode = String(attendanceRow?.sedeCodigo || '').trim();
+  if (context?.dayClosed) return rawSedeCode || null;
+
+  const documento = String(attendanceRow?.documento || '').trim();
+  if (documento && context?.superDocs?.has(documento)) return null;
+
+  const empleadoId = String(attendanceRow?.empleadoId || '').trim();
+  const employee = (empleadoId && context?.employeeById?.get(empleadoId))
+    || (documento && context?.employeeByDoc?.get(documento))
+    || null;
+  if (!employee) return null;
+  if (!isEmployeeAssignedToActiveSedeOnDate(employee, context?.selectedDate, context?.activeSedeCodes || new Set())) return null;
+  return String(employee?.sedeCodigo || employee?.sede_codigo || '').trim() || null;
+}
+
+async function computeDailyClosureSnapshot(fecha) {
+  const day = String(fecha || '').trim();
+  if (!day) return null;
+  const [{ data: attendance }, { data: replacements }, sedesRows, employeesRows, cargosRows] = await Promise.all([
+    supabase.from('attendance').select('*').eq('fecha', day),
+    supabase.from('import_replacements').select('*').eq('fecha', day),
+    selectAllRows('sedes', { select: '*' }),
+    selectAllRows('employees', { select: '*' }),
+    selectAllRows('cargos', { select: 'codigo, alineacion_crud, nombre' })
+  ]);
+
+  const attRows = (attendance || []).map(mapAttendanceRow);
+  const repRows = (replacements || []).map(mapImportReplacementRow);
+  const sedes = (sedesRows || []).filter((s) => String(s?.estado || 'activo').trim().toLowerCase() !== 'inactivo' && isSedeScheduledForDate(s, day));
+  const activeSedeCodes = new Set(sedes.map((row) => String(row?.codigo || '').trim()).filter(Boolean));
+  activeSedeCodes.rows = sedes;
+  const cargoMap = new Map((cargosRows || []).map((row) => [String(row.codigo || '').trim(), row]));
+
+  const employeeById = new Map();
+  const employeeByDoc = new Map();
+  const contractedBySede = new Map();
+  const superDocs = new Set();
+
+  (employeesRows || []).forEach((emp) => {
+    const mapped = mapEmployeeRow(emp);
+    const empId = String(mapped?.id || '').trim();
+    const doc = String(mapped?.documento || '').trim();
+    if (empId) employeeById.set(empId, mapped);
+    if (doc) employeeByDoc.set(doc, mapped);
+    if (!isEmployeeAssignedToActiveSedeOnDate(mapped, day, activeSedeCodes)) return;
+    if (isEmployeeSupernumerario(mapped, cargoMap)) {
+      if (doc) superDocs.add(doc);
+      return;
+    }
+    const sedeCode = String(mapped?.sedeCodigo || '').trim();
+    if (!contractedBySede.has(sedeCode)) contractedBySede.set(sedeCode, new Set());
+    contractedBySede.get(sedeCode).add(doc || empId);
+  });
+
+  const attendanceByKey = new Map();
+  attRows.forEach((row) => {
+    const effectiveSedeCode = resolveAttendanceSedeCode(row, {
+      dayClosed: true,
+      selectedDate: day,
+      activeSedeCodes,
+      employeeById,
+      employeeByDoc,
+      superDocs
+    });
+    if (!effectiveSedeCode || !activeSedeCodes.has(effectiveSedeCode)) return;
+    const key = `${day}|${effectiveSedeCode}`;
+    if (!attendanceByKey.has(key)) attendanceByKey.set(key, []);
+    attendanceByKey.get(key).push({ ...row, sedeCodigo: effectiveSedeCode });
+  });
+
+  const replacementSuperDocs = new Set(
+    repRows
+      .filter((row) => String(row?.decision || '').trim().toLowerCase() === 'reemplazo')
+      .map((row) => String(row?.supernumerarioDocumento || '').trim())
+      .filter(Boolean)
+  );
+
+  const totals = sedes.reduce((acc, sede) => {
+    const sedeCode = String(sede?.codigo || '').trim();
+    const key = `${day}|${sedeCode}`;
+    const atts = dedupeAttendanceRows(attendanceByKey.get(key) || []);
+    const planeados = Number(sede?.numero_operarios ?? 0) || 0;
+    const contratados = Number(contractedBySede.get(sedeCode)?.size || 0);
+    const registrados = atts.length;
+    const faltan = Math.max(0, planeados - registrados);
+    const sobran = Math.max(0, registrados - planeados);
+    const noContratados = Math.max(0, planeados - contratados);
+    acc.planeados += planeados;
+    acc.contratados += contratados;
+    acc.registrados += registrados;
+    acc.faltan += faltan;
+    acc.sobran += sobran;
+    acc.noContratados += noContratados;
+    return acc;
+  }, { planeados: 0, contratados: 0, registrados: 0, faltan: 0, sobran: 0, noContratados: 0, replacementSupernumerarios: replacementSuperDocs.size });
+
+  return totals;
+}
+
+async function computeDailySedeClosureSnapshot(fecha) {
+  const day = String(fecha || '').trim();
+  if (!day) return [];
+  const [{ data: attendance }, { data: replacements }, sedesRows, employeesRows, cargosRows, novedadesRows] = await Promise.all([
+    supabase.from('attendance').select('*').eq('fecha', day),
+    supabase.from('import_replacements').select('*').eq('fecha', day),
+    selectAllRows('sedes', { select: '*' }),
+    selectAllRows('employees', { select: '*' }),
+    selectAllRows('cargos', { select: 'codigo, alineacion_crud, nombre' }),
+    selectAllRows('novedades', { select: 'codigo, codigo_novedad, nombre, reemplazo' })
+  ]);
+
+  const attRows = (attendance || []).map(mapAttendanceRow);
+  const repRows = (replacements || []).map(mapImportReplacementRow);
+  const sedes = (sedesRows || [])
+    .map(mapSedeRow)
+    .filter((sede) => String(sede?.estado || 'activo').trim().toLowerCase() !== 'inactivo')
+    .filter((sede) => isSedeScheduledForDate(sede, day));
+  const activeSedeCodes = new Set(sedes.map((row) => String(row?.codigo || '').trim()).filter(Boolean));
+  const cargoMap = new Map((cargosRows || []).map((row) => [String(row.codigo || '').trim(), row]));
+  const replacementRules = buildNovedadReplacementRules((novedadesRows || []).map(mapNovedadRow));
+  const replacementMap = new Map(repRows.map((row) => [metricReplacementKey(row), row]));
+  const replacementSuperDocs = new Set(
+    repRows
+      .filter((row) => String(row?.decision || '').trim().toLowerCase() === 'reemplazo')
+      .map((row) => `${String(row?.fecha || '').trim()}|${String(row?.supernumerarioDocumento || '').trim()}`)
+      .filter((value) => !value.endsWith('|'))
+  );
+
+  const employeeById = new Map();
+  const employeeByDoc = new Map();
+  const contractedBySede = new Map();
+  (employeesRows || []).forEach((emp) => {
+    const mapped = mapEmployeeRow(emp);
+    const empId = String(mapped?.id || '').trim();
+    const doc = String(mapped?.documento || '').trim();
+    if (empId) employeeById.set(empId, mapped);
+    if (doc) employeeByDoc.set(doc, mapped);
+    if (!isEmployeeAssignedToActiveSedeOnDate(mapped, day, activeSedeCodes)) return;
+    if (isEmployeeSupernumerario(mapped, cargoMap)) return;
+    const sedeCode = String(mapped?.sedeCodigo || '').trim();
+    if (!sedeCode) return;
+    if (!contractedBySede.has(sedeCode)) contractedBySede.set(sedeCode, new Set());
+    contractedBySede.get(sedeCode).add(doc || empId);
+  });
+
+  const registeredBySede = new Map();
+  attRows.forEach((row) => {
+    const doc = String(row?.documento || '').trim();
+    if (doc && replacementSuperDocs.has(`${String(row?.fecha || '').trim()}|${doc}`)) return;
+    const empId = String(row?.empleadoId || '').trim();
+    const employee = (empId && employeeById.get(empId)) || (doc && employeeByDoc.get(doc)) || null;
+    if (isEmployeeSupernumerario(employee, cargoMap)) return;
+    const sedeCode = String(row?.sedeCodigo || employee?.sedeCodigo || '').trim();
+    if (!sedeCode || !activeSedeCodes.has(sedeCode)) return;
+    if (!registeredBySede.has(sedeCode)) registeredBySede.set(sedeCode, new Set());
+    registeredBySede.get(sedeCode).add(doc || empId || String(row?.id || '').trim());
+  });
+
+  return sedes.map((sede) => {
+    const sedeCode = String(sede?.codigo || '').trim();
+    const planeados = Number(sede?.numeroOperarios ?? 0) || 0;
+    const baseContracted = Number(contractedBySede.get(sedeCode)?.size || 0);
+    const registrados = Number(registeredBySede.get(sedeCode)?.size || 0);
+    const externalRegistered = Math.max(0, registrados - baseContracted);
+    const contratados = Math.min(planeados, baseContracted + externalRegistered);
+    const faltantes = Math.max(0, planeados - registrados);
+    const sobrantes = Math.max(0, registrados - planeados);
+    return {
+      id: `${day}_${sedeCode}`,
+      fecha: day,
+      sede_codigo: sedeCode,
+      sede_nombre: sede?.nombre || sedeCode || null,
+      zona_codigo: sede?.zonaCodigo || null,
+      zona_nombre: sede?.zonaNombre || null,
+      dependencia_codigo: sede?.dependenciaCodigo || null,
+      dependencia_nombre: sede?.dependenciaNombre || null,
+      planeados,
+      contratados,
+      registrados,
+      faltantes,
+      sobrantes
+    };
+  });
 }
 
 async function getCargoCrudAlignmentByCode(cargoCodigo, cargoNombre = null) {
@@ -690,28 +915,51 @@ async function recomputeDailyMetrics(fecha) {
   const attRows = (attendance || []).map(mapAttendanceRow);
   const repRows = (replacements || []).map(mapImportReplacementRow);
   const sedes = (sedesRows || []).filter((s) => String(s?.estado || 'activo').trim().toLowerCase() !== 'inactivo');
+  const scheduledSedes = sedes.filter((sede) => isSedeScheduledForDate(sede, day));
   const activeSedeCodes = new Set(
-    sedes
+    scheduledSedes
       .map((row) => String(row?.codigo || '').trim())
       .filter(Boolean)
   );
+  activeSedeCodes.rows = scheduledSedes;
   const cargoMap = new Map((cargosRows || []).map((row) => [String(row.codigo || '').trim(), row]));
   const replacementRules = buildNovedadReplacementRules((novedadesRows || []).map(mapNovedadRow));
   const replacementMap = new Map(repRows.map((row) => [metricReplacementKey(row), row]));
+  const replacementSuperDocs = new Set(
+    repRows
+      .filter((row) => String(row?.decision || '').trim().toLowerCase() === 'reemplazo')
+      .map((row) => `${String(row?.fecha || '').trim()}|${String(row?.supernumerarioDocumento || '').trim()}`)
+      .filter((value) => !value.endsWith('|'))
+  );
+  const employeeById = new Map();
+  const employeeByDoc = new Map();
+  (employeesRows || []).forEach((emp) => {
+    const mapped = mapEmployeeRow(emp);
+    const empId = String(mapped?.id || '').trim();
+    const doc = String(mapped?.documento || '').trim();
+    if (empId) employeeById.set(empId, mapped);
+    if (doc) employeeByDoc.set(doc, mapped);
+  });
   const fallbackExpected = (employeesRows || []).filter((emp) => {
     if (String(emp?.estado || '').trim().toLowerCase() !== 'activo') return false;
-    const sedeCodigo = String(emp?.sedeCodigo || emp?.sede_codigo || '').trim();
-    if (!sedeCodigo || !activeSedeCodes.has(sedeCodigo)) return false;
+    if (!isEmployeeAssignedToActiveSedeOnDate(emp, day, activeSedeCodes)) return false;
     return !isEmployeeSupernumerario(emp, cargoMap);
   }).length;
-  const planned = sedes.reduce((acc, sede) => {
+  const planned = scheduledSedes.reduce((acc, sede) => {
     const n = Number(sede?.numero_operarios ?? 0);
     return acc + (Number.isFinite(n) && n > 0 ? n : 0);
   }, 0);
   const expected = fallbackExpected;
-  const uniqueDocs = new Set(attRows.map((row) => String(row.documento || row.empleadoId || '')).filter(Boolean));
-  const attendanceCount = attRows.filter((row) => metricAttendanceCountsAsService(row, replacementMap, replacementRules)).length;
-  const absenteeism = attRows.filter((row) => metricAttendanceCountsAsAbsenteeism(row, replacementMap, replacementRules)).length;
+  const baseAttendanceRows = attRows.filter((row) => {
+    const doc = String(row?.documento || '').trim();
+    if (doc && replacementSuperDocs.has(`${String(row?.fecha || '').trim()}|${doc}`)) return false;
+    const empId = String(row?.empleadoId || '').trim();
+    const employee = (empId && employeeById.get(empId)) || (doc && employeeByDoc.get(doc)) || null;
+    return !isEmployeeSupernumerario(employee, cargoMap);
+  });
+  const uniqueDocs = new Set(baseAttendanceRows.map((row) => String(row.documento || row.empleadoId || '')).filter(Boolean));
+  const attendanceCount = baseAttendanceRows.filter((row) => metricAttendanceCountsAsService(row, replacementMap, replacementRules)).length;
+  const absenteeism = baseAttendanceRows.filter((row) => metricAttendanceCountsAsAbsenteeism(row, replacementMap, replacementRules)).length;
   const paidServices = attendanceCount;
   const noContracted = Math.max(0, planned - expected);
   const payload = {
@@ -2552,6 +2800,19 @@ export async function listDailyClosuresRange(dateFrom, dateTo) {
   return (data || []).map(mapDailyClosureRow);
 }
 
+export async function listDailySedeClosuresRange(dateFrom, dateTo) {
+  if (!dateFrom || !dateTo) return [];
+  const { data, error } = await supabase
+    .from('daily_sede_closures')
+    .select('*')
+    .gte('fecha', dateFrom)
+    .lte('fecha', dateTo)
+    .order('fecha', { ascending: true })
+    .order('sede_codigo', { ascending: true });
+  if (error) throw error;
+  return (data || []).map(mapDailySedeClosureRow);
+}
+
 export async function confirmImportOperation(payload) {
   const data = payload || {};
   const day = String(data.fechaOperacion || '').trim();
@@ -2708,6 +2969,8 @@ export async function closeOperationDayManual(fecha) {
   await finalizePendingAbsenteeismForClosure(day);
   await recomputeSedeStatusSnapshot(day);
   const metrics = mapDailyMetricsRow((await recomputeDailyMetrics(day)) || {});
+  const closureSnapshot = await computeDailyClosureSnapshot(day);
+  const sedeClosureSnapshot = await computeDailySedeClosureSnapshot(day);
   await runPostClosureTasks(day);
   const audit = await getCurrentAuditFields();
   const { error } = await supabase.from('daily_closures').upsert({
@@ -2715,15 +2978,22 @@ export async function closeOperationDayManual(fecha) {
     fecha: day,
     status: 'closed',
     locked: true,
-    planeados: metrics.planned || 0,
-    contratados: metrics.expected || 0,
+    planeados: closureSnapshot?.planeados ?? metrics.planned ?? 0,
+    contratados: closureSnapshot?.contratados ?? metrics.expected ?? 0,
     asistencias: metrics.attendanceCount || 0,
     ausentismos: metrics.absenteeism || 0,
-    no_contratados: metrics.noContracted || 0,
+    faltan: closureSnapshot?.faltan ?? 0,
+    sobran: closureSnapshot?.sobran ?? 0,
+    no_contratados: closureSnapshot?.noContratados ?? metrics.noContracted ?? 0,
     closed_by_uid: audit.created_by_uid,
     closed_by_email: audit.created_by_email
   }, { onConflict: 'id' });
   if (error) throw error;
+  if (sedeClosureSnapshot.length) {
+    const { error: sedeClosureError } = await supabase.from('daily_sede_closures').upsert(sedeClosureSnapshot, { onConflict: 'id' });
+    if (sedeClosureError) throw sedeClosureError;
+    await notifyTableReload('daily_sede_closures');
+  }
   await recomputeSedeStatusSnapshot(day);
   await recomputeDailyMetrics(day);
   await notifyTableReload('daily_closures');
