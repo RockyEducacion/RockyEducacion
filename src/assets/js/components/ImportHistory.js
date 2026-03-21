@@ -66,7 +66,7 @@ export const ImportHistory = (mount, deps = {}) => {
       planeados: Number(raw.planeados || 0),
       contratados: Number(raw.contratados || 0),
       registrados: Number(raw.asistencias || raw.registrados || 0),
-      faltan: Number(raw.faltan || Math.max(0, Number(raw.contratados || 0) - Number(raw.asistencias || raw.registrados || 0))),
+      faltan: Number(raw.faltan || 0),
       sobran: Number(raw.sobran || 0),
       ausentismos: Number(raw.ausentismos || 0)
     };

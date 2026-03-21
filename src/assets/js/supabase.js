@@ -632,87 +632,16 @@ function resolveAttendanceSedeCode(attendanceRow = {}, context = {}) {
 }
 
 async function computeDailyClosureSnapshot(fecha) {
-  const day = String(fecha || '').trim();
-  if (!day) return null;
-  const [{ data: attendance }, { data: replacements }, sedesRows, employeesRows, cargosRows] = await Promise.all([
-    supabase.from('attendance').select('*').eq('fecha', day),
-    supabase.from('import_replacements').select('*').eq('fecha', day),
-    selectAllRows('sedes', { select: '*' }),
-    selectAllRows('employees', { select: '*' }),
-    selectAllRows('cargos', { select: 'codigo, alineacion_crud, nombre' })
-  ]);
-
-  const attRows = (attendance || []).map(mapAttendanceRow);
-  const repRows = (replacements || []).map(mapImportReplacementRow);
-  const sedes = (sedesRows || []).filter((s) => String(s?.estado || 'activo').trim().toLowerCase() !== 'inactivo' && isSedeScheduledForDate(s, day));
-  const activeSedeCodes = new Set(sedes.map((row) => String(row?.codigo || '').trim()).filter(Boolean));
-  activeSedeCodes.rows = sedes;
-  const cargoMap = new Map((cargosRows || []).map((row) => [String(row.codigo || '').trim(), row]));
-
-  const employeeById = new Map();
-  const employeeByDoc = new Map();
-  const contractedBySede = new Map();
-  const superDocs = new Set();
-
-  (employeesRows || []).forEach((emp) => {
-    const mapped = mapEmployeeRow(emp);
-    const empId = String(mapped?.id || '').trim();
-    const doc = String(mapped?.documento || '').trim();
-    if (empId) employeeById.set(empId, mapped);
-    if (doc) employeeByDoc.set(doc, mapped);
-    if (!isEmployeeAssignedToActiveSedeOnDate(mapped, day, activeSedeCodes)) return;
-    if (isEmployeeSupernumerario(mapped, cargoMap)) {
-      if (doc) superDocs.add(doc);
-      return;
-    }
-    const sedeCode = String(mapped?.sedeCodigo || '').trim();
-    if (!contractedBySede.has(sedeCode)) contractedBySede.set(sedeCode, new Set());
-    contractedBySede.get(sedeCode).add(doc || empId);
-  });
-
-  const attendanceByKey = new Map();
-  attRows.forEach((row) => {
-    const effectiveSedeCode = resolveAttendanceSedeCode(row, {
-      dayClosed: true,
-      selectedDate: day,
-      activeSedeCodes,
-      employeeById,
-      employeeByDoc,
-      superDocs
-    });
-    if (!effectiveSedeCode || !activeSedeCodes.has(effectiveSedeCode)) return;
-    const key = `${day}|${effectiveSedeCode}`;
-    if (!attendanceByKey.has(key)) attendanceByKey.set(key, []);
-    attendanceByKey.get(key).push({ ...row, sedeCodigo: effectiveSedeCode });
-  });
-
-  const replacementSuperDocs = new Set(
-    repRows
-      .filter((row) => String(row?.decision || '').trim().toLowerCase() === 'reemplazo')
-      .map((row) => String(row?.supernumerarioDocumento || '').trim())
-      .filter(Boolean)
-  );
-
-  const totals = sedes.reduce((acc, sede) => {
-    const sedeCode = String(sede?.codigo || '').trim();
-    const key = `${day}|${sedeCode}`;
-    const atts = dedupeAttendanceRows(attendanceByKey.get(key) || []);
-    const planeados = Number(sede?.numero_operarios ?? 0) || 0;
-    const contratados = Number(contractedBySede.get(sedeCode)?.size || 0);
-    const registrados = atts.length;
-    const faltan = Math.max(0, planeados - registrados);
-    const sobran = Math.max(0, registrados - planeados);
-    const noContratados = Math.max(0, planeados - contratados);
-    acc.planeados += planeados;
-    acc.contratados += contratados;
-    acc.registrados += registrados;
-    acc.faltan += faltan;
-    acc.sobran += sobran;
-    acc.noContratados += noContratados;
+  const sedeRows = await computeDailySedeClosureSnapshot(fecha);
+  return (sedeRows || []).reduce((acc, row) => {
+    acc.planeados += Number(row?.planeados || 0);
+    acc.contratados += Number(row?.contratados || 0);
+    acc.registrados += Number(row?.registrados || 0);
+    acc.faltan += Number(row?.faltantes || 0);
+    acc.sobran += Number(row?.sobrantes || 0);
+    acc.noContratados += Math.max(0, Number(row?.planeados || 0) - Number(row?.contratados || 0));
     return acc;
-  }, { planeados: 0, contratados: 0, registrados: 0, faltan: 0, sobran: 0, noContratados: 0, replacementSupernumerarios: replacementSuperDocs.size });
-
-  return totals;
+  }, { planeados: 0, contratados: 0, registrados: 0, faltan: 0, sobran: 0, noContratados: 0 });
 }
 
 async function computeDailySedeClosureSnapshot(fecha) {
@@ -747,12 +676,16 @@ async function computeDailySedeClosureSnapshot(fecha) {
   const employeeById = new Map();
   const employeeByDoc = new Map();
   const contractedBySede = new Map();
+  const supernumerarioDocs = new Set();
   (employeesRows || []).forEach((emp) => {
     const mapped = mapEmployeeRow(emp);
     const empId = String(mapped?.id || '').trim();
     const doc = String(mapped?.documento || '').trim();
     if (empId) employeeById.set(empId, mapped);
     if (doc) employeeByDoc.set(doc, mapped);
+    if (doc && isEmployeeSupernumerario(mapped, cargoMap) && isEmployeeAssignedToActiveSedeOnDate(mapped, day, activeSedeCodes)) {
+      supernumerarioDocs.add(doc);
+    }
     if (!isEmployeeAssignedToActiveSedeOnDate(mapped, day, activeSedeCodes)) return;
     if (isEmployeeSupernumerario(mapped, cargoMap)) return;
     const sedeCode = String(mapped?.sedeCodigo || '').trim();
@@ -762,9 +695,10 @@ async function computeDailySedeClosureSnapshot(fecha) {
   });
 
   const registeredBySede = new Map();
-  attRows.forEach((row) => {
+  dedupeAttendanceRows(attRows).forEach((row) => {
     const doc = String(row?.documento || '').trim();
     if (doc && replacementSuperDocs.has(`${String(row?.fecha || '').trim()}|${doc}`)) return;
+    if (doc && supernumerarioDocs.has(doc)) return;
     const empId = String(row?.empleadoId || '').trim();
     const employee = (empId && employeeById.get(empId)) || (doc && employeeByDoc.get(doc)) || null;
     if (isEmployeeSupernumerario(employee, cargoMap)) return;
@@ -933,12 +867,16 @@ async function recomputeDailyMetrics(fecha) {
   );
   const employeeById = new Map();
   const employeeByDoc = new Map();
+  const supernumerarioDocs = new Set();
   (employeesRows || []).forEach((emp) => {
     const mapped = mapEmployeeRow(emp);
     const empId = String(mapped?.id || '').trim();
     const doc = String(mapped?.documento || '').trim();
     if (empId) employeeById.set(empId, mapped);
     if (doc) employeeByDoc.set(doc, mapped);
+    if (doc && isEmployeeSupernumerario(mapped, cargoMap) && isEmployeeAssignedToActiveSedeOnDate(mapped, day, activeSedeCodes)) {
+      supernumerarioDocs.add(doc);
+    }
   });
   const fallbackExpected = (employeesRows || []).filter((emp) => {
     if (String(emp?.estado || '').trim().toLowerCase() !== 'activo') return false;
@@ -950,9 +888,10 @@ async function recomputeDailyMetrics(fecha) {
     return acc + (Number.isFinite(n) && n > 0 ? n : 0);
   }, 0);
   const expected = fallbackExpected;
-  const baseAttendanceRows = attRows.filter((row) => {
+  const baseAttendanceRows = dedupeAttendanceRows(attRows).filter((row) => {
     const doc = String(row?.documento || '').trim();
     if (doc && replacementSuperDocs.has(`${String(row?.fecha || '').trim()}|${doc}`)) return false;
+    if (doc && supernumerarioDocs.has(doc)) return false;
     const empId = String(row?.empleadoId || '').trim();
     const employee = (empId && employeeById.get(empId)) || (doc && employeeByDoc.get(doc)) || null;
     return !isEmployeeSupernumerario(employee, cargoMap);
@@ -1008,12 +947,16 @@ async function recomputeSedeStatusSnapshot(fecha) {
   const employeeById = new Map();
   const employeeByDoc = new Map();
   const contractedBySede = new Map();
+  const supernumerarioDocs = new Set();
 
   (employeesRows || []).forEach((emp) => {
     const empId = String(emp?.id || '').trim();
     const doc = String(emp?.documento || '').trim();
     if (empId) employeeById.set(empId, emp);
     if (doc) employeeByDoc.set(doc, emp);
+    if (doc && isEmployeeSupernumerario(emp, cargoMap) && isEmployeeAssignedToActiveSedeOnDate(emp, day, activeSedeCodes)) {
+      supernumerarioDocs.add(doc);
+    }
     if (!isEmployeeAssignedToActiveSedeOnDate(emp, day, activeSedeCodes)) return;
     if (isEmployeeSupernumerario(emp, cargoMap)) return;
     const sedeCode = String(emp?.sedeCodigo || emp?.sede_codigo || '').trim();
@@ -1023,9 +966,10 @@ async function recomputeSedeStatusSnapshot(fecha) {
 
   const registeredBySede = new Map();
   const novSinReemplazoBySede = new Map();
-  attRows.forEach((row) => {
+  dedupeAttendanceRows(attRows).forEach((row) => {
     const doc = String(row?.documento || '').trim();
     if (doc && replacementSuperDocs.has(`${String(row?.fecha || '').trim()}|${doc}`)) return;
+    if (doc && supernumerarioDocs.has(doc)) return;
     const empId = String(row?.empleadoId || '').trim();
     const employee = (empId && employeeById.get(empId)) || (doc && employeeByDoc.get(doc)) || null;
     const sedeCode = String(row?.sedeCodigo || employee?.sedeCodigo || employee?.sede_codigo || '').trim();
