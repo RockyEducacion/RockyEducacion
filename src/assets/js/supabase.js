@@ -2757,6 +2757,15 @@ export async function listDailySedeClosuresRange(dateFrom, dateTo) {
   return (data || []).map(mapDailySedeClosureRow);
 }
 
+async function persistDailySedeClosureSnapshot(day) {
+  const snapshot = await computeDailySedeClosureSnapshot(day);
+  if (!snapshot.length) return [];
+  const { error } = await supabase.from('daily_sede_closures').upsert(snapshot, { onConflict: 'id' });
+  if (error) throw error;
+  await notifyTableReload('daily_sede_closures');
+  return snapshot;
+}
+
 export async function confirmImportOperation(payload) {
   const data = payload || {};
   const day = String(data.fechaOperacion || '').trim();
@@ -2907,6 +2916,7 @@ export async function closeOperationDayManual(fecha) {
   const day = String(fecha || '').trim();
   if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) throw new Error('Fecha invalida.');
   if (await isOperationDayClosed(day)) {
+    await persistDailySedeClosureSnapshot(day);
     await runPostClosureTasks(day);
     return { ok: true, results: [{ date: day, status: 'already_closed' }] };
   }

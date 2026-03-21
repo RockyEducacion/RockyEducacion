@@ -633,17 +633,21 @@ async function handleDateEnd(phone, session, value) {
 async function registerNovelty(phone, employee, novelty, selectedSede = null, incapacity = null) {
   const date = currentDate();
   const time = currentTime();
-  const documento = normalizeDocument(employee.documento);
-  const attendanceId = buildDailyRecordId(date, documento, employee.id);
-  const sedeCodigo = selectedSede?.codigo || employee.sede_codigo || null;
-  const sedeNombre = selectedSede?.nombre || employee.sede_nombre || null;
+  const freshEmployee = await reloadEmployeeForAttendance(employee);
+  const documento = normalizeDocument(freshEmployee.documento);
+  const attendanceId = buildDailyRecordId(date, documento, freshEmployee.id);
+  const sedeCodigo = selectedSede?.codigo || freshEmployee.sede_codigo || null;
+  const sedeNombre = selectedSede?.nombre || freshEmployee.sede_nombre || null;
+  if (!sedeCodigo) {
+    throw new Error(`attendance_missing_sede:${freshEmployee.id || 'no_id'}:${documento || 'no_doc'}`);
+  }
 
   const { error: attendanceError } = await supabaseAdmin.from('attendance').upsert({
     id: attendanceId,
     fecha: date,
-    empleado_id: employee.id,
+    empleado_id: freshEmployee.id,
     documento,
-    nombre: employee.nombre,
+    nombre: freshEmployee.nombre,
     sede_codigo: sedeCodigo,
     sede_nombre: sedeNombre,
     asistio: [NOVELTIES.WORKING.code, NOVELTIES.COMPENSATORY.code].includes(novelty.code),
@@ -655,9 +659,9 @@ async function registerNovelty(phone, employee, novelty, selectedSede = null, in
     const { error: absenteeismError } = await supabaseAdmin.from('absenteeism').upsert({
       id: attendanceId,
       fecha: date,
-      empleado_id: employee.id,
+      empleado_id: freshEmployee.id,
       documento,
-      nombre: employee.nombre,
+      nombre: freshEmployee.nombre,
       sede_codigo: sedeCodigo,
       sede_nombre: sedeNombre,
       estado: 'reportado_whatsapp'
@@ -667,9 +671,9 @@ async function registerNovelty(phone, employee, novelty, selectedSede = null, in
 
   if (incapacity?.startDate && incapacity?.endDate) {
     const { error: incapacityError } = await supabaseAdmin.from('incapacitados').insert({
-      employee_id: employee.id,
+      employee_id: freshEmployee.id,
       documento,
-      nombre: employee.nombre,
+      nombre: freshEmployee.nombre,
       fecha_inicio: incapacity.startDate,
       fecha_fin: incapacity.endDate,
       estado: 'activo',
@@ -681,10 +685,10 @@ async function registerNovelty(phone, employee, novelty, selectedSede = null, in
 
   await recomputeDailyMetrics(date);
   await storeSession(phone, {
-    employee_id: employee.id,
-    documento: employee.documento,
+    employee_id: freshEmployee.id,
+    documento: freshEmployee.documento,
     session_state: SESSION.COMPLETED,
-    session_data: { employee: sessionEmployee(employee) }
+    session_data: { employee: sessionEmployee(freshEmployee) }
   });
   await sendText(phone, `Registro confirmado. Fecha: ${formatDateForHumans(date)}, Hora: ${time}, Novedad: ${novelty.label}, Muchas Gracias.`);
 }
@@ -1426,6 +1430,21 @@ async function findActiveIncapacity(documento, date) {
   const { data, error } = await supabaseAdmin.from('incapacitados').select('*').eq('documento', documento).eq('estado', 'activo').lte('fecha_inicio', date).gte('fecha_fin', date).limit(1).maybeSingle();
   if (error) throw error;
   return data || null;
+}
+
+async function reloadEmployeeForAttendance(employee) {
+  const employeeId = String(employee?.id || '').trim();
+  if (employeeId) {
+    const { data, error } = await supabaseAdmin.from('employees').select('*').eq('id', employeeId).maybeSingle();
+    if (error) throw error;
+    if (data) return hydrateEmployee(data);
+  }
+  const documento = normalizeDocument(employee?.documento);
+  if (documento) {
+    const found = await findEmployeeByDocument(documento);
+    if (found) return found;
+  }
+  return employee || null;
 }
 
 async function searchSedes(keyword) {

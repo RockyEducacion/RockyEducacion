@@ -14,7 +14,8 @@ export const Reports = (mount, deps = {}) => {
     { id: 'employees_current', title: 'Empleados', subtitle: 'Vigentes con cedula, nombre, cargo, zona, dependencia y sede' },
     { id: 'daily_registry', title: 'Registro diario', subtitle: 'Fecha, hora, cedula, nombre, sede, novedad y reemplazo/ausentismo' },
     { id: 'hiring_by_sede', title: 'Contratacion por Sedes', subtitle: 'Dependencia, zona, sede, planeados y contratados por sede' },
-    { id: 'daily_absenteeism', title: 'Ausentismo diario', subtitle: 'Dependencia, zona, sede, planeados, contratados, ausentismo y total a pagar' }
+    { id: 'daily_absenteeism', title: 'Ausentismo diario', subtitle: 'Dependencia, zona, sede, planeados, contratados, ausentismo y total a pagar' },
+    { id: 'monthly_payroll', title: 'Nomina', subtitle: 'Matriz mensual por sede y cupo planeado, con la persona que cubrio cada dia' }
   ];
 
   const cards = reports.map((r) =>
@@ -30,9 +31,12 @@ export const Reports = (mount, deps = {}) => {
   let generatedDailyRows = [];
   let generatedHiringRows = [];
   let generatedAbsenteeismRows = [];
+  let generatedPayrollRows = [];
+  let generatedPayrollDays = [];
   let running = false;
   let selectedDailyDate = new Date().toISOString().slice(0, 10);
   let selectedAbsenteeismDate = new Date().toISOString().slice(0, 10);
+  let selectedPayrollMonth = new Date().toISOString().slice(0, 7);
 
   function setMessage(text) {
     qs('#msg', ui).textContent = text || ' ';
@@ -230,6 +234,166 @@ export const Reports = (mount, deps = {}) => {
       });
   }
 
+  function monthBounds(value) {
+    const raw = String(value || '').trim();
+    if (!/^\d{4}-\d{2}$/.test(raw)) return null;
+    const [year, month] = raw.split('-').map((v) => Number(v));
+    const lastDay = new Date(year, month, 0).getDate();
+    const from = `${raw}-01`;
+    const to = `${raw}-${String(lastDay).padStart(2, '0')}`;
+    const days = Array.from({ length: lastDay }, (_, idx) => `${raw}-${String(idx + 1).padStart(2, '0')}`);
+    return { from, to, days, month: raw };
+  }
+
+  function buildPersonMaps(rows = []) {
+    const byId = new Map();
+    const byDoc = new Map();
+    (rows || []).forEach((row) => {
+      const id = String(row?.id || '').trim();
+      const doc = String(row?.documento || '').trim();
+      if (id) byId.set(id, row);
+      if (doc) byDoc.set(doc, row);
+    });
+    return { byId, byDoc };
+  }
+
+  function resolvePerson({ id = '', doc = '', byId = new Map(), byDoc = new Map() } = {}) {
+    const cleanId = String(id || '').trim();
+    const cleanDoc = String(doc || '').trim();
+    return (cleanId && byId.get(cleanId)) || (cleanDoc && byDoc.get(cleanDoc)) || null;
+  }
+
+  function normalizePayrollRows(monthValue, attendanceRows = [], replacementsRows = [], sedeRows = [], employeeRows = [], supernumerarioRows = []) {
+    const bounds = monthBounds(monthValue);
+    if (!bounds) throw new Error('Selecciona un mes valido.');
+
+    const employeeMaps = buildPersonMaps(employeeRows);
+    const superMaps = buildPersonMaps(supernumerarioRows);
+    const sedeByCode = new Map((sedeRows || []).map((row) => [String(row.codigo || '').trim(), row]).filter(([key]) => Boolean(key)));
+    const workerMapByDaySede = new Map();
+    const sedeCodesWithData = new Set();
+
+    function ensureBucket(day, sedeCode) {
+      const key = `${day}|${sedeCode || ''}`;
+      if (!workerMapByDaySede.has(key)) workerMapByDaySede.set(key, new Map());
+      return workerMapByDaySede.get(key);
+    }
+
+    (attendanceRows || []).forEach((row) => {
+      if (row?.asistio !== true) return;
+      const sedeCode = String(row.sedeCodigo || '').trim();
+      const day = String(row.fecha || '').trim();
+      if (!day) return;
+      const employee = resolvePerson({ id: row.empleadoId, doc: row.documento, byId: employeeMaps.byId, byDoc: employeeMaps.byDoc });
+      const supernumerario = resolvePerson({ id: row.empleadoId, doc: row.documento, byId: superMaps.byId, byDoc: superMaps.byDoc });
+      const person = supernumerario || employee || null;
+      const effectiveSedeCode = String(row.sedeCodigo || person?.sedeCodigo || '').trim();
+      const type = supernumerario ? 'Supernumerario' : 'Empleado';
+      const doc = String(row.documento || person?.documento || '').trim();
+      const name = String(row.nombre || person?.nombre || '').trim();
+      if (!doc && !name) return;
+      const bucket = ensureBucket(day, effectiveSedeCode);
+      const workerKey = doc || `NAME:${name}`;
+      if (bucket.has(workerKey)) return;
+      if (effectiveSedeCode) sedeCodesWithData.add(effectiveSedeCode);
+      bucket.set(workerKey, {
+        doc: doc || '-',
+        name: name || '-',
+        label: `${name || doc || '-'}${supernumerario ? ' [SUP]' : ''}`,
+        type,
+        sortName: normalizeText(name || doc || '-')
+      });
+    });
+
+    (replacementsRows || []).forEach((row) => {
+      if (String(row.decision || '').trim().toLowerCase() !== 'reemplazo') return;
+      const sedeCode = String(row.sedeCodigo || '').trim();
+      const day = String(row.fecha || '').trim();
+      if (!day) return;
+      const replacement = resolvePerson({ id: row.supernumerarioId, doc: row.supernumerarioDocumento, byId: superMaps.byId, byDoc: superMaps.byDoc });
+      const replaced = resolvePerson({ id: row.empleadoId, doc: row.documento, byId: employeeMaps.byId, byDoc: employeeMaps.byDoc });
+      const effectiveSedeCode = String(row.sedeCodigo || replaced?.sedeCodigo || replacement?.sedeCodigo || '').trim();
+      const doc = String(row.supernumerarioDocumento || replacement?.documento || '').trim();
+      const name = String(row.supernumerarioNombre || replacement?.nombre || '').trim();
+      const replacedName = String(row.nombre || replaced?.nombre || row.documento || '').trim();
+      if (!doc && !name) return;
+      const bucket = ensureBucket(day, effectiveSedeCode);
+      const workerKey = doc || `NAME:${name}`;
+      if (effectiveSedeCode) sedeCodesWithData.add(effectiveSedeCode);
+      bucket.set(workerKey, {
+        doc: doc || '-',
+        name: name || '-',
+        label: `${name || doc || '-'} (Reemplaza a ${replacedName || '-'})`,
+        type: 'Supernumerario',
+        sortName: normalizeText(name || doc || '-')
+      });
+    });
+
+    const rows = [];
+    const exportRows = [];
+    (sedeRows || [])
+      .filter((sede) => {
+        const sedeCode = String(sede?.codigo || '').trim();
+        if (!sedeCode) return false;
+        const active = String(sede?.estado || 'activo').trim().toLowerCase() !== 'inactivo';
+        return active || sedeCodesWithData.has(sedeCode);
+      })
+      .sort((a, b) => {
+        const dep = String(a.dependenciaNombre || '').localeCompare(String(b.dependenciaNombre || ''));
+        if (dep !== 0) return dep;
+        const zone = String(a.zonaNombre || '').localeCompare(String(b.zonaNombre || ''));
+        if (zone !== 0) return zone;
+        return String(a.nombre || '').localeCompare(String(b.nombre || ''));
+      })
+      .forEach((sede) => {
+        const sedeCode = String(sede.codigo || '').trim();
+        const planned = parseOperatorCount(sede.numeroOperarios ?? 0);
+        const dailyLists = bounds.days.map((day) => {
+          const workers = Array.from((workerMapByDaySede.get(`${day}|${sedeCode}`) || new Map()).values());
+          workers.sort((a, b) => {
+            const byName = String(a.sortName || '').localeCompare(String(b.sortName || ''));
+            if (byName !== 0) return byName;
+            return String(a.doc || '').localeCompare(String(b.doc || ''));
+          });
+          return workers;
+        });
+        const maxWorkers = dailyLists.reduce((max, list) => Math.max(max, list.length), 0);
+        const slotCount = Math.max(planned, maxWorkers);
+        if (slotCount <= 0) return;
+        for (let slot = 0; slot < slotCount; slot += 1) {
+          const isExtra = planned > 0 && slot >= planned;
+          const row = {
+            dependencia: String(sede.dependenciaNombre || sede.dependenciaCodigo || '-').trim() || '-',
+            zona: String(sede.zonaNombre || sede.zonaCodigo || '-').trim() || '-',
+            sede: String(sede.nombre || sede.codigo || '-').trim() || '-',
+            cupo: isExtra ? `Extra ${slot - planned + 1}` : `Cupo ${slot + 1}`
+          };
+          bounds.days.forEach((day, index) => {
+            row[`d${index + 1}`] = dailyLists[index]?.[slot]?.label || '';
+          });
+          rows.push(row);
+
+          const exportRow = {
+            Dependencia: row.dependencia,
+            Zona: row.zona,
+            Sede: row.sede,
+            Cupo: row.cupo
+          };
+          bounds.days.forEach((day, index) => {
+            exportRow[`Dia ${String(index + 1).padStart(2, '0')}`] = dailyLists[index]?.[slot]?.label || '';
+          });
+          exportRows.push(exportRow);
+        }
+      });
+
+    return {
+      days: bounds.days.map((day, index) => ({ iso: day, key: `d${index + 1}`, label: String(index + 1) })),
+      rows,
+      exportRows,
+      month: bounds.month
+    };
+  }
+
   function normalizeText(value) {
     return String(value || '')
       .normalize('NFD')
@@ -386,6 +550,17 @@ export const Reports = (mount, deps = {}) => {
         el('td', {}, [String(r.totalPagar)])
       ])
     );
+  }
+
+  function renderPayrollRows(rows = [], days = []) {
+    if (!rows.length) return [el('tr', {}, [el('td', { colSpan: 4 + days.length, className: 'text-muted' }, ['Sin datos para el mes seleccionado.'])])];
+    return rows.map((r) => el('tr', {}, [
+      el('td', {}, [r.dependencia]),
+      el('td', {}, [r.zona]),
+      el('td', {}, [r.sede]),
+      el('td', {}, [r.cupo]),
+      ...days.map((day) => el('td', {}, [r[day.key] || '']))
+    ]));
   }
 
   async function generateEmployeesReport() {
@@ -550,6 +725,60 @@ export const Reports = (mount, deps = {}) => {
     }
   }
 
+  async function generatePayrollReport() {
+    if (running) return;
+    const month = String(qs('#payrollMonth', ui)?.value || '').trim();
+    if (!/^\d{4}-\d{2}$/.test(month)) {
+      setMessage('Selecciona un mes valido para generar el reporte.');
+      return;
+    }
+    running = true;
+    selectedPayrollMonth = month;
+    const btnGenerate = qs('#btnGeneratePayroll', ui);
+    const btnExport = qs('#btnExportPayroll', ui);
+    try {
+      if (btnGenerate) {
+        btnGenerate.disabled = true;
+        btnGenerate.textContent = 'Generando...';
+      }
+      const bounds = monthBounds(month);
+      const [attendanceRows, replacementsRows, sedeRows, employeeRows, supernumerarioRows] = await Promise.all([
+        deps.listAttendanceRange?.(bounds.from, bounds.to) || [],
+        deps.listImportReplacementsRange?.(bounds.from, bounds.to) || [],
+        streamOnce((ok, fail) => deps.streamSedes?.(ok, fail)),
+        streamOnce((ok, fail) => deps.streamEmployees?.(ok, fail)),
+        streamOnce((ok, fail) => deps.streamSupernumerarios?.(ok, fail))
+      ]);
+      const normalized = normalizePayrollRows(month, attendanceRows, replacementsRows, sedeRows, employeeRows, supernumerarioRows);
+      generatedPayrollRows = normalized.exportRows;
+      generatedPayrollDays = normalized.days;
+      const totalNode = qs('#payrollTotal', ui);
+      if (totalNode) totalNode.textContent = `Mes: ${normalized.month} | Filas: ${normalized.rows.length} | Dias: ${normalized.days.length}`;
+      const headRow = qs('#payrollHeadRow', ui);
+      if (headRow) {
+        headRow.replaceChildren(
+          el('th', {}, ['Dependencia']),
+          el('th', {}, ['Zona']),
+          el('th', {}, ['Sede']),
+          el('th', {}, ['Cupo']),
+          ...normalized.days.map((day) => el('th', {}, [day.label]))
+        );
+      }
+      const tbody = qs('#payrollTbody', ui);
+      if (tbody) tbody.replaceChildren(...renderPayrollRows(normalized.rows, normalized.days));
+      if (btnExport) btnExport.disabled = generatedPayrollRows.length === 0;
+      setMessage(`Reporte de nomina generado para ${month}. Filas: ${normalized.rows.length}`);
+    } catch (e) {
+      setMessage(`Error al generar reporte de nomina: ${e?.message || e}`);
+    } finally {
+      running = false;
+      if (btnGenerate) {
+        btnGenerate.disabled = false;
+        btnGenerate.textContent = 'Generar reporte';
+      }
+    }
+  }
+
   async function exportEmployeesExcel() {
     try {
       if (!generatedEmployeesRows.length) throw new Error('Primero genera el reporte.');
@@ -687,6 +916,39 @@ export const Reports = (mount, deps = {}) => {
     }
   }
 
+  async function exportPayrollExcel() {
+    try {
+      if (!generatedPayrollRows.length) throw new Error('Primero genera el reporte.');
+      const btn = qs('#btnExportPayroll', ui);
+      if (btn) {
+        btn.disabled = true;
+        btn.textContent = 'Generando...';
+      }
+      const mod = await import('https://cdn.jsdelivr.net/npm/xlsx@0.18.5/+esm');
+      const ws = mod.utils.json_to_sheet(generatedPayrollRows);
+      const cols = [
+        { wch: 24 },
+        { wch: 18 },
+        { wch: 28 },
+        { wch: 14 },
+        ...generatedPayrollDays.map(() => ({ wch: 26 }))
+      ];
+      ws['!cols'] = cols;
+      const wb = mod.utils.book_new();
+      mod.utils.book_append_sheet(wb, ws, 'Nomina');
+      mod.writeFile(wb, `reporte_nomina_${selectedPayrollMonth}.xlsx`);
+      setMessage(`Excel de nomina generado para ${selectedPayrollMonth}. Filas: ${generatedPayrollRows.length}`);
+    } catch (e) {
+      setMessage(`Error al generar Excel de nomina: ${e?.message || e}`);
+    } finally {
+      const btn = qs('#btnExportPayroll', ui);
+      if (btn) {
+        btn.disabled = generatedPayrollRows.length === 0;
+        btn.textContent = 'Generar Excel';
+      }
+    }
+  }
+
   function renderEmployeesPanel() {
     const content = el('section', {}, [
       el('div', { className: 'form-row' }, [
@@ -769,12 +1031,40 @@ export const Reports = (mount, deps = {}) => {
     qs('#btnExportAbsenteeism', ui)?.addEventListener('click', exportAbsenteeismExcel);
   }
 
+  function renderPayrollPanel() {
+    const content = el('section', {}, [
+      el('div', { className: 'form-row' }, [
+        el('div', {}, [el('h3', { style: 'margin:0;' }, ['Reporte: Nomina mensual'])]),
+        el('div', {}, [el('label', { className: 'label' }, ['Mes']), el('input', { id: 'payrollMonth', className: 'input', type: 'month', value: selectedPayrollMonth, style: 'max-width:180px' })]),
+        el('button', { id: 'btnGeneratePayroll', className: 'btn', type: 'button' }, ['Generar reporte']),
+        el('button', { id: 'btnExportPayroll', className: 'btn btn--primary', type: 'button', disabled: true }, ['Generar Excel'])
+      ]),
+      el('p', { id: 'payrollTotal', className: 'text-muted mt-2' }, ['Selecciona el mes y genera el reporte.']),
+      el('div', { className: 'table-wrap mt-2' }, [
+        el('table', { className: 'table' }, [
+          el('thead', {}, [el('tr', { id: 'payrollHeadRow' }, [
+            el('th', {}, ['Dependencia']),
+            el('th', {}, ['Zona']),
+            el('th', {}, ['Sede']),
+            el('th', {}, ['Cupo'])
+          ])]),
+          el('tbody', { id: 'payrollTbody' }, [el('tr', {}, [el('td', { colSpan: 4, className: 'text-muted' }, ['Sin generar.'])])])
+        ])
+      ])
+    ]);
+    qs('#reportContent', ui).replaceChildren(content);
+    qs('#btnGeneratePayroll', ui)?.addEventListener('click', generatePayrollReport);
+    qs('#btnExportPayroll', ui)?.addEventListener('click', exportPayrollExcel);
+  }
+
   function openReport(reportId) {
     selectedReportId = String(reportId || '');
     generatedEmployeesRows = [];
     generatedDailyRows = [];
     generatedHiringRows = [];
     generatedAbsenteeismRows = [];
+    generatedPayrollRows = [];
+    generatedPayrollDays = [];
     ui.querySelectorAll('.report-card').forEach((n) => n.classList.toggle('is-active', n.dataset.id === selectedReportId));
     if (selectedReportId === 'employees_current') {
       renderEmployeesPanel();
@@ -793,6 +1083,11 @@ export const Reports = (mount, deps = {}) => {
     }
     if (selectedReportId === 'daily_absenteeism') {
       renderAbsenteeismPanel();
+      setMessage(' ');
+      return;
+    }
+    if (selectedReportId === 'monthly_payroll') {
+      renderPayrollPanel();
       setMessage(' ');
       return;
     }
