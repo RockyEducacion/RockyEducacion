@@ -1,0 +1,68 @@
+[
+  {
+    "id": "7da0bb15-ab2c-4c40-ab8c-e785ec2fde3f",
+    "codigo": "CAR-0001",
+    "nombre": "OPERARIO ASEO Y CAFETERIA",
+    "alineacion_crud": "empleado",
+    "estado": "activo",
+    "created_by_uid": "58d81c79-4777-4d2b-9dd1-7a3058592f76",
+    "created_by_email": "rocky.edu@capcol.com.co",
+    "created_at": "2026-03-12T01:44:22.385059+00:00",
+    "updated_at": "2026-03-12T13:55:23.407128+00:00"
+  },
+  {
+    "id": "713eaff3-553d-4b25-ade6-ff0cdd46f0d4",
+    "codigo": "CAR-0002",
+    "nombre": "SUPERVISOR",
+    "alineacion_crud": "supervisor",
+    "estado": "activo",
+    "created_by_uid": "58d81c79-4777-4d2b-9dd1-7a3058592f76",
+    "created_by_email": "rocky.edu@capcol.com.co",
+    "created_at": "2026-03-12T02:12:45.573879+00:00",
+    "updated_at": "2026-03-12T02:12:45.573879+00:00"
+  },
+  {
+    "id": "97f47751-dbd1-487f-a3ea-4d2ae0007b95",
+    "codigo": "CAR-0003",
+    "nombre": "SUPERNUMERARIO",
+    "alineacion_crud": "supernumerario",
+    "estado": "activo",
+    "created_by_uid": "58d81c79-4777-4d2b-9dd1-7a3058592f76",
+    "created_by_email": "rocky.edu@capcol.com.co",
+    "created_at": "2026-03-12T02:19:02.512017+00:00",
+    "updated_at": "2026-03-12T02:19:02.512017+00:00"
+  },
+  {
+    "id": "5259e563-235a-41ce-8eb5-312d283c24e1",
+    "codigo": "CAR-0004",
+    "nombre": "OPERARIO ALTURAS",
+    "alineacion_crud": "empleado",
+    "estado": "activo",
+    "created_by_uid": "58d81c79-4777-4d2b-9dd1-7a3058592f76",
+    "created_by_email": "rocky.edu@capcol.com.co",
+    "created_at": "2026-03-12T13:55:06.099772+00:00",
+    "updated_at": "2026-03-12T13:55:06.099772+00:00"
+  },
+  {
+    "id": "1b014fe3-2e6d-4e92-b3d2-10e7cadfefa0",
+    "codigo": "CAR-0005",
+    "nombre": "OPERARIO CARGUE Y DESCARGUE",
+    "alineacion_crud": "empleado",
+    "estado": "activo",
+    "created_by_uid": "58d81c79-4777-4d2b-9dd1-7a3058592f76",
+    "created_by_email": "rocky.edu@capcol.com.co",
+    "created_at": "2026-03-12T13:55:43.879094+00:00",
+    "updated_at": "2026-03-12T13:55:43.879094+00:00"
+  },
+  {
+    "id": "f1947334-d7ad-433f-87d8-a622863afab2",
+    "codigo": "CAR-0006",
+    "nombre": "COORDINADOR",
+    "alineacion_crud": "supervisor",
+    "estado": "activo",
+    "created_by_uid": "58d81c79-4777-4d2b-9dd1-7a3058592f76",
+    "created_by_email": "rocky.edu@capcol.com.co",
+    "created_at": "2026-03-12T13:55:55.956625+00:00",
+    "updated_at": "2026-03-12T13:55:55.956625+00:00"
+  }
+]

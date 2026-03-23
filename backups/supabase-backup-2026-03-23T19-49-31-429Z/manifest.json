@@ -1,0 +1,72 @@
+{
+  "backupId": "supabase-backup-2026-03-23T19-49-31-429Z",
+  "createdAt": "2026-03-23T19:49:31.492Z",
+  "source": "https://rknphdxrtcftttmapbkx.supabase.co",
+  "tables": [
+    {
+      "table": "attendance",
+      "rows": 8488,
+      "file": "attendance.json"
+    },
+    {
+      "table": "import_replacements",
+      "rows": 259,
+      "file": "import_replacements.json"
+    },
+    {
+      "table": "sede_status",
+      "rows": 4673,
+      "file": "sede_status.json"
+    },
+    {
+      "table": "daily_metrics",
+      "rows": 12,
+      "file": "daily_metrics.json"
+    },
+    {
+      "table": "daily_closures",
+      "rows": 11,
+      "file": "daily_closures.json"
+    },
+    {
+      "table": "daily_sede_closures",
+      "rows": 428,
+      "file": "daily_sede_closures.json"
+    },
+    {
+      "table": "import_history",
+      "rows": 0,
+      "file": "import_history.json"
+    },
+    {
+      "table": "employees",
+      "rows": 1237,
+      "file": "employees.json"
+    },
+    {
+      "table": "sedes",
+      "rows": 428,
+      "file": "sedes.json"
+    },
+    {
+      "table": "cargos",
+      "rows": 6,
+      "file": "cargos.json"
+    },
+    {
+      "table": "novedades",
+      "rows": 9,
+      "file": "novedades.json"
+    },
+    {
+      "table": "whatsapp_sessions",
+      "rows": 1164,
+      "file": "whatsapp_sessions.json"
+    },
+    {
+      "table": "whatsapp_incoming",
+      "rows": 67783,
+      "file": "whatsapp_incoming.json"
+    }
+  ]
+}
