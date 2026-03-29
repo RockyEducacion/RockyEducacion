@@ -99,41 +99,96 @@ export const ImportHistory = (mount, deps = {}) => {
     return { filtered: sorted, count: filtered.length };
   }
 
+  function attendanceKey(item = {}) {
+    return [
+      String(item?.fecha || '').trim(),
+      String(item?.employeeId || item?.empleadoId || '').trim(),
+      String(item?.documento || '').trim()
+    ].join('|');
+  }
+
+  function statusDetailState(row) {
+    const estadoDia = String(row?.estadoDia || '').trim();
+    const decision = String(row?.decisionCobertura || '').trim().toLowerCase();
+    const tipoPersonal = String(row?.tipoPersonal || 'empleado').trim().toLowerCase();
+    const reemplazaA = row?.reemplazaANombre || row?.reemplazaADocumento || '-';
+    const reemplazadoPor = row?.reemplazadoPorNombre || row?.reemplazadoPorDocumento || '-';
+
+    if (tipoPersonal === 'supernumerario' && estadoDia === 'trabajado_reemplazo') {
+      return `Supernumerario reemplazando a ${reemplazaA}`;
+    }
+    if (decision === 'reemplazo') {
+      return `Reemplazado por ${reemplazadoPor}`;
+    }
+    if (row?.asistio === true) {
+      return tipoPersonal === 'supernumerario' ? 'Trabajo supernumerario' : 'Trabajo';
+    }
+    if (decision === 'ausentismo' || row?.cuentaPagoServicio === false) {
+      return 'Ausentismo';
+    }
+    if (estadoDia === 'sin_registro') {
+      return 'Sin registro';
+    }
+    if (estadoDia === 'incapacidad') {
+      return 'Incapacidad';
+    }
+    if (estadoDia === 'vacaciones') {
+      return 'Vacaciones';
+    }
+    if (estadoDia === 'compensatorio') {
+      return 'Compensatorio';
+    }
+    if (estadoDia === 'ausente_con_novedad') {
+      return 'Ausente con novedad';
+    }
+    if (estadoDia === 'ausente_sin_reemplazo') {
+      return 'Ausentismo';
+    }
+    if (estadoDia === 'no_programado') {
+      return 'No programado';
+    }
+    return estadoDia
+      ? estadoDia.replace(/_/g, ' ').replace(/\b\w/g, (ch) => ch.toUpperCase())
+      : '-';
+  }
+
   async function showDetail(row) {
     const date = String(row?.fecha || '').trim();
     if (!date) return;
     qs('#detailTitle', ui).textContent = `Detalle del dia ${date}`;
     qs('#msg', ui).textContent = 'Cargando detalle...';
     try {
-      const [attendance, replacements] = await Promise.all([
-        deps.listAttendanceRange?.(date, date) || [],
-        deps.listImportReplacementsRange?.(date, date) || []
+      const [statusRows, attendance] = await Promise.all([
+        deps.listEmployeeDailyStatusRange?.(date, date) || [],
+        deps.listAttendanceRange?.(date, date) || []
       ]);
-      const replByEmp = new Map();
-      (replacements || []).forEach((r) => {
-        replByEmp.set(`${r.fecha || ''}_${r.empleadoId || ''}`, r);
+
+      const attendanceByKey = new Map();
+      (attendance || []).forEach((item) => {
+        attendanceByKey.set(attendanceKey(item), item);
       });
-      detailSnapshot = (attendance || [])
+
+      detailSnapshot = (statusRows || [])
         .slice()
-        .sort((a, b) => String(b.hora || '').localeCompare(String(a.hora || '')))
-        .map((a) => {
-          const repl = replByEmp.get(`${a.fecha || ''}_${a.empleadoId || ''}`);
-          let estado = a.asistio === true ? 'Trabajo' : 'Sin registro';
-          if (repl && String(repl.decision || '').trim() === 'reemplazo') {
-            estado = `Reemplazado por ${repl.supernumerarioNombre || repl.supernumerarioDocumento || '-'}`;
-          } else if (repl && String(repl.decision || '').trim() === 'ausentismo') {
-            estado = 'Ausentismo';
-          } else if (a.asistio === false) {
-            estado = 'Ausentismo';
-          }
+        .sort((a, b) => {
+          const hourA = String(attendanceByKey.get(attendanceKey(a))?.hora || '');
+          const hourB = String(attendanceByKey.get(attendanceKey(b))?.hora || '');
+          const byHour = hourB.localeCompare(hourA);
+          if (byHour !== 0) return byHour;
+          const bySede = String(a?.sedeNombreSnapshot || a?.sedeCodigo || '').localeCompare(String(b?.sedeNombreSnapshot || b?.sedeCodigo || ''));
+          if (bySede !== 0) return bySede;
+          return String(a?.nombre || '').localeCompare(String(b?.nombre || ''));
+        })
+        .map((statusRow) => {
+          const attendanceRow = attendanceByKey.get(attendanceKey(statusRow)) || null;
           return {
-            fecha: a.fecha || date,
-            hora: a.hora || '-',
-            sede: a.sedeNombre || a.sedeCodigo || '-',
-            documento: a.documento || '-',
-            nombre: a.nombre || '-',
-            novedad: a.novedadNombre || a.novedad || '-',
-            estado
+            fecha: statusRow.fecha || date,
+            hora: attendanceRow?.hora || '-',
+            sede: statusRow.sedeNombreSnapshot || statusRow.sedeCodigo || '-',
+            documento: statusRow.documento || '-',
+            nombre: statusRow.nombre || '-',
+            novedad: statusRow.novedadNombre || statusRow.novedadCodigo || '-',
+            estado: statusDetailState(statusRow)
           };
         });
       renderDetail();

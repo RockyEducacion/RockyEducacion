@@ -34,12 +34,16 @@ export const Reports = (mount, deps = {}) => {
   let generatedPayrollRows = [];
   let generatedPayrollDays = [];
   let running = false;
-  let selectedDailyDate = new Date().toISOString().slice(0, 10);
-  let selectedAbsenteeismDate = new Date().toISOString().slice(0, 10);
-  let selectedPayrollMonth = new Date().toISOString().slice(0, 7);
+  let selectedDailyDate = todayBogota();
+  let selectedAbsenteeismDate = todayBogota();
+  let selectedPayrollMonth = todayBogota().slice(0, 7);
 
   function setMessage(text) {
     qs('#msg', ui).textContent = text || ' ';
+  }
+
+  function todayBogota() {
+    return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Bogota' }).format(new Date());
   }
 
   function toISODate(value) {
@@ -116,7 +120,7 @@ export const Reports = (mount, deps = {}) => {
 
   function normalizeEmployeesForReport(rawRows = [], sedeRows = []) {
     const sedeByCode = new Map((sedeRows || []).map((s) => [String(s.codigo || '').trim(), s || {}]).filter(([k]) => Boolean(k)));
-    const todayISO = new Date().toISOString().slice(0, 10);
+    const todayISO = todayBogota();
     return (rawRows || [])
       .filter((e) => isCurrentEmployee(e, todayISO))
       .map((e) => {
@@ -263,69 +267,35 @@ export const Reports = (mount, deps = {}) => {
     return (cleanId && byId.get(cleanId)) || (cleanDoc && byDoc.get(cleanDoc)) || null;
   }
 
-  function normalizePayrollRows(monthValue, attendanceRows = [], replacementsRows = [], sedeRows = [], employeeRows = [], supernumerarioRows = []) {
+  function normalizePayrollRows(monthValue, statusRows = [], sedeRows = []) {
     const bounds = monthBounds(monthValue);
     if (!bounds) throw new Error('Selecciona un mes valido.');
 
-    const employeeMaps = buildPersonMaps(employeeRows);
-    const superMaps = buildPersonMaps(supernumerarioRows);
-    const sedeByCode = new Map((sedeRows || []).map((row) => [String(row.codigo || '').trim(), row]).filter(([key]) => Boolean(key)));
+    const snapshotBySede = new Map();
     const workerMapByDaySede = new Map();
     const sedeCodesWithData = new Set();
 
     function ensureBucket(day, sedeCode) {
-      const key = `${day}|${sedeCode || ''}`;
+      const key = String(day || '') + '|' + String(sedeCode || '');
       if (!workerMapByDaySede.has(key)) workerMapByDaySede.set(key, new Map());
       return workerMapByDaySede.get(key);
     }
 
-    (attendanceRows || []).forEach((row) => {
-      if (row?.asistio !== true) return;
-      const sedeCode = String(row.sedeCodigo || '').trim();
-      const day = String(row.fecha || '').trim();
+    (statusRows || []).forEach((row) => {
+      const sedeCode = String(row?.sedeCodigo || '').trim();
+      if (sedeCode && !snapshotBySede.has(sedeCode)) snapshotBySede.set(sedeCode, row);
+      if (!shouldIncludePayrollMatrixRow(row)) return;
+      const day = String(row?.fecha || '').trim();
       if (!day) return;
-      const employee = resolvePerson({ id: row.empleadoId, doc: row.documento, byId: employeeMaps.byId, byDoc: employeeMaps.byDoc });
-      const supernumerario = resolvePerson({ id: row.empleadoId, doc: row.documento, byId: superMaps.byId, byDoc: superMaps.byDoc });
-      const person = supernumerario || employee || null;
-      const effectiveSedeCode = String(row.sedeCodigo || person?.sedeCodigo || '').trim();
-      const type = supernumerario ? 'Supernumerario' : 'Empleado';
-      const doc = String(row.documento || person?.documento || '').trim();
-      const name = String(row.nombre || person?.nombre || '').trim();
-      if (!doc && !name) return;
-      const bucket = ensureBucket(day, effectiveSedeCode);
-      const workerKey = doc || `NAME:${name}`;
-      if (bucket.has(workerKey)) return;
-      if (effectiveSedeCode) sedeCodesWithData.add(effectiveSedeCode);
+      const bucket = ensureBucket(day, sedeCode);
+      const workerKey = String(row?.documento || row?.employeeId || row?.nombre || '').trim();
+      if (!workerKey) return;
+      if (sedeCode) sedeCodesWithData.add(sedeCode);
       bucket.set(workerKey, {
-        doc: doc || '-',
-        name: name || '-',
-        label: `${name || doc || '-'}${supernumerario ? ' [SUP]' : ''}`,
-        type,
-        sortName: normalizeText(name || doc || '-')
-      });
-    });
-
-    (replacementsRows || []).forEach((row) => {
-      if (String(row.decision || '').trim().toLowerCase() !== 'reemplazo') return;
-      const sedeCode = String(row.sedeCodigo || '').trim();
-      const day = String(row.fecha || '').trim();
-      if (!day) return;
-      const replacement = resolvePerson({ id: row.supernumerarioId, doc: row.supernumerarioDocumento, byId: superMaps.byId, byDoc: superMaps.byDoc });
-      const replaced = resolvePerson({ id: row.empleadoId, doc: row.documento, byId: employeeMaps.byId, byDoc: employeeMaps.byDoc });
-      const effectiveSedeCode = String(row.sedeCodigo || replaced?.sedeCodigo || replacement?.sedeCodigo || '').trim();
-      const doc = String(row.supernumerarioDocumento || replacement?.documento || '').trim();
-      const name = String(row.supernumerarioNombre || replacement?.nombre || '').trim();
-      const replacedName = String(row.nombre || replaced?.nombre || row.documento || '').trim();
-      if (!doc && !name) return;
-      const bucket = ensureBucket(day, effectiveSedeCode);
-      const workerKey = doc || `NAME:${name}`;
-      if (effectiveSedeCode) sedeCodesWithData.add(effectiveSedeCode);
-      bucket.set(workerKey, {
-        doc: doc || '-',
-        name: name || '-',
-        label: `${name || doc || '-'} (Reemplaza a ${replacedName || '-'})`,
-        type: 'Supernumerario',
-        sortName: normalizeText(name || doc || '-')
+        doc: String(row?.documento || '').trim() || '-',
+        name: String(row?.nombre || '').trim() || '-',
+        label: buildPayrollMatrixLabel(row),
+        sortName: normalizeText(String(row?.nombre || row?.documento || '-').trim())
       });
     });
 
@@ -347,9 +317,13 @@ export const Reports = (mount, deps = {}) => {
       })
       .forEach((sede) => {
         const sedeCode = String(sede.codigo || '').trim();
+        const snapshot = snapshotBySede.get(sedeCode) || null;
         const planned = parseOperatorCount(sede.numeroOperarios ?? 0);
+        const dependencia = String(snapshot?.dependenciaNombreSnapshot || sede.dependenciaNombre || sede.dependenciaCodigo || '-').trim() || '-';
+        const zona = String(snapshot?.zonaNombreSnapshot || sede.zonaNombre || sede.zonaCodigo || '-').trim() || '-';
+        const sedeNombre = String(snapshot?.sedeNombreSnapshot || sede.nombre || sede.codigo || '-').trim() || '-';
         const dailyLists = bounds.days.map((day) => {
-          const workers = Array.from((workerMapByDaySede.get(`${day}|${sedeCode}`) || new Map()).values());
+          const workers = Array.from((workerMapByDaySede.get(day + '|' + sedeCode) || new Map()).values());
           workers.sort((a, b) => {
             const byName = String(a.sortName || '').localeCompare(String(b.sortName || ''));
             if (byName !== 0) return byName;
@@ -363,13 +337,13 @@ export const Reports = (mount, deps = {}) => {
         for (let slot = 0; slot < slotCount; slot += 1) {
           const isExtra = planned > 0 && slot >= planned;
           const row = {
-            dependencia: String(sede.dependenciaNombre || sede.dependenciaCodigo || '-').trim() || '-',
-            zona: String(sede.zonaNombre || sede.zonaCodigo || '-').trim() || '-',
-            sede: String(sede.nombre || sede.codigo || '-').trim() || '-',
-            cupo: isExtra ? `Extra ${slot - planned + 1}` : `Cupo ${slot + 1}`
+            dependencia,
+            zona,
+            sede: sedeNombre,
+            cupo: isExtra ? 'Extra ' + String(slot - planned + 1) : 'Cupo ' + String(slot + 1)
           };
           bounds.days.forEach((day, index) => {
-            row[`d${index + 1}`] = dailyLists[index]?.[slot]?.label || '';
+            row['d' + String(index + 1)] = dailyLists[index]?.[slot]?.label || '';
           });
           rows.push(row);
 
@@ -380,18 +354,32 @@ export const Reports = (mount, deps = {}) => {
             Cupo: row.cupo
           };
           bounds.days.forEach((day, index) => {
-            exportRow[`Dia ${String(index + 1).padStart(2, '0')}`] = dailyLists[index]?.[slot]?.label || '';
+            exportRow['Dia ' + String(index + 1).padStart(2, '0')] = dailyLists[index]?.[slot]?.label || '';
           });
           exportRows.push(exportRow);
         }
       });
 
     return {
-      days: bounds.days.map((day, index) => ({ iso: day, key: `d${index + 1}`, label: String(index + 1) })),
+      days: bounds.days.map((day, index) => ({ iso: day, key: 'd' + String(index + 1), label: String(index + 1) })),
       rows,
       exportRows,
       month: bounds.month
     };
+  }
+
+  function shouldIncludePayrollMatrixRow(row = {}) {
+    const type = String(row?.tipoPersonal || '').trim();
+    if (type === 'supernumerario') return String(row?.estadoDia || '').trim() === 'trabajado_reemplazo';
+    return row?.asistio === true;
+  }
+
+  function buildPayrollMatrixLabel(row = {}) {
+    const name = String(row?.nombre || row?.documento || '-').trim() || '-';
+    if (String(row?.tipoPersonal || '').trim() === 'supernumerario' && row?.reemplazaANombre) {
+      return name + ' (Reemplaza a ' + row.reemplazaANombre + ')';
+    }
+    return name;
   }
 
   function normalizeText(value) {
@@ -442,68 +430,50 @@ export const Reports = (mount, deps = {}) => {
     return false;
   }
 
-  function normalizeAbsenteeismRows(fecha, sedeStatusRows = [], attendanceRows = [], replacementsRows = [], sedeRows = [], novedadRows = []) {
-    const statusBySede = new Map((sedeStatusRows || []).map((row) => [String(row.sedeCodigo || '').trim(), row]).filter(([key]) => Boolean(key)));
+  function normalizeAbsenteeismRows(fecha, statusRows = [], sedeRows = []) {
     const sedeByCode = new Map((sedeRows || []).map((row) => [String(row.codigo || '').trim(), row]).filter(([key]) => Boolean(key)));
-    const rules = buildNovedadReplacementRules(novedadRows);
-    const replacementByEmployee = new Map();
-    const replacementSuperByDateDoc = new Set();
+    const snapshotBySede = new Map();
+    const serviceRowsBySede = new Map();
 
-    (replacementsRows || []).forEach((row) => {
-      const employeeKey = `${row.fecha || ''}|${row.empleadoId || ''}`;
-      if (String(row.empleadoId || '').trim()) replacementByEmployee.set(employeeKey, row);
-      if (String(row.decision || '').trim().toLowerCase() === 'reemplazo') {
-        const superDoc = String(row.supernumerarioDocumento || '').trim();
-        if (superDoc) replacementSuperByDateDoc.add(`${row.fecha || ''}|${superDoc}`);
-      }
-    });
-
-    const attendanceBySede = new Map();
-    (attendanceRows || []).forEach((row) => {
-      const attDoc = String(row.documento || '').trim();
-      if (attDoc && replacementSuperByDateDoc.has(`${row.fecha || ''}|${attDoc}`)) return;
-      const sedeCode = String(row.sedeCodigo || '').trim();
+    (statusRows || []).forEach((row) => {
+      const sedeCode = String(row?.sedeCodigo || '').trim();
       if (!sedeCode) return;
-      if (!attendanceBySede.has(sedeCode)) attendanceBySede.set(sedeCode, []);
-      attendanceBySede.get(sedeCode).push(row);
+      if (!snapshotBySede.has(sedeCode)) snapshotBySede.set(sedeCode, row);
+      if (String(row?.tipoPersonal || '').trim() !== 'empleado') return;
+      if (row?.servicioProgramado !== true) return;
+      if (!serviceRowsBySede.has(sedeCode)) serviceRowsBySede.set(sedeCode, []);
+      serviceRowsBySede.get(sedeCode).push(row);
     });
 
-    const historicalSedeCodes = new Set([
-      ...(sedeStatusRows || []).map((row) => String(row.sedeCodigo || '').trim()).filter(Boolean),
-      ...(attendanceRows || []).map((row) => String(row.sedeCodigo || '').trim()).filter(Boolean)
+    const sedeCodes = new Set([
+      ...(sedeRows || []).map((row) => String(row?.codigo || '').trim()).filter(Boolean),
+      ...(statusRows || []).map((row) => String(row?.sedeCodigo || '').trim()).filter(Boolean)
     ]);
 
-    return Array.from(historicalSedeCodes)
+    return Array.from(sedeCodes)
       .map((sedeCode) => {
-        const status = statusBySede.get(sedeCode) || {};
         const sede = sedeByCode.get(sedeCode) || {};
-        const attendance = attendanceBySede.get(sedeCode) || [];
-        const planeados = parseOperatorCount(sede.numeroOperarios ?? status.operariosPlaneados ?? status.operariosEsperados ?? 0);
-        const contratadosSnapshot = parseOperatorCount(status.operariosEsperados ?? 0);
-        const contratados = contratadosSnapshot > 0 ? contratadosSnapshot : planeados;
+        const snapshot = snapshotBySede.get(sedeCode) || {};
+        const serviceRows = serviceRowsBySede.get(sedeCode) || [];
+        const planeados = parseOperatorCount(sede.numeroOperarios ?? 0);
+        const contratados = serviceRows.length;
         const noContratado = Math.max(0, planeados - contratados);
-        const noRegistrado = parseOperatorCount(status.faltantes ?? 0);
-        const novSinReemplazo = attendance.filter((att) => {
-          if (att.asistio === true) return false;
-          const replacement = replacementByEmployee.get(`${att.fecha || ''}|${att.empleadoId || ''}`);
-          if (replacement && String(replacement.decision || '').trim().toLowerCase() === 'reemplazo') return false;
-          return attendanceRequiresReplacement(att, rules);
-        }).length;
-        const ausentismoTotal = noRegistrado + novSinReemplazo;
-        const totalPagar = Math.max(0, planeados - noContratado - ausentismoTotal);
+        const totalAusentismo = serviceRows.filter((row) => row?.servicioCubierto !== true).length;
+        const totalPagar = serviceRows.filter((row) => row?.cuentaPagoServicio === true).length;
         return {
           fecha,
-          dependencia: String(sede.dependenciaNombre || sede.dependenciaCodigo || '-').trim() || '-',
-          zona: String(sede.zonaNombre || sede.zonaCodigo || '-').trim() || '-',
-          sede: String(status.sedeNombre || sede.nombre || sedeCode || '-').trim() || '-',
+          dependencia: String(snapshot?.dependenciaNombreSnapshot || sede.dependenciaNombre || sede.dependenciaCodigo || '-').trim() || '-',
+          zona: String(snapshot?.zonaNombreSnapshot || sede.zonaNombre || sede.zonaCodigo || '-').trim() || '-',
+          sede: String(snapshot?.sedeNombreSnapshot || sede.nombre || sedeCode || '-').trim() || '-',
           planeados,
           contratados,
           noContratado,
-          novedadSinReemplazo: novSinReemplazo,
-          totalAusentismo: ausentismoTotal,
+          novedadSinReemplazo: totalAusentismo,
+          totalAusentismo,
           totalPagar
         };
       })
+      .filter((row) => row.planeados > 0 || row.contratados > 0 || row.totalAusentismo > 0 || row.totalPagar > 0)
       .sort((a, b) => {
         const byDependency = String(a.dependencia || '').localeCompare(String(b.dependencia || ''));
         if (byDependency !== 0) return byDependency;
@@ -687,14 +657,11 @@ export const Reports = (mount, deps = {}) => {
       }
       const dayClosed = await deps.isOperationDayClosed?.(date);
       if (!dayClosed) throw new Error('La fecha seleccionada no esta cerrada.');
-      const [sedeStatusRows, attendanceRows, replacementsRows, sedeRows, novedadRows] = await Promise.all([
-        deps.listSedeStatusRange?.(date, date) || [],
-        deps.listAttendanceRange?.(date, date) || [],
-        deps.listImportReplacementsRange?.(date, date) || [],
-        streamOnce((ok, fail) => deps.streamSedes?.(ok, fail)),
-        streamOnce((ok, fail) => deps.streamNovedades?.(ok, fail))
+      const [statusRows, sedeRows] = await Promise.all([
+        deps.listEmployeeDailyStatusRange?.(date, date) || [],
+        streamOnce((ok, fail) => deps.streamSedes?.(ok, fail))
       ]);
-      generatedAbsenteeismRows = normalizeAbsenteeismRows(date, sedeStatusRows, attendanceRows, replacementsRows, sedeRows, novedadRows);
+      generatedAbsenteeismRows = normalizeAbsenteeismRows(date, statusRows, sedeRows);
       const totals = generatedAbsenteeismRows.reduce(
         (acc, row) => {
           acc.planeados += Number(row.planeados || 0);
@@ -742,14 +709,11 @@ export const Reports = (mount, deps = {}) => {
         btnGenerate.textContent = 'Generando...';
       }
       const bounds = monthBounds(month);
-      const [attendanceRows, replacementsRows, sedeRows, employeeRows, supernumerarioRows] = await Promise.all([
-        deps.listAttendanceRange?.(bounds.from, bounds.to) || [],
-        deps.listImportReplacementsRange?.(bounds.from, bounds.to) || [],
-        streamOnce((ok, fail) => deps.streamSedes?.(ok, fail)),
-        streamOnce((ok, fail) => deps.streamEmployees?.(ok, fail)),
-        streamOnce((ok, fail) => deps.streamSupernumerarios?.(ok, fail))
+      const [statusRows, sedeRows] = await Promise.all([
+        deps.listEmployeeDailyStatusRange?.(bounds.from, bounds.to) || [],
+        streamOnce((ok, fail) => deps.streamSedes?.(ok, fail))
       ]);
-      const normalized = normalizePayrollRows(month, attendanceRows, replacementsRows, sedeRows, employeeRows, supernumerarioRows);
+      const normalized = normalizePayrollRows(month, statusRows, sedeRows);
       generatedPayrollRows = normalized.exportRows;
       generatedPayrollDays = normalized.days;
       const totalNode = qs('#payrollTotal', ui);

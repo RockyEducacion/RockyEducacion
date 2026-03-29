@@ -1,4 +1,4 @@
-import fs from 'node:fs/promises';
+﻿import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import dotenv from 'dotenv';
@@ -44,22 +44,38 @@ function stamp() {
   return iso;
 }
 
-async function selectAllRows(table, order) {
+async function selectAllRows(table, order, pageSize = PAGE_SIZE) {
   const rows = [];
   let from = 0;
 
   while (true) {
-    let query = supabase.from(table).select('*').range(from, from + PAGE_SIZE - 1);
+    let query = supabase.from(table).select('*').range(from, from + pageSize - 1);
     if (order) query = query.order(order, { ascending: true });
     const { data, error } = await query;
     if (error) throw error;
     const batch = Array.isArray(data) ? data : [];
     rows.push(...batch);
-    if (batch.length < PAGE_SIZE) break;
-    from += PAGE_SIZE;
+    if (batch.length < pageSize) break;
+    from += pageSize;
   }
 
   return rows;
+}
+
+function isStatementTimeout(error) {
+  return String(error?.code || '').trim() === '57014';
+}
+
+async function exportTable(table) {
+  try {
+    const rows = await selectAllRows(table.name, table.order);
+    return { rows, orderUsed: table.order || null, fallbackUsed: false };
+  } catch (error) {
+    if (!isStatementTimeout(error) || !table.order) throw error;
+    console.warn(`Reintentando ${table.name} sin order por timeout...`);
+    const rows = await selectAllRows(table.name, null, 250);
+    return { rows, orderUsed: null, fallbackUsed: true };
+  }
 }
 
 async function main() {
@@ -75,13 +91,15 @@ async function main() {
   };
 
   for (const table of tables) {
-    const rows = await selectAllRows(table.name, table.order);
+    const { rows, orderUsed, fallbackUsed } = await exportTable(table);
     const filePath = path.join(backupDir, `${table.name}.json`);
     await fs.writeFile(filePath, JSON.stringify(rows, null, 2), 'utf8');
     manifest.tables.push({
       table: table.name,
       rows: rows.length,
-      file: `${table.name}.json`
+      file: `${table.name}.json`,
+      orderUsed,
+      fallbackUsed
     });
     console.log(`${table.name}: ${rows.length} filas`);
   }
@@ -94,4 +112,3 @@ main().catch((error) => {
   console.error('No se pudo crear el backup:', error);
   process.exitCode = 1;
 });
-

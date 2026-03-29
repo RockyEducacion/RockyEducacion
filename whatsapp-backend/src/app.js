@@ -693,8 +693,88 @@ async function registerNovelty(phone, employee, novelty, selectedSede = null, in
   await sendText(phone, `Registro confirmado. Fecha: ${formatDateForHumans(date)}, Hora: ${time}, Novedad: ${novelty.label}, Muchas Gracias.`);
 }
 
+function isMissingRpcError(error) {
+  const code = String(error?.code || '').trim();
+  if (code === 'PGRST202' || code === '42883') return true;
+  const message = [
+    error?.message,
+    error?.details,
+    error?.hint
+  ].filter(Boolean).join(' ');
+  return /could not find the function|function .* does not exist|schema cache/i.test(message);
+}
+
+function unwrapRpcSingleRow(data) {
+  if (Array.isArray(data)) return data[0] || null;
+  return data || null;
+}
+
+async function fetchDailyMetricsRow(date) {
+  const day = String(date || '').trim();
+  if (!day) return null;
+  const { data, error } = await supabaseAdmin
+    .from('daily_metrics')
+    .select('*')
+    .eq('fecha', day)
+    .maybeSingle();
+  if (error) throw error;
+  return data || null;
+}
+
+async function refreshEmployeeDailyStatusSnapshot(date) {
+  const day = String(date || '').trim();
+  if (!day) return null;
+  const { data, error } = await supabaseAdmin.rpc('refresh_employee_daily_status', { p_fecha: day });
+  if (error) {
+    if (isMissingRpcError(error)) return null;
+    throw error;
+  }
+  return data ?? 0;
+}
+
+async function refreshOperationalSnapshotsFromEmployeeDailyStatus(date) {
+  const day = String(date || '').trim();
+  if (!day) return null;
+
+  const refreshed = await refreshEmployeeDailyStatusSnapshot(day);
+  if (refreshed === null) return null;
+
+  const { data, error } = await supabaseAdmin.rpc('refresh_operational_snapshots_from_employee_daily_status', { p_fecha: day });
+  if (error) {
+    if (isMissingRpcError(error)) return null;
+    throw error;
+  }
+
+  return unwrapRpcSingleRow(data);
+}
+
+async function refreshOperationalState(date) {
+  const day = String(date || '').trim();
+  if (!day) return null;
+
+  const refreshed = await refreshOperationalSnapshotsFromEmployeeDailyStatus(day);
+  if (refreshed !== null) {
+    return fetchDailyMetricsRow(day);
+  }
+
+  await recomputeSedeStatusSnapshot(day);
+  return recomputeAndFetchDailyMetrics(day);
+}
+
 async function recomputeDailyMetrics(date) {
   const day = String(date || '').trim();
+  if (!day) return null;
+
+  const refreshed = await refreshEmployeeDailyStatusSnapshot(day);
+  if (refreshed !== null) {
+    const { data, error } = await supabaseAdmin.rpc('recompute_daily_metrics_from_employee_daily_status', { p_fecha: day });
+    if (error) {
+      if (!isMissingRpcError(error)) throw error;
+    } else {
+      return unwrapRpcSingleRow(data) || (await fetchDailyMetricsRow(day));
+    }
+  }
+
   const [
     { data: attendance, error: attendanceError },
     { data: replacements, error: replacementsError },
@@ -762,6 +842,17 @@ async function recomputeDailyMetrics(date) {
 async function recomputeSedeStatusSnapshot(date) {
   const day = String(date || '').trim();
   if (!day) return;
+
+  const refreshed = await refreshEmployeeDailyStatusSnapshot(day);
+  if (refreshed !== null) {
+    const { data, error } = await supabaseAdmin.rpc('recompute_sede_status_from_employee_daily_status', { p_fecha: day });
+    if (error) {
+      if (!isMissingRpcError(error)) throw error;
+    } else {
+      return data ?? null;
+    }
+  }
+
   const [
     { data: attendance, error: attendanceError },
     { data: replacements, error: replacementsError },
@@ -1000,7 +1091,64 @@ function toISODate(value) {
   }
   return null;
 }
-
+async function computeDailyClosureSummary(date) {
+  const day = String(date || '').trim();
+  if (!day) {
+    return { planeados: 0, contratados: 0, asistencias: 0, faltan: 0, sobran: 0, ausentismos: 0, noContratados: 0 };
+  }
+  const [
+    { data: statusRows, error: statusError },
+    sedesRows
+  ] = await Promise.all([
+    supabaseAdmin
+      .from('employee_daily_status')
+      .select('sede_codigo, tipo_personal, servicio_programado, asistio, cuenta_pago_servicio')
+      .eq('fecha', day),
+    selectAllRows('sedes')
+  ]);
+  if (statusError) throw statusError;
+  const sedes = (sedesRows || [])
+    .filter((sede) => String(sede?.estado || 'activo').trim().toLowerCase() !== 'inactivo')
+    .filter((sede) => isSedeScheduledForDate(sede, day));
+  const bySede = new Map();
+  for (const row of statusRows || []) {
+    if (String(row?.tipo_personal || '').trim() !== 'empleado') continue;
+    if (row?.servicio_programado !== true) continue;
+    const sedeCode = String(row?.sede_codigo || '').trim();
+    if (!sedeCode) continue;
+    const bucket = bySede.get(sedeCode) || {
+      contratados: 0,
+      asistencias: 0,
+      ausentismos: 0
+    };
+    bucket.contratados += 1;
+    if (row?.cuenta_pago_servicio === true) bucket.asistencias += 1;
+    if (row?.cuenta_pago_servicio === false) bucket.ausentismos += 1;
+    bySede.set(sedeCode, bucket);
+  }
+  const summary = sedes.reduce((acc, sede) => {
+    const sedeCode = String(sede?.codigo || '').trim();
+    const planned = Number(sede?.numero_operarios ?? 0) || 0;
+    const counts = bySede.get(sedeCode) || { contratados: 0, asistencias: 0, ausentismos: 0 };
+    acc.planeados += planned;
+    acc.contratados += counts.contratados;
+    acc.asistencias += counts.asistencias;
+    acc.faltan += Math.max(0, planned - counts.contratados);
+    acc.sobran += Math.max(0, counts.contratados - planned);
+    acc.ausentismos += counts.ausentismos;
+    return acc;
+  }, {
+    planeados: 0,
+    contratados: 0,
+    asistencias: 0,
+    faltan: 0,
+    sobran: 0,
+    ausentismos: 0,
+    noContratados: 0
+  });
+  summary.noContratados = Math.max(0, summary.planeados - summary.contratados);
+  return summary;
+}
 async function closeOperationDay(date) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(String(date || '').trim())) {
     throw new Error('invalid_date');
@@ -1012,7 +1160,7 @@ async function closeOperationDay(date) {
     targetType: 'daily_closure',
     targetId: day,
     action: 'cron_close_started',
-    note: `Inicio de cierre automatico para ${day}.`
+    note: 'Inicio de cierre automatico para ' + day + '.'
   });
 
   const { data: existingClosure, error: existingClosureError } = await supabaseAdmin
@@ -1024,13 +1172,18 @@ async function closeOperationDay(date) {
 
   if (existingClosure?.locked === true || String(existingClosure?.status || '').trim().toLowerCase() === 'closed') {
     await runPostClosureTasks(day);
+    const refreshedAlreadyClosed = await refreshOperationalSnapshotsFromEmployeeDailyStatus(day);
+    if (refreshedAlreadyClosed === null) {
+      await recomputeSedeStatusSnapshot(day);
+      await recomputeDailyMetrics(day);
+    }
     await insertSystemAuditLog({
       actorEmail: 'cron@system',
       targetType: 'daily_closure',
       targetId: day,
       action: 'cron_close_reconciled',
       before: existingClosure,
-      note: `El cierre automatico de ${day} ya estaba cerrado; se reconciliaron tareas pendientes de post-cierre.`
+      note: 'El cierre automatico de ' + day + ' ya estaba cerrado; se reconciliaron tareas pendientes de post-cierre.'
     });
     return { date: day, status: 'already_closed' };
   }
@@ -1042,37 +1195,42 @@ async function closeOperationDay(date) {
       targetType: 'daily_closure',
       targetId: day,
       action: 'cron_close_stage_finalize_absenteeism',
-      note: `Se consolidaron ausentismos pendientes para ${day}.`
+      note: 'Se consolidaron ausentismos pendientes para ' + day + '.'
     });
 
-    await recomputeSedeStatusSnapshot(day);
-    await insertSystemAuditLog({
-      actorEmail: 'cron@system',
-      targetType: 'daily_closure',
-      targetId: day,
-      action: 'cron_close_stage_sede_status',
-      note: `Se recalculo sede_status para ${day}.`
-    });
+    const refreshedBeforeClosure = await refreshOperationalSnapshotsFromEmployeeDailyStatus(day);
+    if (refreshedBeforeClosure === null) {
+      await recomputeSedeStatusSnapshot(day);
+      await insertSystemAuditLog({
+        actorEmail: 'cron@system',
+        targetType: 'daily_closure',
+        targetId: day,
+        action: 'cron_close_stage_sede_status',
+        note: 'Se recalculo sede_status para ' + day + '.'
+      });
+    } else {
+      await insertSystemAuditLog({
+        actorEmail: 'cron@system',
+        targetType: 'daily_closure',
+        targetId: day,
+        action: 'cron_close_stage_operational_snapshots',
+        note: 'Se consolidaron employee_daily_status, sede_status y daily_metrics para ' + day + '.'
+      });
+    }
 
-    // Always recompute metrics before closing so the snapshot is not based on stale partial rows.
-    const metrics = await recomputeAndFetchDailyMetrics(day);
+    const metrics = refreshedBeforeClosure === null
+      ? await recomputeAndFetchDailyMetrics(day)
+      : ((await fetchDailyMetricsRow(day)) || (await recomputeAndFetchDailyMetrics(day)));
     await insertSystemAuditLog({
       actorEmail: 'cron@system',
       targetType: 'daily_closure',
       targetId: day,
       action: 'cron_close_stage_metrics',
       after: metrics,
-      note: `Se recalcularon daily_metrics para ${day}.`
+      note: 'Se recalcularon daily_metrics para ' + day + '.'
     });
 
-    await runPostClosureTasks(day);
-    await insertSystemAuditLog({
-      actorEmail: 'cron@system',
-      targetType: 'daily_closure',
-      targetId: day,
-      action: 'cron_close_stage_post_closure',
-      note: `Se ejecutaron tareas de post-cierre para ${day}.`
-    });
+    const closureSummary = await computeDailyClosureSummary(day);
 
     const { error: closureError } = await supabaseAdmin
       .from('daily_closures')
@@ -1081,11 +1239,13 @@ async function closeOperationDay(date) {
         fecha: day,
         status: 'closed',
         locked: true,
-        planeados: Number(metrics?.planned || 0),
-        contratados: Number(metrics?.expected || 0),
-        asistencias: Number(metrics?.attendance_count || metrics?.attendanceCount || 0),
-        ausentismos: Number(metrics?.absenteeism || 0),
-        no_contratados: Number(metrics?.no_contracted || metrics?.noContracted || 0),
+        planeados: Number(closureSummary?.planeados || metrics?.planned || 0),
+        contratados: Number(closureSummary?.contratados || metrics?.expected || 0),
+        asistencias: Number(closureSummary?.asistencias || 0),
+        ausentismos: Number(closureSummary?.ausentismos || metrics?.absenteeism || 0),
+        faltan: Number(closureSummary?.faltan || 0),
+        sobran: Number(closureSummary?.sobran || 0),
+        no_contratados: Number(closureSummary?.noContratados || metrics?.no_contracted || metrics?.noContracted || 0),
         closed_by_uid: null,
         closed_by_email: 'cron@system'
       }, { onConflict: 'id' });
@@ -1097,28 +1257,37 @@ async function closeOperationDay(date) {
       targetId: day,
       action: 'cron_close_stage_closure_saved',
       after: metrics,
-      note: `Se guardo daily_closures para ${day}.`
+      note: 'Se guardo daily_closures para ' + day + '.'
     });
 
-    const { error: metricCloseError } = await supabaseAdmin
-      .from('daily_metrics')
-      .update({ closed: true })
-      .eq('fecha', day);
-    if (metricCloseError) throw metricCloseError;
+    await runPostClosureTasks(day);
+    await insertSystemAuditLog({
+      actorEmail: 'cron@system',
+      targetType: 'daily_closure',
+      targetId: day,
+      action: 'cron_close_stage_post_closure',
+      note: 'Se ejecutaron tareas de post-cierre para ' + day + '.'
+    });
+
+    const refreshedAfterClosure = await refreshOperationalSnapshotsFromEmployeeDailyStatus(day);
+    if (refreshedAfterClosure === null) {
+      await recomputeSedeStatusSnapshot(day);
+      await recomputeDailyMetrics(day);
+    }
 
     await insertSystemAuditLog({
       actorEmail: 'cron@system',
       targetType: 'daily_closure',
       targetId: day,
       action: 'cron_close_stage_metrics_closed',
-      note: `Se marco daily_metrics como cerrado para ${day}.`
+      note: 'Se reconciliaron snapshots cerrados para ' + day + '.'
     });
     await insertSystemAuditLog({
       actorEmail: 'cron@system',
       targetType: 'daily_closure',
       targetId: day,
       action: 'cron_close_completed',
-      note: `El cierre automatico de ${day} finalizo correctamente.`
+      note: 'El cierre automatico de ' + day + ' finalizo correctamente.'
     });
   } catch (error) {
     await insertSystemAuditLog({
@@ -1128,7 +1297,7 @@ async function closeOperationDay(date) {
       action: 'cron_close_failed',
       before: existingClosure,
       after: serializeErrorForAudit(error),
-      note: `Fallo el cierre automatico de ${day}.`
+      note: 'Fallo el cierre automatico de ' + day + '.'
     });
     throw error;
   }
@@ -1137,6 +1306,7 @@ async function closeOperationDay(date) {
 }
 
 async function runPostClosureTasks(day) {
+
   const { error: metricCloseError } = await supabaseAdmin
     .from('daily_metrics')
     .update({ closed: true })
@@ -1147,13 +1317,7 @@ async function runPostClosureTasks(day) {
 
 async function recomputeAndFetchDailyMetrics(date) {
   await recomputeDailyMetrics(date);
-  const { data, error } = await supabaseAdmin
-    .from('daily_metrics')
-    .select('*')
-    .eq('fecha', date)
-    .maybeSingle();
-  if (error) throw error;
-  return data || null;
+  return fetchDailyMetricsRow(date);
 }
 
 async function insertSystemAuditLog({
@@ -1262,10 +1426,65 @@ async function finalizePendingAbsenteeismForClosure(day) {
       created_by_email: 'cron@system'
     }, { onConflict: 'id' });
     if (absenteeismError) throw absenteeismError;
-
   }
+
+  await materializeClosedOperationalAbsenteeismForClosure(day);
 }
 
+async function materializeClosedOperationalAbsenteeismForClosure(day) {
+  const refreshed = await refreshEmployeeDailyStatusSnapshot(day);
+  if (refreshed === null) return 0;
+
+  const { data: statusRows, error } = await supabaseAdmin
+    .from('employee_daily_status')
+    .select('employee_id, documento, nombre, sede_codigo, sede_nombre_snapshot, novedad_codigo, novedad_nombre, tipo_personal, servicio_programado, cuenta_pago_servicio')
+    .eq('fecha', day)
+    .eq('tipo_personal', 'empleado')
+    .eq('servicio_programado', true)
+    .eq('cuenta_pago_servicio', false);
+  if (error) throw error;
+
+  let changed = 0;
+  for (const row of statusRows || []) {
+    const recordId = buildDailyRecordId(day, row?.documento, row?.employee_id);
+    const novedadCodigo = String(row?.novedad_codigo || '').trim() || '8';
+    const novedadNombre = String(row?.novedad_nombre || '').trim() || 'AUSENCIA NO JUSTIFICADA';
+
+    const { error: replacementError } = await supabaseAdmin.from('import_replacements').upsert({
+      id: recordId,
+      fecha_operacion: day,
+      fecha: day,
+      empleado_id: row?.employee_id || null,
+      documento: row?.documento || null,
+      nombre: row?.nombre || null,
+      sede_codigo: row?.sede_codigo || null,
+      sede_nombre: row?.sede_nombre_snapshot || null,
+      novedad_codigo: novedadCodigo,
+      novedad_nombre: novedadNombre,
+      decision: 'ausentismo',
+      actor_uid: null,
+      actor_email: 'cron@system'
+    }, { onConflict: 'id' });
+    if (replacementError) throw replacementError;
+
+    const { error: absenteeismError } = await supabaseAdmin.from('absenteeism').upsert({
+      id: recordId,
+      fecha: day,
+      empleado_id: row?.employee_id || null,
+      documento: row?.documento || null,
+      nombre: row?.nombre || null,
+      sede_codigo: row?.sede_codigo || null,
+      sede_nombre: row?.sede_nombre_snapshot || null,
+      estado: 'confirmado',
+      created_by_uid: null,
+      created_by_email: 'cron@system'
+    }, { onConflict: 'id' });
+    if (absenteeismError) throw absenteeismError;
+    changed += 1;
+  }
+
+  return changed;
+}
 function addDaysToIsoDate(value, days = 1) {
   const iso = String(value || '').trim();
   if (!/^\d{4}-\d{2}-\d{2}$/.test(iso)) return null;
@@ -1373,7 +1592,7 @@ async function propagateIncapacitiesToNextDay(day) {
     if (absenteeismError) throw absenteeismError;
   }
 
-  await recomputeDailyMetrics(nextDay);
+  await refreshOperationalState(nextDay);
 }
 
 async function findEmployeeByPhone(phone) {
@@ -1710,6 +1929,8 @@ function truncate(value, max) {
 }
 
 export default app;
+
+
 
 
 

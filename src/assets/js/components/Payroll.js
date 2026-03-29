@@ -4,7 +4,7 @@ export const Payroll = (mount, deps = {}) => {
   const today = todayBogota();
   const ui = el('section', { className: 'main-card' }, [
     el('h2', {}, ['Nomina']),
-    el('p', { className: 'text-muted' }, ['Consulta quienes trabajaron por sede en el periodo seleccionado.']),
+    el('p', { className: 'text-muted' }, ['Consulta el estado diario de nomina por sede en el periodo seleccionado.']),
     el('div', { className: 'section-block mt-2' }, [
       el('h3', { className: 'section-title' }, ['Generar consulta']),
       el('div', { className: 'form-row mt-1' }, [
@@ -28,7 +28,7 @@ export const Payroll = (mount, deps = {}) => {
         kpiCard('Periodo', 'Sin consultar', 'payrollKpiRange'),
         kpiCard('Sedes', '0', 'payrollKpiSedes'),
         kpiCard('Personas', '0', 'payrollKpiPeople'),
-        kpiCard('Jornadas', '0', 'payrollKpiShifts')
+        kpiCard('Registros', '0', 'payrollKpiShifts')
       ])
     ]),
     sectionTable('Resumen por sede', 'payrollSummaryTable', [
@@ -36,7 +36,7 @@ export const Payroll = (mount, deps = {}) => {
       th('dependenciaNombre', 'Dependencia', 'summary'),
       th('zonaNombre', 'Zona', 'summary'),
       th('peopleCount', 'Personas', 'summary'),
-      th('shiftCount', 'Jornadas', 'summary'),
+      th('shiftCount', 'Registros', 'summary'),
       th('firstDate', 'Primera fecha', 'summary'),
       th('lastDate', 'Ultima fecha', 'summary'),
       el('th', {}, ['Accion'])
@@ -47,7 +47,7 @@ export const Payroll = (mount, deps = {}) => {
       th('cargo', 'Cargo', 'workers'),
       th('workerTypeLabel', 'Tipo', 'workers'),
       th('sedeNombre', 'Sede', 'workers'),
-      th('daysWorked', 'Dias trabajados', 'workers'),
+      th('daysWorked', 'Dias con registro', 'workers'),
       th('firstDate', 'Primera fecha', 'workers'),
       th('lastDate', 'Ultima fecha', 'workers'),
       el('th', {}, ['Accion'])
@@ -59,7 +59,7 @@ export const Payroll = (mount, deps = {}) => {
       th('nombre', 'Nombre', 'daily'),
       th('cargo', 'Cargo', 'daily'),
       th('workerTypeLabel', 'Tipo', 'daily'),
-      th('sourceLabel', 'Origen', 'daily')
+      th('sourceLabel', 'Estado / nomina', 'daily')
     ], 'payrollDailyTotals', 'Selecciona una fila para ver el detalle.', 'payrollDailyTitle')
   ]);
 
@@ -120,15 +120,13 @@ export const Payroll = (mount, deps = {}) => {
       btn.disabled = true;
       btn.textContent = 'Consultando...';
       setMessage('Consultando informacion de nomina...');
-      const [attendance, replacements, employees, supernumerarios, sedes, cargos] = await Promise.all([
-        deps.listAttendanceRange?.(dateFrom, dateTo) || [],
-        deps.listImportReplacementsRange?.(dateFrom, dateTo) || [],
+      const [statusRows, employees, supernumerarios, cargos] = await Promise.all([
+        deps.listEmployeeDailyStatusRange?.(dateFrom, dateTo) || [],
         snapshotOnce(deps.streamEmployees),
         snapshotOnce(deps.streamSupernumerarios),
-        snapshotOnce(deps.streamSedes),
         snapshotOnce(deps.streamCargos)
       ]);
-      const dataset = buildPayrollDataset({ attendance, replacements, employees, supernumerarios, sedes, cargos });
+      const dataset = buildPayrollDataset({ statusRows, employees, supernumerarios, cargos });
       summaryRows = dataset.summaryRows;
       workerRows = dataset.workerRows;
       dailyRows = dataset.dailyRows;
@@ -138,7 +136,7 @@ export const Payroll = (mount, deps = {}) => {
       syncSelectOptions(qs('#payrollSedeFilter', ui), dataset.meta.sedes, 'Todas');
       updateKpis(ui, dateFrom, dateTo, dataset.meta);
       renderAll();
-      setMessage(`Consulta lista. Jornadas encontradas: ${dataset.meta.shiftCount}.`);
+      setMessage(`Consulta lista. Registros encontrados: ${dataset.meta.shiftCount}.`);
     } catch (error) {
       console.error('Payroll error:', error);
       summaryRows = [];
@@ -169,7 +167,7 @@ export const Payroll = (mount, deps = {}) => {
 
     if (!rows.length) {
       tbody.replaceChildren(emptyRow(8, 'Sin sedes para el filtro seleccionado.'));
-      qs('#payrollSummaryTotals', ui).textContent = 'Sedes filtradas: 0 | Personas: 0 | Jornadas: 0';
+      qs('#payrollSummaryTotals', ui).textContent = 'Sedes filtradas: 0 | Personas: 0 | Registros: 0';
       updateSortIndicators(ui, '#payrollSummaryTable th[data-sort-summary]', 'data-sort-summary', summarySortKey, summarySortDir);
       return;
     }
@@ -199,7 +197,7 @@ export const Payroll = (mount, deps = {}) => {
       return tr;
     }));
     const totals = rows.reduce((acc, row) => ({ people: acc.people + Number(row.peopleCount || 0), shifts: acc.shifts + Number(row.shiftCount || 0) }), { people: 0, shifts: 0 });
-    qs('#payrollSummaryTotals', ui).textContent = `Sedes filtradas: ${rows.length} | Personas: ${totals.people} | Jornadas: ${totals.shifts}`;
+    qs('#payrollSummaryTotals', ui).textContent = `Sedes filtradas: ${rows.length} | Personas: ${totals.people} | Registros: ${totals.shifts}`;
     updateSortIndicators(ui, '#payrollSummaryTable th[data-sort-summary]', 'data-sort-summary', summarySortKey, summarySortDir);
   }
 
@@ -213,7 +211,7 @@ export const Payroll = (mount, deps = {}) => {
 
     if (!rows.length) {
       tbody.replaceChildren(emptyRow(9, 'Sin personas para el filtro seleccionado.'));
-      qs('#payrollWorkersTotals', ui).textContent = 'Personas filtradas: 0 | Dias trabajados: 0';
+      qs('#payrollWorkersTotals', ui).textContent = 'Personas filtradas: 0 | Dias con registro: 0';
       updateSortIndicators(ui, '#payrollWorkersTable th[data-sort-workers]', 'data-sort-workers', workersSortKey, workersSortDir);
       return;
     }
@@ -242,7 +240,7 @@ export const Payroll = (mount, deps = {}) => {
       return tr;
     }));
     const totals = rows.reduce((acc, row) => acc + Number(row.daysWorked || 0), 0);
-    qs('#payrollWorkersTotals', ui).textContent = `Personas filtradas: ${rows.length} | Dias trabajados: ${totals}`;
+    qs('#payrollWorkersTotals', ui).textContent = `Personas filtradas: ${rows.length} | Dias con registro: ${totals}`;
     updateSortIndicators(ui, '#payrollWorkersTable th[data-sort-workers]', 'data-sort-workers', workersSortKey, workersSortDir);
   }
 
@@ -319,56 +317,22 @@ function monthStartBogota(today) {
   return `${year}-${month}-01`;
 }
 
-function buildPayrollDataset({ attendance = [], replacements = [], employees = [], supernumerarios = [], sedes = [], cargos = [] } = {}) {
+function buildPayrollDataset({ statusRows = [], employees = [], supernumerarios = [], cargos = [] } = {}) {
   const cargoByCode = makeMap(cargos, 'codigo');
   const employeeById = makeMap(employees, 'id');
   const employeeByDoc = makeMap(employees, 'documento');
   const superById = makeMap(supernumerarios, 'id');
   const superByDoc = makeMap(supernumerarios, 'documento');
-  const sedeByCode = makeMap(sedes, 'codigo');
   const seen = new Set();
   const dailyRows = [];
 
-  (attendance || []).forEach((row) => {
-    if (row?.asistio !== true) return;
-    const item = normalizeWorkerRecord({
-      source: 'attendance',
-      fecha: row.fecha,
-      documento: row.documento,
-      nombre: row.nombre,
-      sedeCodigo: row.sedeCodigo,
-      sedeNombre: row.sedeNombre,
-      empleadoId: row.empleadoId,
+  (statusRows || []).forEach((row) => {
+    const item = normalizePayrollStatusRecord({
+      row,
       employeeById,
       employeeByDoc,
       superById,
       superByDoc,
-      sedeByCode,
-      cargoByCode
-    });
-    if (!item) return;
-    const key = buildShiftKey(item);
-    if (seen.has(key)) return;
-    seen.add(key);
-    dailyRows.push(item);
-  });
-
-  (replacements || []).forEach((row) => {
-    if (String(row?.decision || '').trim().toLowerCase() !== 'reemplazo') return;
-    const item = normalizeWorkerRecord({
-      source: 'replacement',
-      fecha: row.fecha,
-      documento: row.supernumerarioDocumento,
-      nombre: row.supernumerarioNombre,
-      sedeCodigo: row.sedeCodigo,
-      sedeNombre: row.sedeNombre,
-      empleadoId: row.supernumerarioId,
-      forcedWorkerType: 'supernumerario',
-      employeeById,
-      employeeByDoc,
-      superById,
-      superByDoc,
-      sedeByCode,
       cargoByCode
     });
     if (!item) return;
@@ -398,7 +362,7 @@ function buildPayrollDataset({ attendance = [], replacements = [], employees = [
     if (row.fecha < worker.firstDate) worker.firstDate = row.fecha;
     if (row.fecha > worker.lastDate) worker.lastDate = row.fecha;
 
-    const summaryKey = row.sedeCodigo || `NO_SEDE:${row.sedeNombre || '-'}`;
+    const summaryKey = row.sedeCodigo || ('NO_SEDE:' + (row.sedeNombre || '-'));
     if (!summaryMap.has(summaryKey)) {
       summaryMap.set(summaryKey, {
         sedeCodigo: row.sedeCodigo || '',
@@ -445,53 +409,77 @@ function buildPayrollDataset({ attendance = [], replacements = [], employees = [
   };
 }
 
-function normalizeWorkerRecord({
-  source,
-  fecha,
-  documento,
-  nombre,
-  sedeCodigo,
-  sedeNombre,
-  empleadoId,
-  forcedWorkerType = '',
+function normalizePayrollStatusRecord({
+  row,
   employeeById,
   employeeByDoc,
   superById,
   superByDoc,
-  sedeByCode,
   cargoByCode
 } = {}) {
-  const doc = String(documento || '').trim();
-  const id = String(empleadoId || '').trim();
-  const employee = forcedWorkerType === 'supernumerario' ? null : ((id && employeeById.get(id)) || (doc && employeeByDoc.get(doc)) || null);
+  const fecha = String(row?.fecha || '').trim();
+  const doc = String(row?.documento || '').trim();
+  const id = String(row?.employeeId || '').trim();
+  const workerType = String(row?.tipoPersonal || '').trim() === 'supernumerario' ? 'supernumerario' : 'empleado';
+  const employee = (id && employeeById.get(id)) || (doc && employeeByDoc.get(doc)) || null;
   const supernumerario = (id && superById.get(id)) || (doc && superByDoc.get(doc)) || null;
-  const workerType = forcedWorkerType || (supernumerario ? 'supernumerario' : 'empleado');
-  const person = workerType === 'supernumerario' ? supernumerario : employee;
+  const person = workerType === 'supernumerario' ? (supernumerario || employee) : (employee || supernumerario);
   const finalDoc = doc || String(person?.documento || '').trim();
-  const finalName = String(nombre || person?.nombre || '').trim();
-  if (!fecha || !finalDoc || !finalName) return null;
+  const finalName = String(row?.nombre || person?.nombre || '').trim();
+  if (!fecha || (!finalDoc && !finalName)) return null;
 
-  const finalSedeCode = String(sedeCodigo || person?.sedeCodigo || '').trim();
-  const sede = (finalSedeCode && sedeByCode.get(finalSedeCode)) || null;
   const cargoCode = String(person?.cargoCodigo || '').trim();
   const cargo = cargoByCode.get(cargoCode) || null;
-  const finalSedeName = String(sedeNombre || sede?.nombre || person?.sedeNombre || finalSedeCode || '').trim();
+  const finalSedeCode = String(row?.sedeCodigo || '').trim();
+  const finalSedeName = String(row?.sedeNombreSnapshot || row?.sedeCodigo || '').trim() || '-';
   return {
-    fecha: String(fecha || '').trim(),
-    documento: finalDoc,
-    nombre: finalName,
+    fecha,
+    documento: finalDoc || '-',
+    nombre: finalName || '-',
     cargo: String(person?.cargoNombre || cargo?.nombre || cargoCode || '-').trim() || '-',
     workerType,
     workerTypeLabel: workerType === 'supernumerario' ? 'Supernumerario' : 'Empleado',
     sedeCodigo: finalSedeCode,
-    sedeNombre: finalSedeName || '-',
-    dependenciaCodigo: String(sede?.dependenciaCodigo || '').trim(),
-    dependenciaNombre: String(sede?.dependenciaNombre || 'Sin dependencia').trim() || 'Sin dependencia',
-    zonaCodigo: String(sede?.zonaCodigo || '').trim(),
-    zonaNombre: String(sede?.zonaNombre || 'Sin zona').trim() || 'Sin zona',
-    sourceLabel: source === 'replacement' ? 'Reemplazo' : 'Asistencia',
-    workerKey: buildWorkerKey(workerType, finalDoc, finalSedeCode || finalSedeName)
+    sedeNombre: finalSedeName,
+    dependenciaCodigo: String(row?.dependenciaCodigoSnapshot || '').trim(),
+    dependenciaNombre: String(row?.dependenciaNombreSnapshot || 'Sin dependencia').trim() || 'Sin dependencia',
+    zonaCodigo: String(row?.zonaCodigoSnapshot || '').trim(),
+    zonaNombre: String(row?.zonaNombreSnapshot || 'Sin zona').trim() || 'Sin zona',
+    estadoDia: String(row?.estadoDia || '').trim(),
+    estadoLabel: formatPayrollStateLabel(row),
+    sourceLabel: formatPayrollStatusSummary(row),
+    workerKey: buildWorkerKey(workerType, finalDoc || id || finalName, finalSedeCode || finalSedeName)
   };
+}
+
+function formatPayrollStateLabel(row = {}) {
+  const state = String(row?.estadoDia || '').trim();
+  if (state === 'trabajado') return 'Trabajado';
+  if (state === 'trabajado_reemplazo') return 'Reemplazo';
+  if (state === 'ausente_con_novedad') return 'Ausencia con novedad';
+  if (state === 'ausente_sin_reemplazo') return 'Ausencia sin reemplazo';
+  if (state === 'incapacidad') return 'Incapacidad';
+  if (state === 'vacaciones') return 'Vacaciones';
+  if (state === 'compensatorio') return 'Compensatorio';
+  if (state === 'sin_registro') return 'Sin registro';
+  if (state === 'no_programado') return 'No programado';
+  return state || 'Sin estado';
+}
+
+function formatPayrollNominaLabel(value) {
+  if (value === true) return 'Paga';
+  if (value === false) return 'No paga';
+  return 'Pendiente';
+}
+
+function formatPayrollStatusSummary(row = {}) {
+  const parts = [formatPayrollStateLabel(row), formatPayrollNominaLabel(row?.pagaNomina)];
+  if (String(row?.tipoPersonal || '').trim() === 'supernumerario' && row?.reemplazaANombre) {
+    parts.push('Reemplaza a ' + row.reemplazaANombre);
+  } else if (row?.reemplazadoPorNombre) {
+    parts.push('Cubierto por ' + row.reemplazadoPorNombre);
+  }
+  return parts.filter(Boolean).join(' | ');
 }
 
 function filterSummaryRows(ui, rows = []) {
