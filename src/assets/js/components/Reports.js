@@ -1,22 +1,36 @@
 import { el, qs } from '../utils/dom.js';
 
-export const Reports = (mount, deps = {}) => {
+export const Reports = (mount, deps = {}, options = {}) => {
+  const variant = String(options?.variant || 'client').trim().toLowerCase();
+  const reportSets = {
+    client: {
+      title: 'Reportes Cliente',
+      subtitle: 'Reportes operativos y de servicio para entregar al cliente.',
+      reports: [
+        { id: 'daily_registry', title: 'Registro diario', subtitle: 'Fecha, hora, cedula, nombre, sede, novedad y reemplazo/ausentismo' },
+        { id: 'daily_absenteeism', title: 'Ausentismo diario', subtitle: 'Dependencia, zona, sede, planeados, contratados, ausentismo y total a pagar' }
+      ]
+    },
+    company: {
+      title: 'Reportes Empresa',
+      subtitle: 'Reportes internos para control de personal y trazabilidad operativa.',
+      reports: [
+        { id: 'employees_current', title: 'Empleados', subtitle: 'Vigentes con cedula, nombre, cargo, zona, dependencia y sede' },
+        { id: 'hiring_by_sede', title: 'Contratacion por Sedes', subtitle: 'Dependencia, zona, sede, planeados y contratados por sede' }
+      ]
+    }
+  };
+  const selectedSet = reportSets[variant] || reportSets.client;
   const ui = el('section', { className: 'main-card' }, [
-    el('h2', {}, ['Reportes']),
-    el('p', { className: 'text-muted' }, ['Selecciona un reporte para consultarlo.']),
+    el('h2', {}, [selectedSet.title]),
+    el('p', { className: 'text-muted' }, [selectedSet.subtitle]),
     el('div', { className: 'reports-grid mt-2', id: 'reportsCards' }, []),
     el('div', { className: 'divider' }, []),
     el('div', { id: 'reportContent' }, [el('p', { className: 'text-muted' }, ['Selecciona una tarjeta para abrir el reporte.'])]),
     el('p', { id: 'msg', className: 'text-muted mt-2' }, [' '])
   ]);
 
-  const reports = [
-    { id: 'employees_current', title: 'Empleados', subtitle: 'Vigentes con cedula, nombre, cargo, zona, dependencia y sede' },
-    { id: 'daily_registry', title: 'Registro diario', subtitle: 'Fecha, hora, cedula, nombre, sede, novedad y reemplazo/ausentismo' },
-    { id: 'hiring_by_sede', title: 'Contratacion por Sedes', subtitle: 'Dependencia, zona, sede, planeados y contratados por sede' },
-    { id: 'daily_absenteeism', title: 'Ausentismo diario', subtitle: 'Dependencia, zona, sede, planeados, contratados, ausentismo y total a pagar' },
-    { id: 'monthly_payroll', title: 'Nomina', subtitle: 'Matriz mensual por sede y cupo planeado, con la persona que cubrio cada dia' }
-  ];
+  const reports = selectedSet.reports;
 
   const cards = reports.map((r) =>
     el('button', { className: 'report-card', type: 'button', 'data-id': r.id }, [
@@ -118,18 +132,23 @@ export const Reports = (mount, deps = {}) => {
     return true;
   }
 
-  function normalizeEmployeesForReport(rawRows = [], sedeRows = []) {
+  function normalizeEmployeesForReport(rawRows = [], sedeRows = [], cargoRows = []) {
     const sedeByCode = new Map((sedeRows || []).map((s) => [String(s.codigo || '').trim(), s || {}]).filter(([k]) => Boolean(k)));
+    const cargoByCode = new Map((cargoRows || []).map((c) => [String(c.codigo || '').trim(), c || {}]).filter(([k]) => Boolean(k)));
     const todayISO = todayBogota();
     return (rawRows || [])
       .filter((e) => isCurrentEmployee(e, todayISO))
       .map((e) => {
         const sedeCode = String(e.sedeCodigo || '').trim();
         const sede = sedeByCode.get(sedeCode) || {};
+        const cargoCode = String(e.cargoCodigo || '').trim();
+        const cargo = cargoByCode.get(cargoCode) || null;
+        const alignment = normalizeCargoAlignment(cargo?.alineacionCrud || cargo?.alineacion_crud || e.cargoNombre || '');
         return {
           cedula: String(e.documento || '').trim() || '-',
           nombre: String(e.nombre || '').trim() || '-',
           cargo: String(e.cargoNombre || e.cargoCodigo || '-').trim() || '-',
+          tipo: alignment === 'supernumerario' ? 'Supernumerario' : alignment === 'supervisor' ? 'Supervisor' : 'Empleado',
           zona: String(sede.zonaNombre || sede.zonaCodigo || '-').trim() || '-',
           dependencia: String(sede.dependenciaNombre || sede.dependenciaCodigo || '-').trim() || '-',
           sede: String(e.sedeNombre || sede.nombre || e.sedeCodigo || '-').trim() || '-'
@@ -155,62 +174,94 @@ export const Reports = (mount, deps = {}) => {
     return raw || '-';
   }
 
-  function normalizeDailyRegistryRows(fecha, attendanceRows = [], replacementsRows = []) {
-    const replacementByEmployeeId = new Map();
-    const replacementByDocumento = new Map();
-    (replacementsRows || []).forEach((r) => {
-      const empId = String(r.empleadoId || '').trim();
-      const doc = String(r.documento || '').trim();
-      if (empId) replacementByEmployeeId.set(empId, r);
-      if (doc) replacementByDocumento.set(doc, r);
-    });
-
-    const out = (attendanceRows || []).map((a) => {
-      const empId = String(a.empleadoId || '').trim();
-      const doc = String(a.documento || '').trim();
-      const rep = replacementByEmployeeId.get(empId) || replacementByDocumento.get(doc) || null;
-      const novedad = rep ? displayNovedadLabel(rep) : displayNovedadLabel(a);
-      let decision = '-';
-      const rawDecision = String(rep?.decision || '').trim().toLowerCase();
-      if (rawDecision === 'reemplazo') {
-        const who = String(rep?.supernumerarioNombre || rep?.supernumerarioDocumento || '').trim();
-        decision = who ? `Reemplazo (${who})` : 'Reemplazo';
-      } else if (rawDecision === 'ausentismo') {
-        decision = 'Ausentismo';
-      }
-
-      return {
-        fecha,
-        hora: formatHour(a.createdAt),
-        cedula: doc || '-',
-        nombre: String(a.nombre || '-').trim() || '-',
-        sede: String(a.sedeNombre || a.sedeCodigo || '-').trim() || '-',
-        novedad,
-        reemplazoAusentismo: decision,
-        _ts: a.createdAt?.toMillis ? Number(a.createdAt.toMillis()) || 0 : 0
-      };
-    });
-
-    out.sort((x, y) => {
-      if (x._ts !== y._ts) return x._ts - y._ts;
-      const byName = String(x.nombre || '').localeCompare(String(y.nombre || ''));
-      if (byName !== 0) return byName;
-      return String(x.cedula || '').localeCompare(String(y.cedula || ''));
-    });
-    return out.map(({ _ts, ...row }) => row);
+  function attendanceKey(item = {}) {
+    return [
+      String(item?.fecha || '').trim(),
+      String(item?.employeeId || item?.empleadoId || '').trim(),
+      String(item?.documento || '').trim()
+    ].join('|');
   }
 
-  function normalizeHiringRows(sedeRows = [], employeeRows = [], cargoRows = []) {
-    const cargoByCode = new Map((cargoRows || []).map((c) => [String(c.codigo || '').trim(), c]).filter(([k]) => Boolean(k)));
-    const todayISO = new Date().toISOString().slice(0, 10);
+  function statusDetailState(row) {
+    const estadoDia = String(row?.estadoDia || '').trim();
+    const decision = String(row?.decisionCobertura || '').trim().toLowerCase();
+    const tipoPersonal = String(row?.tipoPersonal || 'empleado').trim().toLowerCase();
+    const reemplazaA = row?.reemplazaANombre || row?.reemplazaADocumento || '-';
+    const reemplazadoPor = row?.reemplazadoPorNombre || row?.reemplazadoPorDocumento || '-';
+
+    if (tipoPersonal === 'supernumerario' && estadoDia === 'trabajado_reemplazo') {
+      return `Supernumerario reemplazando a ${reemplazaA}`;
+    }
+    if (decision === 'reemplazo') {
+      return `Reemplazado por ${reemplazadoPor}`;
+    }
+    if (row?.asistio === true) {
+      return tipoPersonal === 'supernumerario' ? 'Trabajo supernumerario' : 'Trabajo';
+    }
+    if (decision === 'ausentismo' || row?.cuentaPagoServicio === false) {
+      return 'Ausentismo';
+    }
+    if (estadoDia === 'sin_registro') {
+      return 'Sin registro';
+    }
+    if (estadoDia === 'incapacidad') {
+      return 'Incapacidad';
+    }
+    if (estadoDia === 'vacaciones') {
+      return 'Vacaciones';
+    }
+    if (estadoDia === 'compensatorio') {
+      return 'Compensatorio';
+    }
+    if (estadoDia === 'ausente_con_novedad') {
+      return 'Ausente con novedad';
+    }
+    if (estadoDia === 'ausente_sin_reemplazo') {
+      return 'Ausentismo';
+    }
+    if (estadoDia === 'no_programado') {
+      return 'No programado';
+    }
+    return estadoDia
+      ? estadoDia.replace(/_/g, ' ').replace(/\b\w/g, (ch) => ch.toUpperCase())
+      : '-';
+  }
+
+  function normalizeDailyRegistryRows(fecha, statusRows = [], attendanceRows = []) {
+    const attendanceByKey = new Map();
+    (attendanceRows || []).forEach((item) => {
+      attendanceByKey.set(attendanceKey(item), item);
+    });
+
+    return (statusRows || [])
+      .slice()
+      .sort((a, b) => {
+        const hourA = String(attendanceByKey.get(attendanceKey(a))?.hora || '');
+        const hourB = String(attendanceByKey.get(attendanceKey(b))?.hora || '');
+        const byHour = hourB.localeCompare(hourA);
+        if (byHour !== 0) return byHour;
+        const bySede = String(a?.sedeNombreSnapshot || a?.sedeCodigo || '').localeCompare(String(b?.sedeNombreSnapshot || b?.sedeCodigo || ''));
+        if (bySede !== 0) return bySede;
+        return String(a?.nombre || '').localeCompare(String(b?.nombre || ''));
+      })
+      .map((statusRow) => {
+        const attendanceRow = attendanceByKey.get(attendanceKey(statusRow)) || null;
+        return {
+          fecha: statusRow.fecha || fecha,
+          hora: attendanceRow?.hora || '-',
+          cedula: statusRow.documento || '-',
+          nombre: statusRow.nombre || '-',
+          sede: statusRow.sedeNombreSnapshot || statusRow.sedeCodigo || '-',
+          novedad: statusRow.novedadNombre || statusRow.novedadCodigo || '-',
+          estado: statusDetailState(statusRow)
+        };
+      });
+  }
+
+  function normalizeHiringRows(sedeRows = [], employeeRows = []) {
     const contractedBySede = new Map();
 
     (employeeRows || []).forEach((emp) => {
-      if (!isCurrentEmployee(emp, todayISO)) return;
-      const cargoCode = String(emp.cargoCodigo || '').trim();
-      const cargo = cargoByCode.get(cargoCode) || null;
-      const alignment = normalizeCargoAlignment(cargo?.alineacionCrud || cargo?.alineacion_crud || emp.cargoNombre || '');
-      if (alignment === 'supernumerario') return;
       const sedeCode = String(emp.sedeCodigo || '').trim();
       if (!sedeCode) return;
       contractedBySede.set(sedeCode, (contractedBySede.get(sedeCode) || 0) + 1);
@@ -430,50 +481,75 @@ export const Reports = (mount, deps = {}) => {
     return false;
   }
 
-  function normalizeAbsenteeismRows(fecha, statusRows = [], sedeRows = []) {
-    const sedeByCode = new Map((sedeRows || []).map((row) => [String(row.codigo || '').trim(), row]).filter(([key]) => Boolean(key)));
-    const snapshotBySede = new Map();
-    const serviceRowsBySede = new Map();
+  function isNoRegistroAbsenteeism(row) {
+    const novedadCodigo = String(row?.novedadCodigo || '').trim();
+    if (novedadCodigo === '8') return true;
+    return row?.servicioProgramado === true
+      && row?.cuentaPagoServicio !== true
+      && !row?.sourceAttendanceId
+      && !row?.sourceIncapacityId
+      && String(row?.decisionCobertura || '').trim() === 'ausentismo';
+  }
 
-    (statusRows || []).forEach((row) => {
+  function isNoveltyWithoutReplacement(row) {
+    if (row?.servicioProgramado !== true) return false;
+    if (row?.cuentaPagoServicio === true) return false;
+    if (isNoRegistroAbsenteeism(row)) return false;
+    return String(row?.decisionCobertura || '').trim() === 'ausentismo' || row?.estadoDia === 'incapacidad' || row?.estadoDia === 'ausente_sin_reemplazo';
+  }
+
+  function normalizeAbsenteeismRows(fecha, statusRows = [], sedeClosureRows = []) {
+    const baseRows = (Array.isArray(statusRows) ? statusRows : []).filter((row) => String(row?.tipoPersonal || '').trim() === 'empleado');
+    const sedeClosuresByCode = new Map((Array.isArray(sedeClosureRows) ? sedeClosureRows : []).map((row) => [String(row?.sedeCodigo || '').trim(), row]));
+    const employeeRowsBySede = new Map();
+
+    baseRows.forEach((row) => {
       const sedeCode = String(row?.sedeCodigo || '').trim();
       if (!sedeCode) return;
-      if (!snapshotBySede.has(sedeCode)) snapshotBySede.set(sedeCode, row);
-      if (String(row?.tipoPersonal || '').trim() !== 'empleado') return;
-      if (row?.servicioProgramado !== true) return;
-      if (!serviceRowsBySede.has(sedeCode)) serviceRowsBySede.set(sedeCode, []);
-      serviceRowsBySede.get(sedeCode).push(row);
+      if (!employeeRowsBySede.has(sedeCode)) employeeRowsBySede.set(sedeCode, []);
+      employeeRowsBySede.get(sedeCode).push(row);
     });
 
-    const sedeCodes = new Set([
-      ...(sedeRows || []).map((row) => String(row?.codigo || '').trim()).filter(Boolean),
-      ...(statusRows || []).map((row) => String(row?.sedeCodigo || '').trim()).filter(Boolean)
-    ]);
+    const fixedSnapshotCodes = (Array.isArray(sedeClosureRows) ? sedeClosureRows : [])
+      .map((row) => String(row?.sedeCodigo || '').trim())
+      .filter(Boolean);
 
-    return Array.from(sedeCodes)
+    const allCodes = new Set([...fixedSnapshotCodes, ...Array.from(employeeRowsBySede.keys())]);
+
+    return Array.from(allCodes)
       .map((sedeCode) => {
-        const sede = sedeByCode.get(sedeCode) || {};
-        const snapshot = snapshotBySede.get(sedeCode) || {};
-        const serviceRows = serviceRowsBySede.get(sedeCode) || [];
-        const planeados = parseOperatorCount(sede.numeroOperarios ?? 0);
-        const contratados = serviceRows.length;
+        const orderedRows = [...(employeeRowsBySede.get(sedeCode) || [])].sort((a, b) => String(a?.nombre || '').localeCompare(String(b?.nombre || '')));
+        const scheduledRows = orderedRows.filter((row) => row?.servicioProgramado === true);
+        const actualRows = orderedRows.filter((row) => row?.asistio === true || row?.asistio === false || row?.sourceIncapacityId || row?.sourceAttendanceId || row?.sourceReplacementId || row?.sourceAbsenteeismId);
+        const sedeSnapshot = sedeClosuresByCode.get(sedeCode) || null;
+        const firstRow = orderedRows[0] || null;
+        const scheduled = Boolean(sedeSnapshot) || scheduledRows.length > 0;
+        const planeados = parseOperatorCount(sedeSnapshot?.planeados);
+        const contratados = scheduledRows.length;
         const noContratado = Math.max(0, planeados - contratados);
-        const totalAusentismo = serviceRows.filter((row) => row?.servicioCubierto !== true).length;
-        const totalPagar = serviceRows.filter((row) => row?.cuentaPagoServicio === true).length;
+        const novedadSinReemplazo = scheduledRows.filter((row) => isNoveltyWithoutReplacement(row)).length;
+        const totalAusentismo = scheduled
+          ? scheduledRows.filter((row) => row?.cuentaPagoServicio !== true).length
+          : actualRows.filter((row) => row?.asistio === false).length;
+        const totalPagar = scheduled
+          ? Math.max(0, planeados - noContratado - totalAusentismo)
+          : actualRows.filter((row) => row?.asistio === true).length;
+
         return {
           fecha,
-          dependencia: String(snapshot?.dependenciaNombreSnapshot || sede.dependenciaNombre || sede.dependenciaCodigo || '-').trim() || '-',
-          zona: String(snapshot?.zonaNombreSnapshot || sede.zonaNombre || sede.zonaCodigo || '-').trim() || '-',
-          sede: String(snapshot?.sedeNombreSnapshot || sede.nombre || sedeCode || '-').trim() || '-',
+          dependencia: String(sedeSnapshot?.dependenciaNombre || firstRow?.dependenciaNombreSnapshot || 'Sin dependencia').trim() || 'Sin dependencia',
+          zona: String(sedeSnapshot?.zonaNombre || firstRow?.zonaNombreSnapshot || 'Sin zona').trim() || 'Sin zona',
+          sede: String(sedeSnapshot?.sedeNombre || firstRow?.sedeNombreSnapshot || sedeCode || '-').trim() || '-',
           planeados,
           contratados,
           noContratado,
-          novedadSinReemplazo: totalAusentismo,
+          novedadSinReemplazo,
           totalAusentismo,
-          totalPagar
+          totalPagar,
+          actualCount: actualRows.length
         };
       })
-      .filter((row) => row.planeados > 0 || row.contratados > 0 || row.totalAusentismo > 0 || row.totalPagar > 0)
+      .filter((row) => row.planeados > 0 || row.contratados > 0 || row.noContratado > 0 || row.totalAusentismo > 0 || row.totalPagar > 0 || row.actualCount > 0)
       .sort((a, b) => {
         const byDependency = String(a.dependencia || '').localeCompare(String(b.dependencia || ''));
         if (byDependency !== 0) return byDependency;
@@ -484,13 +560,13 @@ export const Reports = (mount, deps = {}) => {
   }
 
   function renderEmployeesRows(rows = []) {
-    if (!rows.length) return [el('tr', {}, [el('td', { colSpan: 6, className: 'text-muted' }, ['Sin empleados vigentes para mostrar.'])])];
-    return rows.map((r) => el('tr', {}, [el('td', {}, [r.cedula]), el('td', {}, [r.nombre]), el('td', {}, [r.cargo]), el('td', {}, [r.zona]), el('td', {}, [r.dependencia]), el('td', {}, [r.sede])]));
+    if (!rows.length) return [el('tr', {}, [el('td', { colSpan: 7, className: 'text-muted' }, ['Sin empleados vigentes para mostrar.'])])];
+    return rows.map((r) => el('tr', {}, [el('td', {}, [r.cedula]), el('td', {}, [r.nombre]), el('td', {}, [r.cargo]), el('td', {}, [r.tipo]), el('td', {}, [r.zona]), el('td', {}, [r.dependencia]), el('td', {}, [r.sede])]));
   }
 
   function renderDailyRows(rows = []) {
     if (!rows.length) return [el('tr', {}, [el('td', { colSpan: 7, className: 'text-muted' }, ['Sin registros para la fecha seleccionada.'])])];
-    return rows.map((r) => el('tr', {}, [el('td', {}, [r.fecha]), el('td', {}, [r.hora]), el('td', {}, [r.cedula]), el('td', {}, [r.nombre]), el('td', {}, [r.sede]), el('td', {}, [r.novedad]), el('td', {}, [r.reemplazoAusentismo])]));
+    return rows.map((r) => el('tr', {}, [el('td', {}, [r.fecha]), el('td', {}, [r.hora]), el('td', {}, [r.cedula]), el('td', {}, [r.nombre]), el('td', {}, [r.sede]), el('td', {}, [r.novedad]), el('td', {}, [r.estado])]));
   }
 
   function renderHiringRows(rows = []) {
@@ -507,7 +583,7 @@ export const Reports = (mount, deps = {}) => {
   }
 
   function renderAbsenteeismRows(rows = []) {
-    if (!rows.length) return [el('tr', {}, [el('td', { colSpan: 8, className: 'text-muted' }, ['Sin datos para la fecha seleccionada.'])])];
+    if (!rows.length) return [el('tr', {}, [el('td', { colSpan: 9, className: 'text-muted' }, ['Sin datos para la fecha seleccionada.'])])];
     return rows.map((r) =>
       el('tr', {}, [
         el('td', {}, [r.dependencia]),
@@ -516,6 +592,7 @@ export const Reports = (mount, deps = {}) => {
         el('td', {}, [String(r.planeados)]),
         el('td', {}, [String(r.contratados)]),
         el('td', {}, [String(r.noContratado)]),
+        el('td', {}, [String(r.novedadSinReemplazo)]),
         el('td', {}, [String(r.totalAusentismo)]),
         el('td', {}, [String(r.totalPagar)])
       ])
@@ -543,10 +620,16 @@ export const Reports = (mount, deps = {}) => {
         btnGenerate.disabled = true;
         btnGenerate.textContent = 'Generando...';
       }
-      const [rawEmployees, rawSedes] = await Promise.all([streamOnce((ok, fail) => deps.streamEmployees?.(ok, fail)), streamOnce((ok, fail) => deps.streamSedes?.(ok, fail))]);
-      generatedEmployeesRows = normalizeEmployeesForReport(rawEmployees, rawSedes);
+      const [rawEmployees, rawSedes, rawCargos] = await Promise.all([streamOnce((ok, fail) => deps.streamEmployees?.(ok, fail)), streamOnce((ok, fail) => deps.streamSedes?.(ok, fail)), streamOnce((ok, fail) => deps.streamCargos?.(ok, fail))]);
+      generatedEmployeesRows = normalizeEmployeesForReport(rawEmployees, rawSedes, rawCargos);
+      const totals = generatedEmployeesRows.reduce((acc, row) => {
+        if (row.tipo === 'Supernumerario') acc.supernumerarios += 1;
+        else if (row.tipo === 'Supervisor') acc.supervisores += 1;
+        else acc.empleados += 1;
+        return acc;
+      }, { empleados: 0, supernumerarios: 0, supervisores: 0 });
       const totalNode = qs('#employeesTotal', ui);
-      if (totalNode) totalNode.textContent = `Total empleados vigentes: ${generatedEmployeesRows.length}`;
+      if (totalNode) totalNode.textContent = `Total registros vigentes: ${generatedEmployeesRows.length} | Empleados: ${totals.empleados} | Supernumerarios: ${totals.supernumerarios} | Supervisores: ${totals.supervisores}`;
       const tbody = qs('#employeesTbody', ui);
       if (tbody) tbody.replaceChildren(...renderEmployeesRows(generatedEmployeesRows));
       if (btnExport) btnExport.disabled = generatedEmployeesRows.length === 0;
@@ -579,11 +662,13 @@ export const Reports = (mount, deps = {}) => {
         btnGenerate.disabled = true;
         btnGenerate.textContent = 'Generando...';
       }
-      const [attendanceRows, replacementsRows] = await Promise.all([
-        streamOnce((ok, fail) => deps.streamAttendanceByDate?.(date, ok, fail)),
-        streamOnce((ok, fail) => deps.streamImportReplacementsByDate?.(date, ok, fail))
+      const isClosed = await deps.isOperationDayClosed?.(date);
+      if (!isClosed) throw new Error('Solo se pueden generar reportes historicos de dias cerrados.');
+      const [statusRows, attendanceRows] = await Promise.all([
+        deps.listEmployeeDailyStatusRange?.(date, date) || [],
+        deps.listAttendanceRange?.(date, date) || []
       ]);
-      generatedDailyRows = normalizeDailyRegistryRows(date, attendanceRows, replacementsRows);
+      generatedDailyRows = normalizeDailyRegistryRows(date, statusRows, attendanceRows);
       const totalNode = qs('#dailyTotal', ui);
       if (totalNode) totalNode.textContent = `Total registros del dia: ${generatedDailyRows.length}`;
       const tbody = qs('#dailyTbody', ui);
@@ -611,12 +696,11 @@ export const Reports = (mount, deps = {}) => {
         btnGenerate.disabled = true;
         btnGenerate.textContent = 'Generando...';
       }
-      const [rawSedes, rawEmployees, rawCargos] = await Promise.all([
+      const [rawSedes, rawEmployees] = await Promise.all([
         streamOnce((ok, fail) => deps.streamSedes?.(ok, fail)),
-        streamOnce((ok, fail) => deps.streamEmployees?.(ok, fail)),
-        streamOnce((ok, fail) => deps.streamCargos?.(ok, fail))
+        streamOnce((ok, fail) => deps.streamActiveBaseEmployees?.(ok, fail))
       ]);
-      generatedHiringRows = normalizeHiringRows(rawSedes, rawEmployees, rawCargos);
+      generatedHiringRows = normalizeHiringRows(rawSedes, rawEmployees);
       const totals = generatedHiringRows.reduce((acc, row) => {
         acc.planeados += Number(row.empleadosPlaneados || 0);
         acc.contratados += Number(row.empleadosContratados || 0);
@@ -657,25 +741,26 @@ export const Reports = (mount, deps = {}) => {
       }
       const dayClosed = await deps.isOperationDayClosed?.(date);
       if (!dayClosed) throw new Error('La fecha seleccionada no esta cerrada.');
-      const [statusRows, sedeRows] = await Promise.all([
+      const [statusRows, sedeClosureRows] = await Promise.all([
         deps.listEmployeeDailyStatusRange?.(date, date) || [],
-        streamOnce((ok, fail) => deps.streamSedes?.(ok, fail))
+        deps.listDailySedeClosuresRange?.(date, date) || []
       ]);
-      generatedAbsenteeismRows = normalizeAbsenteeismRows(date, statusRows, sedeRows);
+      generatedAbsenteeismRows = normalizeAbsenteeismRows(date, statusRows, sedeClosureRows);
       const totals = generatedAbsenteeismRows.reduce(
         (acc, row) => {
           acc.planeados += Number(row.planeados || 0);
           acc.contratados += Number(row.contratados || 0);
           acc.noContratado += Number(row.noContratado || 0);
+          acc.novedadSinReemplazo += Number(row.novedadSinReemplazo || 0);
           acc.ausentismo += Number(row.totalAusentismo || 0);
           acc.totalPagar += Number(row.totalPagar || 0);
           return acc;
         },
-        { planeados: 0, contratados: 0, noContratado: 0, ausentismo: 0, totalPagar: 0 }
+        { planeados: 0, contratados: 0, noContratado: 0, novedadSinReemplazo: 0, ausentismo: 0, totalPagar: 0 }
       );
       const totalNode = qs('#absenteeismTotal', ui);
       if (totalNode) {
-        totalNode.textContent = `Sedes: ${generatedAbsenteeismRows.length} | Planeados: ${totals.planeados} | Contratados: ${totals.contratados} | No contratado: ${totals.noContratado} | Ausentismo: ${totals.ausentismo} | Total a pagar: ${totals.totalPagar}`;
+        totalNode.textContent = `Sedes: ${generatedAbsenteeismRows.length} | Planeados: ${totals.planeados} | Contratados: ${totals.contratados} | No contratado: ${totals.noContratado} | Novedad sin reemplazo: ${totals.novedadSinReemplazo} | Ausentismo: ${totals.ausentismo} | Total a pagar: ${totals.totalPagar}`;
       }
       const tbody = qs('#absenteeismTbody', ui);
       if (tbody) tbody.replaceChildren(...renderAbsenteeismRows(generatedAbsenteeismRows));
@@ -752,8 +837,8 @@ export const Reports = (mount, deps = {}) => {
         btn.textContent = 'Generando...';
       }
       const mod = await import('https://cdn.jsdelivr.net/npm/xlsx@0.18.5/+esm');
-      const ws = mod.utils.json_to_sheet(generatedEmployeesRows.map((r) => ({ Cedula: r.cedula, Nombre: r.nombre, Cargo: r.cargo, Zona: r.zona, Dependencia: r.dependencia, Sede: r.sede })));
-      ws['!cols'] = [{ wch: 18 }, { wch: 35 }, { wch: 28 }, { wch: 24 }, { wch: 26 }, { wch: 30 }];
+      const ws = mod.utils.json_to_sheet(generatedEmployeesRows.map((r) => ({ Cedula: r.cedula, Nombre: r.nombre, Cargo: r.cargo, Tipo: r.tipo, Zona: r.zona, Dependencia: r.dependencia, Sede: r.sede })));
+      ws['!cols'] = [{ wch: 18 }, { wch: 35 }, { wch: 28 }, { wch: 18 }, { wch: 24 }, { wch: 26 }, { wch: 30 }];
       const wb = mod.utils.book_new();
       mod.utils.book_append_sheet(wb, ws, 'Empleados');
       const date = new Date().toISOString().slice(0, 10);
@@ -787,7 +872,7 @@ export const Reports = (mount, deps = {}) => {
           Nombre: r.nombre,
           Sede: r.sede,
           Novedad: r.novedad,
-          'Reemplazo/Ausentismo': r.reemplazoAusentismo
+          Estado: r.estado
         }))
       );
       ws['!cols'] = [{ wch: 12 }, { wch: 12 }, { wch: 18 }, { wch: 30 }, { wch: 26 }, { wch: 26 }, { wch: 30 }];
@@ -923,8 +1008,8 @@ export const Reports = (mount, deps = {}) => {
       el('p', { id: 'employeesTotal', className: 'text-muted mt-2' }, ['Genera el reporte para ver resultados.']),
       el('div', { className: 'table-wrap mt-2' }, [
         el('table', { className: 'table' }, [
-          el('thead', {}, [el('tr', {}, [el('th', {}, ['Cedula']), el('th', {}, ['Nombre']), el('th', {}, ['Cargo']), el('th', {}, ['Zona']), el('th', {}, ['Dependencia']), el('th', {}, ['Sede'])])]),
-          el('tbody', { id: 'employeesTbody' }, [el('tr', {}, [el('td', { colSpan: 6, className: 'text-muted' }, ['Sin generar.'])])])
+          el('thead', {}, [el('tr', {}, [el('th', {}, ['Cedula']), el('th', {}, ['Nombre']), el('th', {}, ['Cargo']), el('th', {}, ['Tipo']), el('th', {}, ['Zona']), el('th', {}, ['Dependencia']), el('th', {}, ['Sede'])])]),
+          el('tbody', { id: 'employeesTbody' }, [el('tr', {}, [el('td', { colSpan: 7, className: 'text-muted' }, ['Sin generar.'])])])
         ])
       ])
     ]);
@@ -941,10 +1026,10 @@ export const Reports = (mount, deps = {}) => {
         el('button', { id: 'btnGenerateDaily', className: 'btn', type: 'button' }, ['Generar reporte']),
         el('button', { id: 'btnExportDaily', className: 'btn btn--primary', type: 'button', disabled: true }, ['Generar Excel'])
       ]),
-      el('p', { id: 'dailyTotal', className: 'text-muted mt-2' }, ['Selecciona la fecha y genera el reporte.']),
+      el('p', { id: 'dailyTotal', className: 'text-muted mt-2' }, ['Selecciona una fecha cerrada y genera el reporte.']),
       el('div', { className: 'table-wrap mt-2' }, [
         el('table', { className: 'table' }, [
-          el('thead', {}, [el('tr', {}, [el('th', {}, ['Fecha']), el('th', {}, ['Hora']), el('th', {}, ['Cedula']), el('th', {}, ['Nombre']), el('th', {}, ['Sede']), el('th', {}, ['Novedad']), el('th', {}, ['Reemplazo/Ausentismo'])])]),
+          el('thead', {}, [el('tr', {}, [el('th', {}, ['Fecha']), el('th', {}, ['Hora']), el('th', {}, ['Cedula']), el('th', {}, ['Nombre']), el('th', {}, ['Sede']), el('th', {}, ['Novedad']), el('th', {}, ['Estado'])])]),
           el('tbody', { id: 'dailyTbody' }, [el('tr', {}, [el('td', { colSpan: 7, className: 'text-muted' }, ['Sin generar.'])])])
         ])
       ])
@@ -985,8 +1070,8 @@ export const Reports = (mount, deps = {}) => {
       el('p', { id: 'absenteeismTotal', className: 'text-muted mt-2' }, ['Selecciona una fecha cerrada y genera el reporte.']),
       el('div', { className: 'table-wrap mt-2' }, [
         el('table', { className: 'table' }, [
-          el('thead', {}, [el('tr', {}, [el('th', {}, ['Dependencia']), el('th', {}, ['Zona']), el('th', {}, ['Nombre Sede']), el('th', {}, ['Planeados']), el('th', {}, ['Contratados']), el('th', {}, ['No contratado']), el('th', {}, ['Total ausentismo']), el('th', {}, ['Total a pagar'])])]),
-          el('tbody', { id: 'absenteeismTbody' }, [el('tr', {}, [el('td', { colSpan: 8, className: 'text-muted' }, ['Sin generar.'])])])
+          el('thead', {}, [el('tr', {}, [el('th', {}, ['Dependencia']), el('th', {}, ['Zona']), el('th', {}, ['Nombre Sede']), el('th', {}, ['Planeados']), el('th', {}, ['Contratados']), el('th', {}, ['No contratado']), el('th', {}, ['Novedad sin reemplazo']), el('th', {}, ['Total ausentismo']), el('th', {}, ['Total a pagar'])])]),
+          el('tbody', { id: 'absenteeismTbody' }, [el('tr', {}, [el('td', { colSpan: 9, className: 'text-muted' }, ['Sin generar.'])])])
         ])
       ])
     ]);

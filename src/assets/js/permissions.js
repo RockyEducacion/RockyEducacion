@@ -19,7 +19,9 @@ const LEGACY_FALLBACK_BY_NEW = {
   [PERMS.VIEW_NOVEDADES]: 'manageEmployees',
   [PERMS.EDIT_NOVEDADES]: 'manageEmployees',
   [PERMS.VIEW_SUPERVISORS]: 'manageSupervisors',
-  [PERMS.EDIT_SUPERVISORS]: 'manageSupervisors'
+  [PERMS.EDIT_SUPERVISORS]: 'manageSupervisors',
+  [PERMS.VIEW_REPORTS_CLIENT]: PERMS.VIEW_REPORTS,
+  [PERMS.VIEW_REPORTS_COMPANY]: PERMS.VIEW_REPORTS
 };
 
 export function getRole() {

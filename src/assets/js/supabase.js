@@ -612,6 +612,82 @@ function isEmployeeActiveForDate(emp, selectedDate) {
   return true;
 }
 
+const colombiaHolidayCache = new Map();
+
+function makeUtcDate(year, month, day) {
+  return new Date(Date.UTC(year, month - 1, day));
+}
+
+function addUtcDays(date, days) {
+  const next = new Date(date.getTime());
+  next.setUTCDate(next.getUTCDate() + Number(days || 0));
+  return next;
+}
+
+function formatUtcDate(date) {
+  return date.toISOString().slice(0, 10);
+}
+
+function easterSundayUtc(year) {
+  const a = year % 19;
+  const b = Math.floor(year / 100);
+  const c = year % 100;
+  const d = Math.floor(b / 4);
+  const e = b % 4;
+  const f = Math.floor((b + 8) / 25);
+  const g = Math.floor((b - f + 1) / 3);
+  const h = (19 * a + b - d - g + 15) % 30;
+  const i = Math.floor(c / 4);
+  const k = c % 4;
+  const l = (32 + 2 * e + 2 * i - h - k) % 7;
+  const m = Math.floor((a + 11 * h + 22 * l) / 451);
+  const month = Math.floor((h + l - 7 * m + 114) / 31);
+  const day = ((h + l - 7 * m + 114) % 31) + 1;
+  return makeUtcDate(year, month, day);
+}
+
+function moveToFollowingMondayUtc(date) {
+  const isoDow = date.getUTCDay() === 0 ? 7 : date.getUTCDay();
+  if (isoDow === 1) return date;
+  return addUtcDays(date, 8 - isoDow);
+}
+
+function getColombiaHolidaySet(year) {
+  if (colombiaHolidayCache.has(year)) return colombiaHolidayCache.get(year);
+
+  const easter = easterSundayUtc(year);
+  const holidays = new Set([
+    formatUtcDate(makeUtcDate(year, 1, 1)),
+    formatUtcDate(makeUtcDate(year, 5, 1)),
+    formatUtcDate(makeUtcDate(year, 7, 20)),
+    formatUtcDate(makeUtcDate(year, 8, 7)),
+    formatUtcDate(makeUtcDate(year, 12, 8)),
+    formatUtcDate(makeUtcDate(year, 12, 25)),
+    formatUtcDate(moveToFollowingMondayUtc(makeUtcDate(year, 1, 6))),
+    formatUtcDate(moveToFollowingMondayUtc(makeUtcDate(year, 3, 19))),
+    formatUtcDate(moveToFollowingMondayUtc(makeUtcDate(year, 6, 29))),
+    formatUtcDate(moveToFollowingMondayUtc(makeUtcDate(year, 8, 15))),
+    formatUtcDate(moveToFollowingMondayUtc(makeUtcDate(year, 10, 12))),
+    formatUtcDate(moveToFollowingMondayUtc(makeUtcDate(year, 11, 1))),
+    formatUtcDate(moveToFollowingMondayUtc(makeUtcDate(year, 11, 11))),
+    formatUtcDate(addUtcDays(easter, -3)),
+    formatUtcDate(addUtcDays(easter, -2)),
+    formatUtcDate(moveToFollowingMondayUtc(addUtcDays(easter, 39))),
+    formatUtcDate(moveToFollowingMondayUtc(addUtcDays(easter, 60))),
+    formatUtcDate(moveToFollowingMondayUtc(addUtcDays(easter, 68)))
+  ]);
+
+  colombiaHolidayCache.set(year, holidays);
+  return holidays;
+}
+
+function isColombiaHolidayDate(selectedDate) {
+  const iso = toISODate(selectedDate);
+  if (!iso) return false;
+  const year = Number(iso.slice(0, 4));
+  return getColombiaHolidaySet(year).has(iso);
+}
+
 function isSedeScheduledForDate(sede, selectedDate) {
   const iso = toISODate(selectedDate);
   if (!iso) return false;
@@ -619,6 +695,7 @@ function isSedeScheduledForDate(sede, selectedDate) {
   const weekday = new Date(Date.UTC(year, (month || 1) - 1, day || 1)).getUTCDay();
   const jornada = String(sede?.jornada || 'lun_vie').trim().toLowerCase();
   if (jornada === 'lun_dom') return true;
+  if (isColombiaHolidayDate(iso)) return false;
   if (jornada === 'lun_sab') return weekday >= 1 && weekday <= 6;
   return weekday >= 1 && weekday <= 5;
 }
@@ -710,28 +787,28 @@ async function computeDailyClosureSnapshot(fecha) {
   ]);
   if (statusError) throw statusError;
 
+  const mappedRows = (statusRows || []).map(mapEmployeeDailyStatusRow);
+  const scheduledRows = mappedRows.filter((row) => row.tipoPersonal === 'empleado' && row.servicioProgramado === true);
+  const actualRows = mappedRows.filter((row) => row.asistio === true || row.asistio === false);
   const sedes = (sedesRows || [])
     .map(mapSedeRow)
     .filter((sede) => String(sede?.estado || 'activo').trim().toLowerCase() !== 'inactivo')
     .filter((sede) => isSedeScheduledForDate(sede, day));
 
   const bySede = new Map();
-  (statusRows || [])
-    .map(mapEmployeeDailyStatusRow)
-    .filter((row) => row.tipoPersonal === 'empleado' && row.servicioProgramado === true)
-    .forEach((row) => {
-      const sedeCode = String(row?.sedeCodigo || '').trim();
-      if (!sedeCode) return;
-      const bucket = bySede.get(sedeCode) || {
-        contratados: 0,
-        asistencias: 0,
-        ausentismos: 0
-      };
-      bucket.contratados += 1;
-      if (row.cuentaPagoServicio === true) bucket.asistencias += 1;
-      if (row.cuentaPagoServicio === false) bucket.ausentismos += 1;
-      bySede.set(sedeCode, bucket);
-    });
+  scheduledRows.forEach((row) => {
+    const sedeCode = String(row?.sedeCodigo || '').trim();
+    if (!sedeCode) return;
+    const bucket = bySede.get(sedeCode) || {
+      contratados: 0,
+      asistencias: 0,
+      ausentismos: 0
+    };
+    bucket.contratados += 1;
+    if (row.cuentaPagoServicio === true) bucket.asistencias += 1;
+    if (row.cuentaPagoServicio === false) bucket.ausentismos += 1;
+    bySede.set(sedeCode, bucket);
+  });
 
   const summary = sedes.reduce((acc, sede) => {
     const sedeCode = String(sede?.codigo || '').trim();
@@ -753,6 +830,13 @@ async function computeDailyClosureSnapshot(fecha) {
     ausentismos: 0,
     noContratados: 0
   });
+
+  if (summary.planeados === 0 && summary.contratados === 0 && actualRows.length) {
+    summary.registrados = actualRows.filter((row) => row.asistio === true).length;
+    summary.ausentismos = actualRows.filter((row) => row.asistio === false).length;
+    summary.faltan = 0;
+    summary.sobran = 0;
+  }
 
   summary.noContratados = Math.max(0, summary.planeados - summary.contratados);
   return summary;
@@ -1089,9 +1173,16 @@ async function recomputeDailyMetrics(fecha) {
     const employee = (empId && employeeById.get(empId)) || (doc && employeeByDoc.get(doc)) || null;
     return !isEmployeeSupernumerario(employee, cargoMap);
   });
-  const uniqueDocs = new Set(baseAttendanceRows.map((row) => String(row.documento || row.empleadoId || '')).filter(Boolean));
-  const attendanceCount = baseAttendanceRows.filter((row) => metricAttendanceCountsAsService(row, replacementMap, replacementRules)).length;
-  const absenteeism = baseAttendanceRows.filter((row) => metricAttendanceCountsAsAbsenteeism(row, replacementMap, replacementRules)).length;
+  const uniqueDocs = new Set(baseAttendanceRows.map((row) => String(row.documento || row.empleadoId || '').trim()).filter(Boolean));
+  const actualAttendanceRows = dedupeAttendanceRows(attRows);
+  const actualAttendanceCount = actualAttendanceRows.filter((row) => row?.asistio === true).length;
+  const actualAbsenteeism = actualAttendanceRows.filter((row) => row?.asistio === false).length;
+  const attendanceCount = planned === 0 && expected === 0
+    ? actualAttendanceCount
+    : baseAttendanceRows.filter((row) => metricAttendanceCountsAsService(row, replacementMap, replacementRules)).length;
+  const absenteeism = planned === 0 && expected === 0
+    ? actualAbsenteeism
+    : baseAttendanceRows.filter((row) => metricAttendanceCountsAsAbsenteeism(row, replacementMap, replacementRules)).length;
   const paidServices = attendanceCount;
   const noContracted = Math.max(0, planned - expected);
   const payload = {
@@ -1100,7 +1191,7 @@ async function recomputeDailyMetrics(fecha) {
     planned,
     expected,
     unique_count: uniqueDocs.size,
-    missing: Math.max(0, expected - attendanceCount),
+    missing: planned === 0 && expected === 0 ? 0 : Math.max(0, expected - attendanceCount),
     attendance_count: attendanceCount,
     absenteeism,
     paid_services: paidServices,
@@ -3311,10 +3402,81 @@ async function finalizePendingAbsenteeismForClosure(day) {
     if (absenteeismError) throw absenteeismError;
   }
 
+  await cleanupNonProgrammedClosedOperationalAbsenteeism(day);
   await materializeClosedOperationalAbsenteeismForClosure(day, {
     actorUid: audit.created_by_uid,
     actorEmail: audit.created_by_email
   });
+}
+
+async function cleanupNonProgrammedClosedOperationalAbsenteeism(day) {
+  const refreshed = await refreshEmployeeDailyStatusSnapshot(day);
+  if (refreshed === null) return 0;
+
+  const { data: statusRows, error } = await supabase
+    .from('employee_daily_status')
+    .select('source_replacement_id, source_absenteeism_id, source_attendance_id, source_incapacity_id, tipo_personal, servicio_programado')
+    .eq('fecha', day)
+    .eq('tipo_personal', 'empleado')
+    .eq('servicio_programado', false);
+  if (error) throw error;
+
+  const candidateRows = (statusRows || []).filter((row) => !row?.source_attendance_id && !row?.source_incapacity_id && (row?.source_replacement_id || row?.source_absenteeism_id));
+  if (!candidateRows.length) return 0;
+
+  const chunk = (items, size = 200) => {
+    const output = [];
+    for (let index = 0; index < items.length; index += size) output.push(items.slice(index, index + size));
+    return output;
+  };
+
+  const replacementIds = [...new Set(candidateRows.map((row) => row?.source_replacement_id).filter(Boolean))];
+  const absenteeismIds = [...new Set(candidateRows.map((row) => row?.source_absenteeism_id).filter(Boolean))];
+
+  const cronReplacementIds = [];
+  for (const batch of chunk(replacementIds)) {
+    const { data, error: replacementError } = await supabase
+      .from('import_replacements')
+      .select('id, actor_email, decision')
+      .in('id', batch);
+    if (replacementError) throw replacementError;
+    for (const row of data || []) {
+      if (String(row?.actor_email || '').trim().toLowerCase() === 'cron@system' && String(row?.decision || '').trim().toLowerCase() === 'ausentismo') {
+        cronReplacementIds.push(row.id);
+      }
+    }
+  }
+
+  const cronAbsenteeismIds = [];
+  for (const batch of chunk(absenteeismIds)) {
+    const { data, error: absenteeismError } = await supabase
+      .from('absenteeism')
+      .select('id, created_by_email')
+      .in('id', batch);
+    if (absenteeismError) throw absenteeismError;
+    for (const row of data || []) {
+      if (String(row?.created_by_email || '').trim().toLowerCase() === 'cron@system') {
+        cronAbsenteeismIds.push(row.id);
+      }
+    }
+  }
+
+  for (const batch of chunk(cronReplacementIds)) {
+    const { error: deleteError } = await supabase.from('import_replacements').delete().in('id', batch);
+    if (deleteError) throw deleteError;
+  }
+  for (const batch of chunk(cronAbsenteeismIds)) {
+    const { error: deleteError } = await supabase.from('absenteeism').delete().in('id', batch);
+    if (deleteError) throw deleteError;
+  }
+
+  const removed = new Set([...cronReplacementIds, ...cronAbsenteeismIds]).size;
+  if (removed > 0) {
+    await refreshEmployeeDailyStatusSnapshot(day);
+    await notifyTableReload('import_replacements');
+    await notifyTableReload('absenteeism');
+  }
+  return removed;
 }
 
 async function materializeClosedOperationalAbsenteeismForClosure(day, { actorUid = null, actorEmail = null } = {}) {

@@ -19,6 +19,98 @@ as $$
   select coalesce(public.bool_from_text_nullable(value), false);
 $$;
 
+create or replace function public.easter_sunday_sql(p_year integer)
+returns date
+language plpgsql
+immutable
+as $$
+declare
+  a integer;
+  b integer;
+  c integer;
+  d integer;
+  e integer;
+  f integer;
+  g integer;
+  h integer;
+  i integer;
+  k integer;
+  l integer;
+  m integer;
+  v_month integer;
+  v_day integer;
+begin
+  a := p_year % 19;
+  b := floor(p_year / 100);
+  c := p_year % 100;
+  d := floor(b / 4);
+  e := b % 4;
+  f := floor((b + 8) / 25);
+  g := floor((b - f + 1) / 3);
+  h := (19 * a + b - d - g + 15) % 30;
+  i := floor(c / 4);
+  k := c % 4;
+  l := (32 + 2 * e + 2 * i - h - k) % 7;
+  m := floor((a + 11 * h + 22 * l) / 451);
+  v_month := floor((h + l - 7 * m + 114) / 31);
+  v_day := ((h + l - 7 * m + 114) % 31) + 1;
+  return make_date(p_year, v_month, v_day);
+end;
+$$;
+
+create or replace function public.move_to_following_monday_sql(p_fecha date)
+returns date
+language sql
+immutable
+as $$
+  select case
+    when p_fecha is null then null
+    when extract(isodow from p_fecha)::integer = 1 then p_fecha
+    else p_fecha + (8 - extract(isodow from p_fecha)::integer)
+  end;
+$$;
+
+create or replace function public.is_colombia_holiday_sql(fecha text)
+returns boolean
+language plpgsql
+immutable
+as $$
+declare
+  v_fecha date;
+  v_year integer;
+  v_easter date;
+begin
+  if fecha is null or fecha !~ '^\d{4}-\d{2}-\d{2}$' then
+    return false;
+  end if;
+
+  v_fecha := fecha::date;
+  v_year := extract(year from v_fecha);
+  v_easter := public.easter_sunday_sql(v_year);
+
+  return v_fecha in (
+    make_date(v_year, 1, 1),
+    make_date(v_year, 5, 1),
+    make_date(v_year, 7, 20),
+    make_date(v_year, 8, 7),
+    make_date(v_year, 12, 8),
+    make_date(v_year, 12, 25),
+    public.move_to_following_monday_sql(make_date(v_year, 1, 6)),
+    public.move_to_following_monday_sql(make_date(v_year, 3, 19)),
+    public.move_to_following_monday_sql(make_date(v_year, 6, 29)),
+    public.move_to_following_monday_sql(make_date(v_year, 8, 15)),
+    public.move_to_following_monday_sql(make_date(v_year, 10, 12)),
+    public.move_to_following_monday_sql(make_date(v_year, 11, 1)),
+    public.move_to_following_monday_sql(make_date(v_year, 11, 11)),
+    v_easter - 3,
+    v_easter - 2,
+    public.move_to_following_monday_sql(v_easter + 39),
+    public.move_to_following_monday_sql(v_easter + 60),
+    public.move_to_following_monday_sql(v_easter + 68)
+  );
+end;
+$$;
+
 create or replace function public.is_sede_scheduled_for_date_sql(jornada text, fecha text)
 returns boolean
 language plpgsql
@@ -38,6 +130,10 @@ begin
 
   if v_jornada = 'lun_dom' then
     return true;
+  end if;
+
+  if public.is_colombia_holiday_sql(fecha) then
+    return false;
   end if;
 
   if v_jornada = 'lun_sab' then

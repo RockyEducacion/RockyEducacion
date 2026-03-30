@@ -4,8 +4,7 @@ export const Payroll = (mount, deps = {}) => {
   const today = todayBogota();
   const ui = el('section', { className: 'main-card' }, [
     el('h2', {}, ['Nomina']),
-    el('p', { className: 'text-muted' }, ['Consulta el estado diario de nomina por sede en el periodo seleccionado.']),
-    el('div', { className: 'section-block mt-2' }, [
+    el('div', { className: 'section-block mt-1' }, [
       el('h3', { className: 'section-title' }, ['Generar consulta']),
       el('div', { className: 'form-row mt-1' }, [
         field('Fecha inicial', el('input', { id: 'payrollDateFrom', className: 'input', type: 'date', value: monthStartBogota(today) })),
@@ -106,7 +105,8 @@ export const Payroll = (mount, deps = {}) => {
 
   mount.replaceChildren(ui);
   enableSectionToggles(ui);
-  run();
+  renderAll();
+  setMessage('Selecciona el rango y pulsa Actualizar para consultar la nomina.');
   return () => {};
 
   async function run() {
@@ -289,7 +289,7 @@ function th(key, label, group) {
 }
 
 function sectionTable(title, tableId, headers, totalsId, totalsText, titleId = '') {
-  return el('div', { className: 'section-block mt-2' }, [
+  return el('div', { className: 'section-block mt-1' }, [
     el('h3', { className: 'section-title', ...(titleId ? { id: titleId } : {}) }, [title]),
     el('div', { className: 'table-wrap mt-2' }, [
       el('table', { className: 'table', id: tableId }, [
@@ -573,9 +573,9 @@ function bindSorting(scope, selector, attr, onSort) {
 
 function updateSortIndicators(scope, selector, attr, key, dir) {
   scope.querySelectorAll(selector).forEach((th) => {
-    const base = th.dataset.baseLabel || String(th.textContent || '').replace(/\s[\^v]$/, '');
+    const base = th.dataset.baseLabel || String(th.textContent || '').replace(/\s[\^v\u25B2\u25BC]$/, '');
     th.dataset.baseLabel = base;
-    th.textContent = String(th.getAttribute(attr) || '').trim() === key ? `${base} ${dir === 1 ? '^' : 'v'}` : base;
+    th.textContent = String(th.getAttribute(attr) || '').trim() === key ? `${base} ${dir === 1 ? '\u25B2' : '\u25BC'}` : base;
   });
 }
 

@@ -27,7 +27,8 @@ const PERM_KEYS = [
   PERMS.VIEW_IMPORT_HISTORY,
   PERMS.RUN_PAYROLL,
   PERMS.MANAGE_ABSENTEEISM,
-  PERMS.VIEW_REPORTS,
+  PERMS.VIEW_REPORTS_CLIENT,
+  PERMS.VIEW_REPORTS_COMPANY,
   PERMS.UPLOAD_DATA
 ];
 
@@ -55,7 +56,8 @@ const PERM_LABELS = {
   [PERMS.VIEW_IMPORT_HISTORY]: 'Operacion - Historial',
   [PERMS.RUN_PAYROLL]: 'Operacion - Nomina',
   [PERMS.MANAGE_ABSENTEEISM]: 'Operacion - Ausentismo',
-  [PERMS.VIEW_REPORTS]: 'Reportes - Consulta',
+  [PERMS.VIEW_REPORTS_CLIENT]: 'Reportes - Cliente',
+  [PERMS.VIEW_REPORTS_COMPANY]: 'Reportes - Empresa',
   [PERMS.UPLOAD_DATA]: 'Carga de datos'
 };
 const LEGACY_FALLBACK_BY_NEW = {
@@ -76,7 +78,9 @@ const LEGACY_FALLBACK_BY_NEW = {
   [PERMS.VIEW_NOVEDADES]: 'manageEmployees',
   [PERMS.EDIT_NOVEDADES]: 'manageEmployees',
   [PERMS.VIEW_SUPERVISORS]: 'manageSupervisors',
-  [PERMS.EDIT_SUPERVISORS]: 'manageSupervisors'
+  [PERMS.EDIT_SUPERVISORS]: 'manageSupervisors',
+  [PERMS.VIEW_REPORTS_CLIENT]: PERMS.VIEW_REPORTS,
+  [PERMS.VIEW_REPORTS_COMPANY]: PERMS.VIEW_REPORTS
 };
 function normalizePermissionRecord(raw = {}, role = null) {
   const hasAny = raw && Object.keys(raw).length > 0;

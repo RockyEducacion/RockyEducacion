@@ -25,8 +25,6 @@ export const Sidebar = () => {
   const { user, userProfile } = getState();
 
   if (user && userProfile) {
-    const role = String(userProfile?.role || '').trim().toLowerCase();
-    const isSupervisor = role === 'supervisor';
     const govLinks = [];
     if (isSuperAdmin()) govLinks.push(navLink('Centro de Permisos', '/permissions'));
     if (can(PERMS.VIEW_USERS)) govLinks.push(navLink('Usuarios', '/users'));
@@ -49,18 +47,18 @@ export const Sidebar = () => {
     if (bulkLinks.length) sections.push(section('Cargue masivo', bulkLinks, 'cargue_masivo'));
 
     const opLinks = [];
-    if (can(PERMS.IMPORT_DATA) || (isSupervisor && can(PERMS.UPLOAD_DATA))) {
-      opLinks.push(navLink(isSupervisor ? 'Registro Diario Supervisor' : 'Registro Diario', '/registros-vivo'));
-    }
+    if (can(PERMS.IMPORT_DATA)) opLinks.push(navLink('Registro Diario', '/registros-vivo'));
     if (can(PERMS.IMPORT_DATA)) opLinks.push(navLink('Registro Sede', '/registro-sede'));
     if (can(PERMS.VIEW_IMPORT_HISTORY)) opLinks.push(navLink('Historial', '/import-history'));
     if (can(PERMS.RUN_PAYROLL)) opLinks.push(navLink('Nomina', '/payroll'));
     if (can(PERMS.MANAGE_ABSENTEEISM)) opLinks.push(navLink('Ausentismo', '/absenteeism'));
-    if (can(PERMS.MANAGE_ABSENTEEISM)) opLinks.push(navLink('Ausentismo Consolidado', '/absenteeism-consolidated'));
     if (opLinks.length) sections.push(section('Operacion', opLinks, 'operacion'));
 
-    if (can(PERMS.VIEW_REPORTS)) {
-      sections.push(section('Reportes', [navLink('Reportes', '/reports')], 'reportes'));
+    const reportLinks = [];
+    if (can(PERMS.VIEW_REPORTS_CLIENT)) reportLinks.push(navLink('Reportes Cliente', '/reports-client'));
+    if (can(PERMS.VIEW_REPORTS_COMPANY)) reportLinks.push(navLink('Reportes Empresa', '/reports-company'));
+    if (reportLinks.length) {
+      sections.push(section('Reportes', reportLinks, 'reportes'));
     }
 
     if (can(PERMS.UPLOAD_DATA)) {
@@ -168,8 +166,9 @@ function getNavIconLabel(route) {
     '/import-history': 'HI',
     '/payroll': 'NO',
     '/absenteeism': 'AU',
-    '/absenteeism-consolidated': 'AC',
     '/reports': 'RP',
+    '/reports-client': 'RC',
+    '/reports-company': 'RE',
     '/upload': 'CD'
   };
   return map[route] || '>>';

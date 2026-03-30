@@ -23,14 +23,12 @@ import { CargueMasivoSedesAdmin } from './components/CargueMasivoSedesAdmin.js';
 import { ImportHistory } from './components/ImportHistory.js';
 import { Payroll } from './components/Payroll.js';
 import { Absenteeism } from './components/Absenteeism.js';
-import { AbsenteeismConsolidated } from './components/AbsenteeismConsolidated.js';
 import { Reports } from './components/Reports.js';
 import { ImportReplacements } from './components/ImportReplacements.js';
 import { CargarDatos } from './components/CargarDatos.js';
 import { PermissionsCenter } from './components/PermissionsCenter.js';
 import { WhatsAppLive } from './components/WhatsAppLive.js';
 import { RegistroSede } from './components/RegistroSede.js';
-import { RegistroDiarioSupervisor } from './components/RegistroDiarioSupervisor.js';
 
 import { addRoute, startRouter, navigate, refreshRoute } from './router.js';
 import { getState, setState } from './state.js';
@@ -135,23 +133,21 @@ const guardWrite=(perm,fn)=> async (...args)=>{
   // Operación
   addRoute('/imports', ()=> { navigate('/registros-vivo'); return null; });
   addRoute('/whatsapp-live', ()=> { navigate('/registros-vivo'); return null; });
-  addRoute('/registros-vivo', ()=> requireAuth(()=> {
-    const role=String(getState().userProfile?.role||'').trim().toLowerCase();
-    if(role==='supervisor'){
-      if(!can(PERMS.UPLOAD_DATA)) return block('No tienes permiso para acceder a esta sección.');
-      return RegistroDiarioSupervisor(root, deps);
-    }
-    return guard(PERMS.IMPORT_DATA, ()=> WhatsAppLive(root, deps));
-  }));
+  addRoute('/registros-vivo', ()=> requireAuth(()=> guard(PERMS.IMPORT_DATA, ()=> WhatsAppLive(root, deps))));
   addRoute('/registro-sede', ()=> requireAuth(()=> guard(PERMS.IMPORT_DATA, ()=> RegistroSede(root, deps))));
   addRoute('/imports-replacements', ()=> requireAuth(()=> guard(PERMS.IMPORT_DATA, ()=> ImportReplacements(root, deps))));
   addRoute('/import-history', ()=> requireAuth(()=> guard(PERMS.VIEW_IMPORT_HISTORY, ()=> ImportHistory(root, deps))));
   addRoute('/payroll', ()=> requireAuth(()=> guard(PERMS.RUN_PAYROLL, ()=> Payroll(root, deps))));
   addRoute('/absenteeism', ()=> requireAuth(()=> guard(PERMS.MANAGE_ABSENTEEISM, ()=> Absenteeism(root, deps))));
-  addRoute('/absenteeism-consolidated', ()=> requireAuth(()=> guard(PERMS.MANAGE_ABSENTEEISM, ()=> AbsenteeismConsolidated(root, deps))));
 
   // Consultor
-  addRoute('/reports', ()=> requireAuth(()=> guard(PERMS.VIEW_REPORTS, ()=> Reports(root, deps))));
+  addRoute('/reports', ()=> requireAuth(()=> {
+    if (can(PERMS.VIEW_REPORTS_CLIENT)) { navigate('/reports-client'); return null; }
+    if (can(PERMS.VIEW_REPORTS_COMPANY)) { navigate('/reports-company'); return null; }
+    return block('No tienes permiso para acceder a esta seccion.');
+  }));
+  addRoute('/reports-client', ()=> requireAuth(()=> guard(PERMS.VIEW_REPORTS_CLIENT, ()=> Reports(root, deps, { variant: 'client' }))));
+  addRoute('/reports-company', ()=> requireAuth(()=> guard(PERMS.VIEW_REPORTS_COMPANY, ()=> Reports(root, deps, { variant: 'company' }))));
 
   // Supervisor/Empleado
   addRoute('/upload', ()=> requireAuth(()=> guard(PERMS.UPLOAD_DATA, ()=> CargarDatos(root))));

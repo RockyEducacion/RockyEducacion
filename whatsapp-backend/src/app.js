@@ -819,8 +819,15 @@ async function recomputeDailyMetrics(date) {
   }, 0);
   const expected = fallbackExpected;
   const uniqueDocs = new Set(attRows.map((row) => String(row?.documento || row?.empleado_id || '').trim()).filter(Boolean));
-  const attendanceCount = attRows.filter((row) => metricAttendanceCountsAsService(row, replacementMap, replacementRules)).length;
-  const absenteeism = attRows.filter((row) => metricAttendanceCountsAsAbsenteeism(row, replacementMap, replacementRules)).length;
+  const dedupedAttendanceRows = dedupeAttendanceRows(attRows);
+  const actualAttendanceCount = dedupedAttendanceRows.filter((row) => row?.asistio === true).length;
+  const actualAbsenteeism = dedupedAttendanceRows.filter((row) => row?.asistio === false).length;
+  const attendanceCount = planned === 0 && expected === 0
+    ? actualAttendanceCount
+    : attRows.filter((row) => metricAttendanceCountsAsService(row, replacementMap, replacementRules)).length;
+  const absenteeism = planned === 0 && expected === 0
+    ? actualAbsenteeism
+    : attRows.filter((row) => metricAttendanceCountsAsAbsenteeism(row, replacementMap, replacementRules)).length;
   const paidServices = attendanceCount;
   const noContracted = Math.max(0, planned - expected);
   const { error } = await supabaseAdmin.from('daily_metrics').upsert({
@@ -829,7 +836,7 @@ async function recomputeDailyMetrics(date) {
     planned,
     expected,
     unique_count: uniqueDocs.size,
-    missing: Math.max(0, expected - attendanceCount),
+    missing: planned === 0 && expected === 0 ? 0 : Math.max(0, expected - attendanceCount),
     attendance_count: attendanceCount,
     absenteeism,
     paid_services: paidServices,
@@ -966,6 +973,82 @@ async function selectAllRows(table, select = '*') {
   return rows;
 }
 
+const colombiaHolidayCache = new Map();
+
+function makeUtcDate(year, month, day) {
+  return new Date(Date.UTC(year, month - 1, day));
+}
+
+function addUtcDays(date, days) {
+  const next = new Date(date.getTime());
+  next.setUTCDate(next.getUTCDate() + Number(days || 0));
+  return next;
+}
+
+function formatUtcDate(date) {
+  return date.toISOString().slice(0, 10);
+}
+
+function easterSundayUtc(year) {
+  const a = year % 19;
+  const b = Math.floor(year / 100);
+  const c = year % 100;
+  const d = Math.floor(b / 4);
+  const e = b % 4;
+  const f = Math.floor((b + 8) / 25);
+  const g = Math.floor((b - f + 1) / 3);
+  const h = (19 * a + b - d - g + 15) % 30;
+  const i = Math.floor(c / 4);
+  const k = c % 4;
+  const l = (32 + 2 * e + 2 * i - h - k) % 7;
+  const m = Math.floor((a + 11 * h + 22 * l) / 451);
+  const month = Math.floor((h + l - 7 * m + 114) / 31);
+  const day = ((h + l - 7 * m + 114) % 31) + 1;
+  return makeUtcDate(year, month, day);
+}
+
+function moveToFollowingMondayUtc(date) {
+  const isoDow = date.getUTCDay() === 0 ? 7 : date.getUTCDay();
+  if (isoDow === 1) return date;
+  return addUtcDays(date, 8 - isoDow);
+}
+
+function getColombiaHolidaySet(year) {
+  if (colombiaHolidayCache.has(year)) return colombiaHolidayCache.get(year);
+
+  const easter = easterSundayUtc(year);
+  const holidays = new Set([
+    formatUtcDate(makeUtcDate(year, 1, 1)),
+    formatUtcDate(makeUtcDate(year, 5, 1)),
+    formatUtcDate(makeUtcDate(year, 7, 20)),
+    formatUtcDate(makeUtcDate(year, 8, 7)),
+    formatUtcDate(makeUtcDate(year, 12, 8)),
+    formatUtcDate(makeUtcDate(year, 12, 25)),
+    formatUtcDate(moveToFollowingMondayUtc(makeUtcDate(year, 1, 6))),
+    formatUtcDate(moveToFollowingMondayUtc(makeUtcDate(year, 3, 19))),
+    formatUtcDate(moveToFollowingMondayUtc(makeUtcDate(year, 6, 29))),
+    formatUtcDate(moveToFollowingMondayUtc(makeUtcDate(year, 8, 15))),
+    formatUtcDate(moveToFollowingMondayUtc(makeUtcDate(year, 10, 12))),
+    formatUtcDate(moveToFollowingMondayUtc(makeUtcDate(year, 11, 1))),
+    formatUtcDate(moveToFollowingMondayUtc(makeUtcDate(year, 11, 11))),
+    formatUtcDate(addUtcDays(easter, -3)),
+    formatUtcDate(addUtcDays(easter, -2)),
+    formatUtcDate(moveToFollowingMondayUtc(addUtcDays(easter, 39))),
+    formatUtcDate(moveToFollowingMondayUtc(addUtcDays(easter, 60))),
+    formatUtcDate(moveToFollowingMondayUtc(addUtcDays(easter, 68)))
+  ]);
+
+  colombiaHolidayCache.set(year, holidays);
+  return holidays;
+}
+
+function isColombiaHolidayDate(selectedDate) {
+  const iso = String(selectedDate || '').trim();
+  if (!iso) return false;
+  const year = Number(iso.slice(0, 4));
+  return getColombiaHolidaySet(year).has(iso);
+}
+
 function isSedeScheduledForDate(sede, selectedDate) {
   const iso = String(selectedDate || '').trim();
   if (!iso || !sede) return false;
@@ -973,6 +1056,7 @@ function isSedeScheduledForDate(sede, selectedDate) {
   const weekday = new Date(Date.UTC(year, (month || 1) - 1, day || 1)).getUTCDay();
   const jornada = String(sede?.jornada || 'lun_vie').trim().toLowerCase();
   if (jornada === 'lun_dom') return true;
+  if (isColombiaHolidayDate(iso)) return false;
   if (jornada === 'lun_sab') return weekday >= 1 && weekday <= 6;
   return weekday >= 1 && weekday <= 5;
 }
@@ -1096,6 +1180,7 @@ async function computeDailyClosureSummary(date) {
   if (!day) {
     return { planeados: 0, contratados: 0, asistencias: 0, faltan: 0, sobran: 0, ausentismos: 0, noContratados: 0 };
   }
+
   const [
     { data: statusRows, error: statusError },
     sedesRows
@@ -1107,13 +1192,15 @@ async function computeDailyClosureSummary(date) {
     selectAllRows('sedes')
   ]);
   if (statusError) throw statusError;
+
+  const scheduledRows = (statusRows || []).filter((row) => String(row?.tipo_personal || '').trim() === 'empleado' && row?.servicio_programado === true);
+  const actualRows = (statusRows || []).filter((row) => row?.asistio === true || row?.asistio === false);
   const sedes = (sedesRows || [])
     .filter((sede) => String(sede?.estado || 'activo').trim().toLowerCase() !== 'inactivo')
     .filter((sede) => isSedeScheduledForDate(sede, day));
+
   const bySede = new Map();
-  for (const row of statusRows || []) {
-    if (String(row?.tipo_personal || '').trim() !== 'empleado') continue;
-    if (row?.servicio_programado !== true) continue;
+  for (const row of scheduledRows) {
     const sedeCode = String(row?.sede_codigo || '').trim();
     if (!sedeCode) continue;
     const bucket = bySede.get(sedeCode) || {
@@ -1126,6 +1213,7 @@ async function computeDailyClosureSummary(date) {
     if (row?.cuenta_pago_servicio === false) bucket.ausentismos += 1;
     bySede.set(sedeCode, bucket);
   }
+
   const summary = sedes.reduce((acc, sede) => {
     const sedeCode = String(sede?.codigo || '').trim();
     const planned = Number(sede?.numero_operarios ?? 0) || 0;
@@ -1146,9 +1234,124 @@ async function computeDailyClosureSummary(date) {
     ausentismos: 0,
     noContratados: 0
   });
+
+  if (summary.planeados === 0 && summary.contratados === 0 && actualRows.length) {
+    summary.asistencias = actualRows.filter((row) => row?.asistio === true).length;
+    summary.ausentismos = actualRows.filter((row) => row?.asistio === false).length;
+    summary.faltan = 0;
+    summary.sobran = 0;
+  }
+
   summary.noContratados = Math.max(0, summary.planeados - summary.contratados);
   return summary;
 }
+
+async function computeDailySedeClosureSnapshot(date) {
+  const day = String(date || '').trim();
+  if (!day) return [];
+
+  const [
+    { data: attendance, error: attendanceError },
+    { data: replacements, error: replacementsError },
+    sedesRows,
+    employeesRows,
+    cargosRows,
+    novedadesRows
+  ] = await Promise.all([
+    supabaseAdmin.from('attendance').select('*').eq('fecha', day),
+    supabaseAdmin.from('import_replacements').select('*').eq('fecha', day),
+    selectAllRows('sedes'),
+    selectAllRows('employees'),
+    selectAllRows('cargos', 'codigo, alineacion_crud, nombre'),
+    selectAllRows('novedades', 'codigo, codigo_novedad, nombre, reemplazo')
+  ]);
+  if (attendanceError) throw attendanceError;
+  if (replacementsError) throw replacementsError;
+
+  const sedes = (sedesRows || [])
+    .filter((sede) => String(sede?.estado || 'activo').trim().toLowerCase() !== 'inactivo')
+    .filter((sede) => isSedeScheduledForDate(sede, day));
+  const activeSedeCodes = new Set(sedes.map((row) => String(row?.codigo || '').trim()).filter(Boolean));
+  const cargoMap = new Map((cargosRows || []).map((row) => [String(row?.codigo || '').trim(), row]));
+  const replacementRules = buildNovedadReplacementRules(novedadesRows || []);
+  const replacementMap = new Map((replacements || []).map((row) => [metricReplacementKey(row), row]));
+  const replacementSuperDocs = new Set(
+    (replacements || [])
+      .filter((row) => String(row?.decision || '').trim().toLowerCase() === 'reemplazo')
+      .map((row) => day + '|' + String(row?.supernumerario_documento || row?.supernumerarioDocumento || '').trim())
+      .filter((value) => !value.endsWith('|'))
+  );
+
+  const employeeById = new Map();
+  const employeeByDoc = new Map();
+  const contractedBySede = new Map();
+  const supernumerarioDocs = new Set();
+
+  for (const emp of employeesRows || []) {
+    const empId = String(emp?.id || '').trim();
+    const doc = String(emp?.documento || '').trim();
+    if (empId) employeeById.set(empId, emp);
+    if (doc) employeeByDoc.set(doc, emp);
+    if (doc && isEmployeeSupernumerarioByCargoMap(emp, cargoMap) && isEmployeeAssignedToActiveSedeOnDate(emp, day, activeSedeCodes)) {
+      supernumerarioDocs.add(doc);
+    }
+    if (!isEmployeeAssignedToActiveSedeOnDate(emp, day, activeSedeCodes)) continue;
+    if (isEmployeeSupernumerarioByCargoMap(emp, cargoMap)) continue;
+    const sedeCode = String(emp?.sede_codigo || emp?.sedeCodigo || '').trim();
+    if (!sedeCode) continue;
+    if (!contractedBySede.has(sedeCode)) contractedBySede.set(sedeCode, new Set());
+    contractedBySede.get(sedeCode).add(doc || empId);
+  }
+
+  const registeredBySede = new Map();
+  for (const row of dedupeAttendanceRows(attendance || [])) {
+    const doc = String(row?.documento || '').trim();
+    if (doc && replacementSuperDocs.has(day + '|' + doc)) continue;
+    if (doc && supernumerarioDocs.has(doc)) continue;
+    const empId = String(row?.empleado_id || row?.empleadoId || '').trim();
+    const employee = (empId && employeeById.get(empId)) || (doc && employeeByDoc.get(doc)) || null;
+    if (isEmployeeSupernumerarioByCargoMap(employee, cargoMap)) continue;
+    const sedeCode = String(row?.sede_codigo || row?.sedeCodigo || employee?.sede_codigo || employee?.sedeCodigo || '').trim();
+    if (!sedeCode || !activeSedeCodes.has(sedeCode)) continue;
+    if (!registeredBySede.has(sedeCode)) registeredBySede.set(sedeCode, new Set());
+    registeredBySede.get(sedeCode).add(doc || empId || String(row?.id || '').trim());
+  }
+
+  return sedes.map((sede) => {
+    const sedeCode = String(sede?.codigo || '').trim();
+    const planeados = Number(sede?.numero_operarios ?? 0) || 0;
+    const baseContracted = Number(contractedBySede.get(sedeCode)?.size || 0);
+    const registrados = Number(registeredBySede.get(sedeCode)?.size || 0);
+    const externalRegistered = Math.max(0, registrados - baseContracted);
+    const contratados = Math.min(planeados, baseContracted + externalRegistered);
+    const faltantes = Math.max(0, planeados - registrados);
+    const sobrantes = Math.max(0, registrados - planeados);
+    return {
+      id: day + '_' + sedeCode,
+      fecha: day,
+      sede_codigo: sedeCode,
+      sede_nombre: sede?.nombre || sedeCode || null,
+      zona_codigo: sede?.zona_codigo || null,
+      zona_nombre: sede?.zona_nombre || null,
+      dependencia_codigo: sede?.dependencia_codigo || null,
+      dependencia_nombre: sede?.dependencia_nombre || null,
+      planeados,
+      contratados,
+      registrados,
+      faltantes,
+      sobrantes
+    };
+  });
+}
+
+async function persistDailySedeClosureSnapshot(day) {
+  const snapshot = await computeDailySedeClosureSnapshot(day);
+  if (!snapshot.length) return [];
+  const { error } = await supabaseAdmin.from('daily_sede_closures').upsert(snapshot, { onConflict: 'id' });
+  if (error) throw error;
+  return snapshot;
+}
+
 async function closeOperationDay(date) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(String(date || '').trim())) {
     throw new Error('invalid_date');
@@ -1171,6 +1374,7 @@ async function closeOperationDay(date) {
   if (existingClosureError) throw existingClosureError;
 
   if (existingClosure?.locked === true || String(existingClosure?.status || '').trim().toLowerCase() === 'closed') {
+    await persistDailySedeClosureSnapshot(day);
     await runPostClosureTasks(day);
     const refreshedAlreadyClosed = await refreshOperationalSnapshotsFromEmployeeDailyStatus(day);
     if (refreshedAlreadyClosed === null) {
@@ -1231,6 +1435,7 @@ async function closeOperationDay(date) {
     });
 
     const closureSummary = await computeDailyClosureSummary(day);
+    const sedeClosureSnapshot = await computeDailySedeClosureSnapshot(day);
 
     const { error: closureError } = await supabaseAdmin
       .from('daily_closures')
@@ -1250,6 +1455,11 @@ async function closeOperationDay(date) {
         closed_by_email: 'cron@system'
       }, { onConflict: 'id' });
     if (closureError) throw closureError;
+
+    if (sedeClosureSnapshot.length) {
+      const { error: sedeClosureError } = await supabaseAdmin.from('daily_sede_closures').upsert(sedeClosureSnapshot, { onConflict: 'id' });
+      if (sedeClosureError) throw sedeClosureError;
+    }
 
     await insertSystemAuditLog({
       actorEmail: 'cron@system',
@@ -1428,7 +1638,76 @@ async function finalizePendingAbsenteeismForClosure(day) {
     if (absenteeismError) throw absenteeismError;
   }
 
+  await cleanupNonProgrammedClosedOperationalAbsenteeism(day);
   await materializeClosedOperationalAbsenteeismForClosure(day);
+}
+
+async function cleanupNonProgrammedClosedOperationalAbsenteeism(day) {
+  const refreshed = await refreshEmployeeDailyStatusSnapshot(day);
+  if (refreshed === null) return 0;
+
+  const { data: statusRows, error } = await supabaseAdmin
+    .from('employee_daily_status')
+    .select('source_replacement_id, source_absenteeism_id, source_attendance_id, source_incapacity_id, tipo_personal, servicio_programado')
+    .eq('fecha', day)
+    .eq('tipo_personal', 'empleado')
+    .eq('servicio_programado', false);
+  if (error) throw error;
+
+  const candidateRows = (statusRows || []).filter((row) => !row?.source_attendance_id && !row?.source_incapacity_id && (row?.source_replacement_id || row?.source_absenteeism_id));
+  if (!candidateRows.length) return 0;
+
+  const chunk = (items, size = 200) => {
+    const output = [];
+    for (let index = 0; index < items.length; index += size) output.push(items.slice(index, index + size));
+    return output;
+  };
+
+  const replacementIds = [...new Set(candidateRows.map((row) => row?.source_replacement_id).filter(Boolean))];
+  const absenteeismIds = [...new Set(candidateRows.map((row) => row?.source_absenteeism_id).filter(Boolean))];
+
+  const cronReplacementIds = [];
+  for (const batch of chunk(replacementIds)) {
+    const { data, error: replacementError } = await supabaseAdmin
+      .from('import_replacements')
+      .select('id, actor_email, decision')
+      .in('id', batch);
+    if (replacementError) throw replacementError;
+    for (const row of data || []) {
+      if (String(row?.actor_email || '').trim().toLowerCase() === 'cron@system' && String(row?.decision || '').trim().toLowerCase() === 'ausentismo') {
+        cronReplacementIds.push(row.id);
+      }
+    }
+  }
+
+  const cronAbsenteeismIds = [];
+  for (const batch of chunk(absenteeismIds)) {
+    const { data, error: absenteeismError } = await supabaseAdmin
+      .from('absenteeism')
+      .select('id, created_by_email')
+      .in('id', batch);
+    if (absenteeismError) throw absenteeismError;
+    for (const row of data || []) {
+      if (String(row?.created_by_email || '').trim().toLowerCase() === 'cron@system') {
+        cronAbsenteeismIds.push(row.id);
+      }
+    }
+  }
+
+  for (const batch of chunk(cronReplacementIds)) {
+    const { error: deleteError } = await supabaseAdmin.from('import_replacements').delete().in('id', batch);
+    if (deleteError) throw deleteError;
+  }
+  for (const batch of chunk(cronAbsenteeismIds)) {
+    const { error: deleteError } = await supabaseAdmin.from('absenteeism').delete().in('id', batch);
+    if (deleteError) throw deleteError;
+  }
+
+  const removed = new Set([...cronReplacementIds, ...cronAbsenteeismIds]).size;
+  if (removed > 0) {
+    await refreshEmployeeDailyStatusSnapshot(day);
+  }
+  return removed;
 }
 
 async function materializeClosedOperationalAbsenteeismForClosure(day) {

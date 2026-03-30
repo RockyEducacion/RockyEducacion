@@ -34,6 +34,8 @@ export const PERMS = {
   RUN_PAYROLL: 'runPayroll',
   MANAGE_ABSENTEEISM: 'manageAbsenteeism',
   VIEW_REPORTS: 'viewReports',
+  VIEW_REPORTS_CLIENT: 'viewReportsClient',
+  VIEW_REPORTS_COMPANY: 'viewReportsCompany',
   UPLOAD_DATA: 'uploadData'
 };
 
@@ -79,7 +81,9 @@ export function permsForRole(role) {
     case ROLES.CONSULTOR:
       return {
         ...none,
-        [PERMS.VIEW_REPORTS]: true
+        [PERMS.VIEW_REPORTS]: true,
+        [PERMS.VIEW_REPORTS_CLIENT]: true,
+        [PERMS.VIEW_REPORTS_COMPANY]: true
       };
     case ROLES.SUPERVISOR:
       return {

@@ -74,12 +74,18 @@ begin
     where lower(trim(coalesce(s.estado, 'activo'))) <> 'inactivo'
       and public.is_sede_scheduled_for_date_sql(s.jornada, p_fecha)
   ),
-  service_rows as (
+  scheduled_service_rows as (
     select *
     from public.employee_daily_status eds
     where eds.fecha = p_fecha
       and eds.tipo_personal = 'empleado'
       and eds.servicio_programado = true
+  ),
+  actual_rows as (
+    select *
+    from public.employee_daily_status eds
+    where eds.fecha = p_fecha
+      and (eds.asistio = true or eds.asistio = false)
   ),
   closure_state as (
     select dc.*
@@ -93,22 +99,31 @@ begin
       where cs.locked = true or lower(trim(coalesce(cs.status, ''))) = 'closed'
     ) as is_closed
   ),
-  metrics as (
+  base_counts as (
     select
       p_fecha as fecha,
       coalesce((select sum(greatest(coalesce(s.numero_operarios, 0), 0))::integer from active_sedes s), 0) as planned,
-      count(*)::integer as expected,
-      count(*) filter (where source_attendance_id is not null)::integer as unique_count,
-      count(*) filter (where cuenta_pago_servicio = true)::integer as attendance_count,
-      count(*) filter (
-        where case
-          when cf.is_closed then coalesce(cuenta_pago_servicio, false) = false
-          else coalesce(decision_cobertura, '') = 'ausentismo' or estado_dia = 'ausente_sin_reemplazo'
-        end
-      )::integer as absenteeism,
-      coalesce(bool_or(cf.is_closed), (select is_closed from closure_flag), false) as is_closed
-    from service_rows
-    cross join closure_flag cf
+      coalesce((select count(*)::integer from scheduled_service_rows), 0) as expected,
+      coalesce((select count(*)::integer from actual_rows where source_attendance_id is not null), 0) as unique_count,
+      (select is_closed from closure_flag) as is_closed
+  ),
+  metrics as (
+    select
+      bc.fecha,
+      bc.planned,
+      bc.expected,
+      bc.unique_count,
+      case
+        when bc.planned = 0 and bc.expected = 0 then coalesce((select count(*)::integer from actual_rows ar where ar.asistio = true), 0)
+        else coalesce((select count(*)::integer from scheduled_service_rows sr where sr.cuenta_pago_servicio = true), 0)
+      end as attendance_count,
+      case
+        when bc.planned = 0 and bc.expected = 0 then coalesce((select count(*)::integer from actual_rows ar where ar.asistio = false), 0)
+        when bc.is_closed then coalesce((select count(*)::integer from scheduled_service_rows sr where coalesce(sr.cuenta_pago_servicio, false) = false), 0)
+        else coalesce((select count(*)::integer from scheduled_service_rows sr where coalesce(sr.decision_cobertura, '') = 'ausentismo' or sr.estado_dia = 'ausente_sin_reemplazo'), 0)
+      end as absenteeism,
+      coalesce(bc.is_closed, false) as is_closed
+    from base_counts bc
   )
   insert into public.daily_metrics (
     id,
@@ -130,6 +145,7 @@ begin
     m.expected,
     m.unique_count,
     case
+      when m.planned = 0 and m.expected = 0 then 0
       when m.is_closed then m.absenteeism
       else greatest(m.expected - m.attendance_count, 0)
     end,
