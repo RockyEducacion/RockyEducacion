@@ -3,14 +3,13 @@
 Plataforma de gestion operativa y administrativa para el seguimiento de servicios, personal y novedades.
 
 ## Estado actual
-- Frontend desplegado fuera de Firebase.
+- Frontend desplegado en Vercel.
 - Autenticacion y datos operando con Supabase/PostgreSQL.
-- Backend de WhatsApp desplegado fuera de Firebase sobre Vercel.
-- Firebase ya fue retirado de la ruta activa y del backend del proyecto.
+- Backend de WhatsApp desplegado en Vercel.
 
 ## Flujo de acceso
-- Pagina principal informativa: `index.html`
-- Ingreso a la aplicacion: `app.html#/login`
+- Entrada principal del proyecto: `index.html`
+- Redireccion a la aplicacion: `app.html#/login`
 
 ## Modulos principales
 - Login
@@ -50,7 +49,7 @@ Plataforma de gestion operativa y administrativa para el seguimiento de servicio
 
 ## Ejecucion local
 1. Abrir `index.html` con Live Server.
-2. Entrar a la app desde `app.html#/login`.
+2. Esperar la redireccion automatica a `app.html#/login`.
 3. Iniciar sesion y validar modulos segun rol/permisos.
 
 ## Documentacion operativa
