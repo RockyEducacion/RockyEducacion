@@ -1109,6 +1109,28 @@ function metricReplacementKey(row = {}) {
   return `${String(row?.fecha || '').trim()}_${String(row?.empleado_id || row?.empleadoId || row?.employee_id || row?.employeeId || '').trim()}`;
 }
 
+function dedupeAttendanceRows(rows = []) {
+  const unique = new Map();
+  for (const row of Array.isArray(rows) ? rows : []) {
+    const logicalKey = [
+      String(row?.fecha || '').trim(),
+      String(row?.empleado_id || row?.empleadoId || row?.employee_id || row?.employeeId || '').trim()
+        || String(row?.documento || '').trim()
+        || String(row?.id || '').trim()
+    ].join('|');
+    if (!logicalKey || logicalKey === '|') continue;
+    const existing = unique.get(logicalKey);
+    if (!existing) {
+      unique.set(logicalKey, row);
+      continue;
+    }
+    const existingTs = String(existing?.created_at || '').trim();
+    const rowTs = String(row?.created_at || '').trim();
+    if (rowTs > existingTs) unique.set(logicalKey, row);
+  }
+  return Array.from(unique.values());
+}
+
 function metricAttendanceCountsAsService(row = {}, replacementMap = new Map(), rules = {}) {
   if (!metricAttendanceRequiresReplacement(row, rules)) return true;
   const replacement = replacementMap.get(metricReplacementKey(row)) || null;
