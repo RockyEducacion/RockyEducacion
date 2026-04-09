@@ -105,7 +105,7 @@ app.post('/webhooks/whatsapp', async (req, res) => {
         await markIncomingProcessed(incomingId, 'processed', null);
       } catch (error) {
         console.error('Error procesando mensaje WhatsApp:', error);
-        await markIncomingProcessed(incomingId, 'failed', error.message || 'processing_failed');
+        await markIncomingProcessed(incomingId, 'failed', describeError(error));
       }
     }
 
@@ -201,7 +201,7 @@ async function processIncomingMessage(message) {
 
 
   if (normalizeKey(parsed.value) === 'hola') {
-    await resetSession(phone, session, {});
+    await resetSession(phone, session, {}, { clearIdentity: true });
     await startIdentificationFlow(phone);
     return;
   }
@@ -250,7 +250,21 @@ async function processIncomingMessage(message) {
   }
 }
 async function startIdentificationFlow(phone) {
-  const employeeByPhone = await findEmployeeByPhone(phone);
+  let employeeByPhone = null;
+  try {
+    employeeByPhone = await findEmployeeByPhone(phone);
+  } catch (error) {
+    console.error('Error identificando empleado por telefono:', error);
+    await storeSession(phone, {
+      employee_id: null,
+      documento: null,
+      session_state: SESSION.AWAITING_DOCUMENT,
+      session_data: { identifiedBy: 'phone_lookup_failed' }
+    });
+    await sendText(phone, 'Hola, no pudimos validar tu número en este momento. Por favor escribe tu cédula sin puntos.');
+    return;
+  }
+
   if (employeeByPhone) {
     await storeSession(phone, {
       employee_id: employeeByPhone.id,
@@ -263,6 +277,8 @@ async function startIdentificationFlow(phone) {
   }
 
   await storeSession(phone, {
+    employee_id: null,
+    documento: null,
     session_state: SESSION.AWAITING_DOCUMENT,
     session_data: { identifiedBy: 'unknown_phone' }
   });
@@ -2047,10 +2063,11 @@ async function storeSession(phone, patch = {}) {
   if (error) throw error;
 }
 
-async function resetSession(phone, session, extraData) {
+async function resetSession(phone, session, extraData, options = {}) {
+  const clearIdentity = options?.clearIdentity === true;
   await storeSession(phone, {
-    employee_id: session?.employee_id || null,
-    documento: session?.documento || null,
+    employee_id: clearIdentity ? null : session?.employee_id || null,
+    documento: clearIdentity ? null : session?.documento || null,
     session_state: SESSION.IDLE,
     session_data: extraData || {}
   });
@@ -2105,6 +2122,18 @@ function extractMessageText(payload) {
   if (interactive?.button_reply?.title) return String(interactive.button_reply.title).trim();
   if (interactive?.list_reply?.title) return String(interactive.list_reply.title).trim();
   return null;
+}
+
+function describeError(error) {
+  if (error instanceof Error) {
+    return String(error.stack || error.message || error.name || 'processing_failed');
+  }
+  if (typeof error === 'string') return error;
+  try {
+    return JSON.stringify(error);
+  } catch {
+    return String(error || 'processing_failed');
+  }
 }
 
 function mapActionChoice(parsed, isSupernumerario, hasMainMenu) {
