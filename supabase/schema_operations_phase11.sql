@@ -521,6 +521,25 @@ begin
       where lower(trim(coalesce(n.nombre, ''))) = lower(trim(coalesce(incap.source, '')))
       limit 1
     ) nav_incap on true
+  ),
+  validated_rows as (
+    select
+      rr.*,
+      coalesce(ec_current.tipo_personal, rr.tipo_personal) as current_tipo_personal
+    from resolved_rows rr
+    left join employees_catalog ec_current on ec_current.employee_id = rr.employee_id
+    left join active_sedes s_current on s_current.codigo = ec_current.home_sede_codigo
+    where rr.servicio_programado = false
+      or (
+        coalesce(ec_current.tipo_personal, rr.tipo_personal) = 'empleado'
+        and s_current.codigo is not null
+        and public.is_employee_effective_for_date_sql(
+          ec_current.estado_empleado,
+          ec_current.fecha_ingreso,
+          ec_current.fecha_retiro,
+          p_fecha
+        )
+      )
   )
   insert into public.employee_daily_status (
     id,
@@ -566,7 +585,7 @@ begin
     rr.employee_id,
     rr.documento,
     rr.nombre,
-    rr.tipo_personal,
+    rr.current_tipo_personal,
     rr.effective_sede_codigo,
     coalesce(sl.nombre, rr.effective_sede_nombre),
     coalesce(sl.zona_codigo, rr.default_zona_codigo_snapshot),
@@ -687,7 +706,7 @@ begin
       else 'manual'
     end as origen,
     coalesce(rr.day_locked, false) or lower(trim(coalesce(rr.day_status, ''))) = 'closed' as closed
-  from resolved_rows rr
+  from validated_rows rr
   left join sedes_lookup sl on sl.codigo = rr.effective_sede_codigo;
 
   get diagnostics v_rows = row_count;

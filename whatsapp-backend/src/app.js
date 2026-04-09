@@ -721,6 +721,58 @@ async function fetchDailyMetricsRow(date) {
   return data || null;
 }
 
+async function removeInvalidScheduledEmployeeDailyStatusRows(date) {
+  const day = String(date || '').trim();
+  if (!day) return 0;
+
+  const [
+    { data: statusRows, error: statusError },
+    sedesRows,
+    employeesRows,
+    cargosRows
+  ] = await Promise.all([
+    supabaseAdmin
+      .from('employee_daily_status')
+      .select('id, employee_id')
+      .eq('fecha', day)
+      .eq('tipo_personal', 'empleado')
+      .eq('servicio_programado', true),
+    selectAllRows('sedes'),
+    selectAllRows('employees'),
+    selectAllRows('cargos', 'codigo, alineacion_crud, nombre')
+  ]);
+  if (statusError) throw statusError;
+
+  const scheduledSedes = (sedesRows || [])
+    .filter((row) => String(row?.estado || 'activo').trim().toLowerCase() !== 'inactivo')
+    .filter((row) => isSedeScheduledForDate(row, day));
+  const activeSedeCodes = new Set(scheduledSedes.map((row) => String(row?.codigo || '').trim()).filter(Boolean));
+  const cargoMap = new Map((cargosRows || []).map((row) => [String(row?.codigo || '').trim(), row]));
+  const employeeById = new Map(
+    (employeesRows || [])
+      .map((row) => [String(row?.id || '').trim(), row])
+      .filter(([id]) => Boolean(id))
+  );
+
+  const invalidIds = (statusRows || [])
+    .filter((row) => {
+      const employee = employeeById.get(String(row?.employee_id || '').trim()) || null;
+      if (!employee) return true;
+      if (isEmployeeSupernumerarioByCargoMap(employee, cargoMap)) return true;
+      return !isEmployeeAssignedToActiveSedeOnDate(employee, day, activeSedeCodes);
+    })
+    .map((row) => String(row?.id || '').trim())
+    .filter(Boolean);
+
+  for (let index = 0; index < invalidIds.length; index += 200) {
+    const batch = invalidIds.slice(index, index + 200);
+    const { error } = await supabaseAdmin.from('employee_daily_status').delete().in('id', batch);
+    if (error) throw error;
+  }
+
+  return invalidIds.length;
+}
+
 async function refreshEmployeeDailyStatusSnapshot(date) {
   const day = String(date || '').trim();
   if (!day) return null;
@@ -729,6 +781,7 @@ async function refreshEmployeeDailyStatusSnapshot(date) {
     if (isMissingRpcError(error)) return null;
     throw error;
   }
+  await removeInvalidScheduledEmployeeDailyStatusRows(day);
   return data ?? 0;
 }
 

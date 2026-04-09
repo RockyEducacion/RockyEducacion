@@ -599,6 +599,8 @@ function todayBogotaISO() {
   return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Bogota' }).format(new Date());
 }
 
+const EMPLOYEE_OPERATIONAL_REFRESH_LOOKBACK_DAYS = 31;
+
 function isEmployeeActiveForDate(emp, selectedDate) {
   const day = toISODate(selectedDate);
   if (!day) return false;
@@ -1056,6 +1058,61 @@ async function getDailyMetricsRowByDate(fecha) {
   return data || null;
 }
 
+async function removeInvalidScheduledEmployeeDailyStatusRows(fecha) {
+  const day = String(fecha || '').trim();
+  if (!day) return 0;
+
+  const [
+    { data: statusRows, error: statusError },
+    sedesRows,
+    employeesRows,
+    cargosRows
+  ] = await Promise.all([
+    supabase
+      .from('employee_daily_status')
+      .select('id, employee_id')
+      .eq('fecha', day)
+      .eq('tipo_personal', 'empleado')
+      .eq('servicio_programado', true),
+    selectAllRows('sedes', { select: '*' }),
+    selectAllRows('employees', { select: '*' }),
+    selectAllRows('cargos', { select: 'codigo, alineacion_crud, nombre' })
+  ]);
+  if (statusError) throw statusError;
+
+  const scheduledSedes = (sedesRows || [])
+    .map(mapSedeRow)
+    .filter((sede) => String(sede?.estado || 'activo').trim().toLowerCase() !== 'inactivo')
+    .filter((sede) => isSedeScheduledForDate(sede, day));
+  const activeSedeCodes = new Set(scheduledSedes.map((row) => String(row?.codigo || '').trim()).filter(Boolean));
+  activeSedeCodes.rows = scheduledSedes;
+  const cargoMap = new Map((cargosRows || []).map((row) => [String(row.codigo || '').trim(), row]));
+  const employeeById = new Map(
+    (employeesRows || [])
+      .map(mapEmployeeRow)
+      .map((row) => [String(row?.id || '').trim(), row])
+      .filter(([id]) => Boolean(id))
+  );
+
+  const invalidIds = (statusRows || [])
+    .filter((row) => {
+      const employee = employeeById.get(String(row?.employee_id || '').trim()) || null;
+      if (!employee) return true;
+      if (isEmployeeSupernumerario(employee, cargoMap)) return true;
+      return !isEmployeeAssignedToActiveSedeOnDate(employee, day, activeSedeCodes);
+    })
+    .map((row) => String(row?.id || '').trim())
+    .filter(Boolean);
+
+  for (let index = 0; index < invalidIds.length; index += 200) {
+    const batch = invalidIds.slice(index, index + 200);
+    const { error } = await supabase.from('employee_daily_status').delete().in('id', batch);
+    if (error) throw error;
+  }
+
+  return invalidIds.length;
+}
+
 async function refreshEmployeeDailyStatusSnapshot(fecha) {
   const day = String(fecha || '').trim();
   if (!day) return null;
@@ -1064,6 +1121,7 @@ async function refreshEmployeeDailyStatusSnapshot(fecha) {
     if (isMissingRpcError(error)) return null;
     throw error;
   }
+  await removeInvalidScheduledEmployeeDailyStatusRows(day);
   await notifyTableReload('employee_daily_status');
   return data ?? 0;
 }
@@ -1317,6 +1375,41 @@ function addDaysToIsoDate(value, days = 1) {
   const m = String(utc.getUTCMonth() + 1).padStart(2, '0');
   const d = String(utc.getUTCDate()).padStart(2, '0');
   return `${y}-${m}-${d}`;
+}
+
+function collectEmployeeOperationalRefreshDays(before = {}, after = {}) {
+  const today = todayBogotaISO();
+  if (!today) return [];
+
+  const oldest = addDaysToIsoDate(today, -EMPLOYEE_OPERATIONAL_REFRESH_LOOKBACK_DAYS) || today;
+  const hints = [
+    today,
+    addDaysToIsoDate(today, -1),
+    toISODate(before?.fechaIngreso || before?.fecha_ingreso),
+    toISODate(after?.fechaIngreso || after?.fecha_ingreso),
+    toISODate(before?.fechaRetiro || before?.fecha_retiro),
+    toISODate(after?.fechaRetiro || after?.fecha_retiro)
+  ]
+    .filter((day) => /^\d{4}-\d{2}-\d{2}$/.test(String(day || '')))
+    .filter((day) => day <= today)
+    .sort();
+
+  const start = hints.length ? (hints[0] < oldest ? oldest : hints[0]) : today;
+  const days = [];
+  let cursor = start;
+  while (cursor && cursor <= today) {
+    days.push(cursor);
+    if (days.length > EMPLOYEE_OPERATIONAL_REFRESH_LOOKBACK_DAYS + 2) break;
+    cursor = addDaysToIsoDate(cursor, 1);
+  }
+  return days;
+}
+
+async function reconcileOperationalSnapshotsForEmployeeChange(before = {}, after = {}) {
+  const days = collectEmployeeOperationalRefreshDays(before, after);
+  for (const day of days) {
+    await refreshOperationalState(day);
+  }
 }
 
 function normalizeDailyDocument(value) {
@@ -2409,12 +2502,21 @@ export async function updateEmployee(id, data = {}) {
   if (error) throw error;
   const currentIngreso = toISODate(currentRow.fecha_ingreso);
   const updatedIngreso = toISODate(updated.fecha_ingreso);
+  const currentRetiro = toISODate(currentRow.fecha_retiro);
+  const updatedRetiro = toISODate(updated.fecha_retiro);
   const currentSede = String(currentRow.sede_codigo || '').trim();
   const updatedSede = String(updated.sede_codigo || '').trim();
+  const currentEstado = String(currentRow.estado || 'activo').trim().toLowerCase();
+  const updatedEstado = String(updated.estado || 'activo').trim().toLowerCase();
+  const currentDocumento = String(currentRow.documento || '').trim();
+  const updatedDocumento = String(updated.documento || '').trim();
   const cargoChanged =
     String(updated.cargo_codigo || '') !== String(currentRow.cargo_codigo || '');
   const sedeChanged = updatedSede !== currentSede;
   const ingresoChanged = updatedIngreso !== currentIngreso;
+  const retiroChanged = updatedRetiro !== currentRetiro;
+  const estadoChanged = updatedEstado !== currentEstado;
+  const documentChanged = updatedDocumento !== currentDocumento;
   const requiresNewHistoryEntry =
     String(updated.estado || 'activo').trim().toLowerCase() === 'activo' &&
     (cargoChanged || sedeChanged || ingresoChanged);
@@ -2441,6 +2543,9 @@ export async function updateEmployee(id, data = {}) {
   }
   if (await getCargoCrudAlignmentByCode(updated.cargo_codigo, updated.cargo_nombre) === 'supervisor') {
     await upsertSupervisorProfileFromEmployee(mapEmployeeRow(updated));
+  }
+    if (cargoChanged || sedeChanged || ingresoChanged || retiroChanged || estadoChanged || documentChanged) {
+    await reconcileOperationalSnapshotsForEmployeeChange(currentRow, updated);
   }
   await notifyTableReload('employees');
 }
@@ -2493,6 +2598,9 @@ export async function setEmployeeStatus(id, estado, options = null) {
       fechaIngreso: patch.fecha_ingreso,
       fechaRetiro: patch.fecha_retiro
     });
+  }
+  if (previousEstado !== nextEstado || toISODate(currentRow.fecha_retiro) !== toISODate(data.fecha_retiro) || toISODate(currentRow.fecha_ingreso) !== toISODate(data.fecha_ingreso)) {
+    await reconcileOperationalSnapshotsForEmployeeChange(currentRow, data);
   }
   await notifyTableReload('employees');
 }
