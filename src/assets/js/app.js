@@ -44,6 +44,7 @@ headerMount.replaceChildren(Header());
 footerMount.replaceChildren(Footer());
 
 let unsubRoleMatrix=null; let unsubUserOverrides=null; let unsubAudit=null;
+let authSyncToken = 0;
 const guardWrite=(perm,fn)=> async (...args)=>{
   if(typeof fn!=='function') return undefined;
   if(!can(perm)) throw new Error('No tienes permiso de edicion para esta seccion.');
@@ -84,12 +85,12 @@ const guardWrite=(perm,fn)=> async (...args)=>{
         streamAttendanceByDate:fb.streamAttendanceByDate, streamAttendanceRecent:fb.streamAttendanceRecent, streamImportReplacementsByDate:fb.streamImportReplacementsByDate
       };
 
-      refreshRoute();
-
       fb.authState(async (user)=>{
+        const syncToken = ++authSyncToken;
         if(unsubRoleMatrix){unsubRoleMatrix();unsubRoleMatrix=null;} if(unsubUserOverrides){unsubUserOverrides();unsubUserOverrides=null;}
         if(!user){ setState({ user:null, userProfile:null, userOverrides:{} }); headerMount.replaceChildren(Header(deps)); sidebarMount.replaceChildren(Sidebar()); if(location.hash!=="#/login") navigate('/login'); else refreshRoute(); return; }
         await fb.ensureUserProfile(user); const profile=await fb.loadUserProfile(user.uid);
+        if(syncToken!==authSyncToken) return;
         const status=String(profile?.estado||'activo').toLowerCase();
         if(status==='inactivo' || status==='eliminado'){
           try{ sessionStorage.setItem('auth_block_msg', status==='eliminado' ? 'Tu usuario fue eliminado. Contacta al administrador.' : 'Tu usuario esta inactivo. Contacta al administrador.'); }catch{}
@@ -101,6 +102,7 @@ const guardWrite=(perm,fn)=> async (...args)=>{
         unsubUserOverrides=fb.streamUserOverrides(user.uid,(ov)=> setState({ userOverrides: ov||{} }));
         headerMount.replaceChildren(Header(deps)); sidebarMount.replaceChildren(Sidebar());
         if(location.hash==='' || location.hash==="#/login") navigate('/');
+        else refreshRoute();
       });
     })
     .catch((err) => {

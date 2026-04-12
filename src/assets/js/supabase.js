@@ -19,11 +19,88 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
 
 const POSTGREST_PAGE_SIZE = 1000;
 const tableReloaders = new Map();
+const REALTIME_SUBSCRIBE_TIMEOUT_MS = 12000;
+let realtimeChannelSeq = 0;
+
+async function syncRealtimeAuth(session = null) {
+  const token = String(session?.access_token || '').trim();
+  if (!token) return;
+  try {
+    await supabase.realtime.setAuth(token);
+  } catch (error) {
+    console.error('No se pudo sincronizar auth con Realtime:', error);
+  }
+}
 
 function registerTableReloader(table, reloader) {
   if (!tableReloaders.has(table)) tableReloaders.set(table, new Set());
   tableReloaders.get(table).add(reloader);
   return () => tableReloaders.get(table)?.delete(reloader);
+}
+
+function nextRealtimeChannelName(base) {
+  realtimeChannelSeq += 1;
+  return `${base}-${realtimeChannelSeq}`;
+}
+
+function normalizeRealtimeError(label, status, error = null) {
+  if (error instanceof Error) return error;
+  const suffix = error?.message || error?.details || String(error || '').trim() || status || 'unknown';
+  return new Error(`Realtime ${label}: ${suffix}`);
+}
+
+function subscribeToRealtime(channel, {
+  label = 'channel',
+  onStatus = null,
+  onError = null,
+  timeoutMs = REALTIME_SUBSCRIBE_TIMEOUT_MS
+} = {}) {
+  let subscribed = false;
+  let failureNotified = false;
+  const timeoutId = timeoutMs > 0
+    ? setTimeout(() => {
+      if (subscribed || failureNotified) return;
+      failureNotified = true;
+      const timeoutError = normalizeRealtimeError(label, 'TIMED_OUT');
+      console.error(`Realtime ${label} timed out before subscribe.`);
+      onStatus?.('TIMED_OUT', timeoutError);
+      onError?.(timeoutError, 'TIMED_OUT');
+    }, timeoutMs)
+    : null;
+
+  const subscription = channel.subscribe((status, error) => {
+    if (status === 'SUBSCRIBED') {
+      subscribed = true;
+      if (timeoutId) clearTimeout(timeoutId);
+    }
+    if (status === 'CLOSED' && timeoutId) clearTimeout(timeoutId);
+    if ((status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') && timeoutId) clearTimeout(timeoutId);
+
+    onStatus?.(status, error || null);
+
+    if ((status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') && !failureNotified) {
+      failureNotified = true;
+      const realtimeError = normalizeRealtimeError(label, status, error);
+      console.error(`Realtime ${label} failed with status ${status}:`, error || realtimeError);
+      onError?.(realtimeError, status);
+    }
+  });
+
+  return {
+    subscription,
+    cancel() {
+      if (timeoutId) clearTimeout(timeoutId);
+    }
+  };
+}
+
+function shouldRefreshForDay(payload, day, column = 'fecha') {
+  const target = String(day || '').trim();
+  if (!target) return true;
+  const nextVal = String(payload?.new?.[column] || '').trim();
+  const prevVal = String(payload?.old?.[column] || '').trim();
+  if (nextVal || prevVal) return nextVal === target || prevVal === target;
+  return true;
 }
 
 async function notifyTableReload(table) {
@@ -1597,7 +1674,11 @@ async function insertEmployeeRecord({
   return data;
 }
 
-function streamTable(table, mapper, onData, order = 'created_at') {
+function streamTable(table, mapper, onData, {
+  order = 'created_at',
+  onError = null,
+  onStatus = null
+} = {}) {
   let active = true;
   const emit = async () => {
     try {
@@ -1607,6 +1688,7 @@ function streamTable(table, mapper, onData, order = 'created_at') {
     } catch (error) {
       if (!active) return;
       console.error(`No se pudo cargar ${table}:`, error);
+      onError?.(error, 'LOAD_ERROR');
       onData([]);
     }
   };
@@ -1614,29 +1696,38 @@ function streamTable(table, mapper, onData, order = 'created_at') {
   emit();
   const unregister = registerTableReloader(table, emit);
 
-  const channel = supabase
-    .channel(`${table}-watch`)
-    .on('postgres_changes', { event: '*', schema: 'public', table }, emit)
-    .subscribe();
+  const realtime = subscribeToRealtime(
+    supabase
+      .channel(nextRealtimeChannelName(`${table}-watch`))
+      .on('postgres_changes', { event: '*', schema: 'public', table }, emit),
+    { label: table, onError, onStatus }
+  );
+  const channel = realtime.subscription;
 
   return () => {
     active = false;
     unregister();
+    realtime.cancel();
     supabase.removeChannel(channel);
   };
 }
 
 export const authState = (cb) => {
-  supabase.auth.getSession().then(({ data, error }) => {
+  supabase.auth.getSession().then(async ({ data, error }) => {
     if (error) {
       console.error('No se pudo consultar la sesion de Supabase:', error);
+      if (/invalid refresh token|refresh token not found/i.test(String(error?.message || ''))) {
+        try { await supabase.auth.signOut({ scope: 'local' }); } catch {}
+      }
       cb(null);
       return;
     }
+    await syncRealtimeAuth(data.session || null);
     cb(normalizeUser(data.session?.user || null));
   });
 
-  const { data } = supabase.auth.onAuthStateChange((_event, session) => {
+  const { data } = supabase.auth.onAuthStateChange(async (_event, session) => {
+    await syncRealtimeAuth(session || null);
     cb(normalizeUser(session?.user || null));
   });
 
@@ -1775,7 +1866,7 @@ export async function setRolePermissions(role, permissions = {}) {
   await notifyTableReload('roles_matrix');
 }
 
-export function streamRoleMatrix(onData) {
+export function streamRoleMatrix(onData, onError = null, onStatus = null) {
   let active = true;
   const emit = async () => {
     const { data, error } = await supabase
@@ -1784,6 +1875,7 @@ export function streamRoleMatrix(onData) {
     if (!active) return;
     if (error) {
       console.error('No se pudo cargar roles_matrix:', error);
+      onError?.(error, 'LOAD_ERROR');
       onData({});
       return;
     }
@@ -1797,14 +1889,18 @@ export function streamRoleMatrix(onData) {
   emit();
 
   const unregister = registerTableReloader('roles_matrix', emit);
-  const channel = supabase
-    .channel('roles-matrix-watch')
-    .on('postgres_changes', { event: '*', schema: 'public', table: 'roles_matrix' }, emit)
-    .subscribe();
+  const realtime = subscribeToRealtime(
+    supabase
+      .channel(nextRealtimeChannelName('roles-matrix-watch'))
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'roles_matrix' }, emit),
+    { label: 'roles_matrix', onError, onStatus }
+  );
+  const channel = realtime.subscription;
 
   return () => {
     active = false;
     unregister();
+    realtime.cancel();
     supabase.removeChannel(channel);
   };
 }
@@ -1979,7 +2075,7 @@ export function streamAuditLogs(onData, max = 200) {
   };
 }
 
-export function streamUserOverrides(uid, onData) {
+export function streamUserOverrides(uid, onData, onError = null, onStatus = null) {
   let active = true;
   const emit = async () => {
     const { data, error } = await supabase
@@ -1990,6 +2086,7 @@ export function streamUserOverrides(uid, onData) {
     if (!active) return;
     if (error) {
       console.error('No se pudo cargar user_overrides:', error);
+      onError?.(error, 'LOAD_ERROR');
       onData({});
       return;
     }
@@ -1999,20 +2096,24 @@ export function streamUserOverrides(uid, onData) {
   emit();
 
   const unregister = registerTableReloader('user_overrides', emit);
-  const channel = supabase
-    .channel(`user-overrides-${uid}`)
-    .on('postgres_changes', { event: '*', schema: 'public', table: 'user_overrides', filter: `user_id=eq.${uid}` }, emit)
-    .subscribe();
+  const realtime = subscribeToRealtime(
+    supabase
+      .channel(nextRealtimeChannelName(`user-overrides-${uid}`))
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'user_overrides', filter: `user_id=eq.${uid}` }, emit),
+    { label: `user_overrides:${uid}`, onError, onStatus }
+  );
+  const channel = realtime.subscription;
 
   return () => {
     active = false;
     unregister();
+    realtime.cancel();
     supabase.removeChannel(channel);
   };
 }
 
-export function streamZones(onData) {
-  return streamTable('zones', mapCatalogRow, onData);
+export function streamZones(onData, onError = null, onStatus = null) {
+  return streamTable('zones', mapCatalogRow, onData, { onError, onStatus });
 }
 
 export async function getNextZoneCode(prefix = 'ZON', width = 4) {
@@ -2058,8 +2159,8 @@ export async function findZoneByCode(codigo) {
   return data ? mapCatalogRow(data) : null;
 }
 
-export function streamDependencies(onData) {
-  return streamTable('dependencies', mapCatalogRow, onData);
+export function streamDependencies(onData, onError = null, onStatus = null) {
+  return streamTable('dependencies', mapCatalogRow, onData, { onError, onStatus });
 }
 
 export async function getNextDependencyCode(prefix = 'DEP', width = 4) {
@@ -2105,8 +2206,8 @@ export async function findDependencyByCode(codigo) {
   return data ? mapCatalogRow(data) : null;
 }
 
-export function streamSedes(onData) {
-  return streamTable('sedes', mapSedeRow, onData);
+export function streamSedes(onData, onError = null, onStatus = null) {
+  return streamTable('sedes', mapSedeRow, onData, { onError, onStatus });
 }
 
 export async function getNextSedeCode(prefix = 'SED', width = 4) {
@@ -2184,8 +2285,8 @@ export async function findSedeByCode(codigo) {
   return data ? mapSedeRow(data) : null;
 }
 
-export function streamCargos(onData) {
-  return streamTable('cargos', mapCargoRow, onData);
+export function streamCargos(onData, onError = null, onStatus = null) {
+  return streamTable('cargos', mapCargoRow, onData, { onError, onStatus });
 }
 
 export async function getNextCargoCode(prefix = 'CAR', width = 4) {
@@ -2233,8 +2334,8 @@ export async function findCargoByCode(codigo) {
   return data ? mapCargoRow(data) : null;
 }
 
-export function streamNovedades(onData) {
-  return streamTable('novedades', mapNovedadRow, onData);
+export function streamNovedades(onData, onError = null, onStatus = null) {
+  return streamTable('novedades', mapNovedadRow, onData, { onError, onStatus });
 }
 
 export async function getNextNovedadCode(prefix = 'NOV', width = 4) {
@@ -2293,8 +2394,8 @@ export async function findNovedadByCodigoNovedad(codigoNovedad) {
   return data ? mapNovedadRow(data) : null;
 }
 
-export function streamEmployees(onData) {
-  return streamTable('employees', mapEmployeeRow, onData);
+export function streamEmployees(onData, onError = null, onStatus = null) {
+  return streamTable('employees', mapEmployeeRow, onData, { onError, onStatus });
 }
 
 export function streamActiveBaseEmployees(onData) {
@@ -2323,8 +2424,8 @@ export function streamActiveBaseEmployees(onData) {
   emit();
   const unA = registerTableReloader('employees', emit);
   const unB = registerTableReloader('cargos', emit);
-  const channelA = supabase.channel('employees-active-base-watch').on('postgres_changes', { event: '*', schema: 'public', table: 'employees' }, emit).subscribe();
-  const channelB = supabase.channel('employees-active-base-cargos-watch').on('postgres_changes', { event: '*', schema: 'public', table: 'cargos' }, emit).subscribe();
+  const channelA = supabase.channel(nextRealtimeChannelName('employees-active-base-watch')).on('postgres_changes', { event: '*', schema: 'public', table: 'employees' }, emit).subscribe();
+  const channelB = supabase.channel(nextRealtimeChannelName('employees-active-base-cargos-watch')).on('postgres_changes', { event: '*', schema: 'public', table: 'cargos' }, emit).subscribe();
   return () => {
     active = false;
     unA();
@@ -2681,8 +2782,8 @@ export function streamSupernumerarios(onData) {
   emit();
   const unA = registerTableReloader('employees', emit);
   const unB = registerTableReloader('cargos', emit);
-  const channelA = supabase.channel('supernumerarios-employees-watch').on('postgres_changes', { event: '*', schema: 'public', table: 'employees' }, emit).subscribe();
-  const channelB = supabase.channel('supernumerarios-cargos-watch').on('postgres_changes', { event: '*', schema: 'public', table: 'cargos' }, emit).subscribe();
+  const channelA = supabase.channel(nextRealtimeChannelName('supernumerarios-employees-watch')).on('postgres_changes', { event: '*', schema: 'public', table: 'employees' }, emit).subscribe();
+  const channelB = supabase.channel(nextRealtimeChannelName('supernumerarios-cargos-watch')).on('postgres_changes', { event: '*', schema: 'public', table: 'cargos' }, emit).subscribe();
   return () => {
     active = false;
     unA();
@@ -2815,9 +2916,9 @@ export function streamSupervisors(onData) {
   const unA = registerTableReloader('employees', emit);
   const unB = registerTableReloader('supervisor_profile', emit);
   const unC = registerTableReloader('cargos', emit);
-  const channelA = supabase.channel('supervisors-employees-watch').on('postgres_changes', { event: '*', schema: 'public', table: 'employees' }, emit).subscribe();
-  const channelB = supabase.channel('supervisors-profile-watch').on('postgres_changes', { event: '*', schema: 'public', table: 'supervisor_profile' }, emit).subscribe();
-  const channelC = supabase.channel('supervisors-cargos-watch').on('postgres_changes', { event: '*', schema: 'public', table: 'cargos' }, emit).subscribe();
+  const channelA = supabase.channel(nextRealtimeChannelName('supervisors-employees-watch')).on('postgres_changes', { event: '*', schema: 'public', table: 'employees' }, emit).subscribe();
+  const channelB = supabase.channel(nextRealtimeChannelName('supervisors-profile-watch')).on('postgres_changes', { event: '*', schema: 'public', table: 'supervisor_profile' }, emit).subscribe();
+  const channelC = supabase.channel(nextRealtimeChannelName('supervisors-cargos-watch')).on('postgres_changes', { event: '*', schema: 'public', table: 'cargos' }, emit).subscribe();
 
   return () => {
     active = false;
@@ -2969,7 +3070,7 @@ export function streamDailyClosures(onData, max = 200) {
   };
 }
 
-export function streamAttendanceByDate(fecha, onData) {
+export function streamAttendanceByDate(fecha, onData, onError = null, onStatus = null) {
   const day = String(fecha || '').trim();
   if (!day) {
     onData([]);
@@ -2981,17 +3082,27 @@ export function streamAttendanceByDate(fecha, onData) {
     if (!active) return;
     if (error) {
       console.error('No se pudo cargar attendance por fecha:', error);
+      onError?.(error, 'LOAD_ERROR');
       onData([]);
       return;
     }
     onData((data || []).map(mapAttendanceRow));
   };
+  const onChange = (payload) => {
+    if (!shouldRefreshForDay(payload, day, 'fecha')) return;
+    emit();
+  };
   emit();
   const unregister = registerTableReloader('attendance', emit);
-  const channel = supabase.channel(`attendance-${day}`).on('postgres_changes', { event: '*', schema: 'public', table: 'attendance', filter: `fecha=eq.${day}` }, emit).subscribe();
+  const realtime = subscribeToRealtime(
+    supabase.channel(nextRealtimeChannelName(`attendance-${day}`)).on('postgres_changes', { event: '*', schema: 'public', table: 'attendance' }, onChange),
+    { label: `attendance:${day}`, onError, onStatus }
+  );
+  const channel = realtime.subscription;
   return () => {
     active = false;
     unregister();
+    realtime.cancel();
     supabase.removeChannel(channel);
   };
 }
@@ -3018,7 +3129,7 @@ export function streamAttendanceRecent(onData, max = 300) {
   };
 }
 
-export function streamImportReplacementsByDate(fecha, onData) {
+export function streamImportReplacementsByDate(fecha, onData, onError = null, onStatus = null) {
   const day = String(fecha || '').trim();
   if (!day) {
     onData([]);
@@ -3030,22 +3141,32 @@ export function streamImportReplacementsByDate(fecha, onData) {
     if (!active) return;
     if (error) {
       console.error('No se pudo cargar import_replacements por fecha:', error);
+      onError?.(error, 'LOAD_ERROR');
       onData([]);
       return;
     }
     onData((data || []).map(mapImportReplacementRow));
   };
+  const onChange = (payload) => {
+    if (!shouldRefreshForDay(payload, day, 'fecha')) return;
+    emit();
+  };
   emit();
   const unregister = registerTableReloader('import_replacements', emit);
-  const channel = supabase.channel(`import-replacements-${day}`).on('postgres_changes', { event: '*', schema: 'public', table: 'import_replacements', filter: `fecha=eq.${day}` }, emit).subscribe();
+  const realtime = subscribeToRealtime(
+    supabase.channel(nextRealtimeChannelName(`import-replacements-${day}`)).on('postgres_changes', { event: '*', schema: 'public', table: 'import_replacements' }, onChange),
+    { label: `import_replacements:${day}`, onError, onStatus }
+  );
+  const channel = realtime.subscription;
   return () => {
     active = false;
     unregister();
+    realtime.cancel();
     supabase.removeChannel(channel);
   };
 }
 
-export function streamDailyMetricsByDate(fecha, onData) {
+export function streamDailyMetricsByDate(fecha, onData, onError = null, onStatus = null) {
   const day = String(fecha || '').trim();
   if (!day) {
     onData(null);
@@ -3057,17 +3178,27 @@ export function streamDailyMetricsByDate(fecha, onData) {
     if (!active) return;
     if (error) {
       console.error('No se pudo cargar daily_metrics por fecha:', error);
+      onError?.(error, 'LOAD_ERROR');
       onData(null);
       return;
     }
     onData(data ? mapDailyMetricsRow(data) : null);
   };
+  const onChange = (payload) => {
+    if (!shouldRefreshForDay(payload, day, 'fecha')) return;
+    emit();
+  };
   emit();
   const unregister = registerTableReloader('daily_metrics', emit);
-  const channel = supabase.channel(`daily-metrics-${day}`).on('postgres_changes', { event: '*', schema: 'public', table: 'daily_metrics', filter: `fecha=eq.${day}` }, emit).subscribe();
+  const realtime = subscribeToRealtime(
+    supabase.channel(nextRealtimeChannelName(`daily-metrics-${day}`)).on('postgres_changes', { event: '*', schema: 'public', table: 'daily_metrics' }, onChange),
+    { label: `daily_metrics:${day}`, onError, onStatus }
+  );
+  const channel = realtime.subscription;
   return () => {
     active = false;
     unregister();
+    realtime.cancel();
     supabase.removeChannel(channel);
   };
 }

@@ -3,7 +3,7 @@ import { showInfoModal } from '../utils/infoModal.js';
 
 export const WhatsAppLive = (mount, deps = {}) => {
   const today = todayBogota();
-  const closureDay = addDaysToIsoDate(today, -1) || today;
+  const closureDay = today;
   const ui = el('section', { className: 'main-card' }, [
     el('section', { className: 'wa-header' }, [
       el('div', { className: 'wa-header__left' }, [
@@ -86,9 +86,28 @@ export const WhatsAppLive = (mount, deps = {}) => {
         el('tbody', {})
       ])
     ]),
+    el('div', { id: 'waPagination', className: 'mt-2', style: 'display:flex;justify-content:space-between;gap:.75rem;align-items:center;flex-wrap:wrap;' }, [
+      el('div', { id: 'waPageSummary', className: 'text-muted', style: 'font-size:.86rem;' }, ['Mostrando 0 de 0']),
+      el('div', { style: 'display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;' }, [
+        el('label', { className: 'text-muted', for: 'waPageSize', style: 'font-size:.86rem;' }, ['Filas por pagina']),
+        el('select', { id: 'waPageSize', className: 'input wa-input', style: 'width:auto;min-width:88px;' }, [
+          el('option', { value: '25' }, ['25']),
+          el('option', { value: '50', selected: true }, ['50']),
+          el('option', { value: '100' }, ['100']),
+          el('option', { value: '200' }, ['200'])
+        ]),
+        el('button', { id: 'waToggleAll', className: 'btn', type: 'button' }, ['Ver todos']),
+        el('button', { id: 'waPrevPage', className: 'btn', type: 'button' }, ['Anterior']),
+        el('span', { id: 'waPageIndicator', className: 'text-muted', style: 'font-size:.86rem;min-width:96px;text-align:center;' }, ['Pagina 1 de 1']),
+        el('button', { id: 'waNextPage', className: 'btn', type: 'button' }, ['Siguiente'])
+      ])
+    ]),
     el('div', { className: 'mt-2', style: 'display:flex;justify-content:space-between;gap:.5rem;align-items:center;flex-wrap:wrap;' }, [
       el('div', { id: 'waModeHint', className: 'text-muted', style: 'font-size:.86rem;' }, ['Vista completa del día']),
+      el('div', { style: 'display:flex;gap:.5rem;align-items:center;flex-wrap:wrap;' }, [
+        el('button', { id: 'btnManualRefresh', className: 'btn', type: 'button' }, ['Actualizar']),
       el('button', { id: 'btnManualClose', className: 'btn btn--primary', type: 'button' }, ['Cerrar dia'])
+      ])
     ]),
     el('p', { id: 'waMsg', className: 'text-muted mt-2' }, ['Conectando...'])
   ]);
@@ -97,7 +116,14 @@ export const WhatsAppLive = (mount, deps = {}) => {
   const msg = qs('#waMsg', ui);
   const searchInput = qs('#waSearch', ui);
   const noveltyFilter = qs('#waNoveltyFilter', ui);
+  const pageSummary = qs('#waPageSummary', ui);
+  const pageSizeSelect = qs('#waPageSize', ui);
+  const btnToggleAll = qs('#waToggleAll', ui);
+  const pageIndicator = qs('#waPageIndicator', ui);
+  const btnPrevPage = qs('#waPrevPage', ui);
+  const btnNextPage = qs('#waNextPage', ui);
   const modeHint = qs('#waModeHint', ui);
+  const btnManualRefresh = qs('#btnManualRefresh', ui);
   const btnManualClose = qs('#btnManualClose', ui);
   const statNoveltyTotal = qs('#statNoveltyTotal', ui);
   const statNoveltyHandled = qs('#statNoveltyHandled', ui);
@@ -121,12 +147,18 @@ export const WhatsAppLive = (mount, deps = {}) => {
   let unSedes = null;
   let unIncapacitados = null;
   let unDailyMetrics = null;
-  let refreshTimer = null;
   let sortKey = 'hora';
   let sortDir = -1;
   let lastLegacyBackfillAt = 0;
   let dailyMetrics = null;
   let cardFilter = 'all';
+  let currentPage = 1;
+  let pageSize = Number(pageSizeSelect?.value || 50) || 50;
+  let showAllRows = false;
+  let attendanceSubscribed = false;
+  let replacementsSubscribed = false;
+  let fallbackMode = false;
+  let fallbackRefreshPromise = null;
   const pendingReplacementSelections = new Map();
 
   function replacementRowKey(r = {}) {
@@ -427,21 +459,44 @@ export const WhatsAppLive = (mount, deps = {}) => {
       render();
     } catch (err) {
       if (!silent) msg.textContent = `Error cargando registro diario: ${err?.message || err}`;
+      throw err;
     }
   }
 
-  function stopRefreshTimer() {
-    if (!refreshTimer) return;
-    clearInterval(refreshTimer);
-    refreshTimer = null;
+  function resetPagination() {
+    currentPage = 1;
   }
 
-  function startRefreshTimer() {
-    stopRefreshTimer();
-    if (!deps.listAttendanceRange && !deps.listImportReplacementsRange) return;
-    refreshTimer = setInterval(() => {
-      refreshCurrentDaySnapshot({ silent: true });
-    }, 5000);
+  function updateModeHint() {
+    if (!modeHint) return;
+    if (fallbackMode) {
+      modeHint.textContent = 'Modo respaldo manual';
+      return;
+    }
+    if (attendanceSubscribed && replacementsSubscribed) {
+      modeHint.textContent = 'Vista en vivo';
+      return;
+    }
+    modeHint.textContent = 'Conectando en vivo...';
+  }
+
+  async function enterFallbackMode(source, error = null) {
+    attendanceSubscribed = false;
+    replacementsSubscribed = false;
+    fallbackMode = true;
+    updateModeHint();
+    if (fallbackRefreshPromise) return fallbackRefreshPromise;
+    fallbackRefreshPromise = refreshCurrentDaySnapshot({ silent: false })
+      .then(() => {
+        msg.textContent = `Actualizacion en vivo no disponible${source ? ` (${source})` : ''}. Usa "Actualizar" para sincronizar la vista.`;
+      })
+      .catch((err) => {
+        msg.textContent = `Error en modo respaldo: ${err?.message || error?.message || error || err}`;
+      })
+      .finally(() => {
+        fallbackRefreshPromise = null;
+      });
+    return fallbackRefreshPromise;
   }
 
   function applyFilters(rows) {
@@ -630,9 +685,17 @@ export const WhatsAppLive = (mount, deps = {}) => {
       return va > vb ? sortDir : -sortDir;
     });
     const stats = calculateStats();
+    const totalRows = rows.length;
+    const effectivePageSize = showAllRows ? Math.max(totalRows, 1) : pageSize;
+    const totalPages = Math.max(1, Math.ceil(totalRows / effectivePageSize));
+    currentPage = Math.min(Math.max(currentPage, 1), totalPages);
+    const startIndex = totalRows ? (currentPage - 1) * effectivePageSize : 0;
+    const pageRows = rows.slice(startIndex, startIndex + effectivePageSize);
+    const visibleFrom = totalRows ? startIndex + 1 : 0;
+    const visibleTo = totalRows ? startIndex + pageRows.length : 0;
 
     tbody.replaceChildren(
-      ...rows.map((r) => {
+      ...pageRows.map((r) => {
         const key = replacementRowKey(r);
         const repl = replMap.get(key) || null;
         const rowClass = classifyRow(r);
@@ -771,13 +834,23 @@ export const WhatsAppLive = (mount, deps = {}) => {
     qs('#waNoveltyTotal', ui).textContent = String(stats.noveltyTotal);
     qs('#waNoveltyHandled', ui).textContent = String(stats.noveltyHandled);
     qs('#waNoveltyPending', ui).textContent = String(stats.noveltyPending);
-    msg.textContent = `Total registros del día: ${rows.length}`;
+    if (pageSummary) pageSummary.textContent = totalRows ? `Mostrando ${visibleFrom}-${visibleTo} de ${totalRows}` : 'Mostrando 0 de 0';
+    if (pageIndicator) pageIndicator.textContent = showAllRows ? 'Todos los registros' : (totalRows ? `Pagina ${currentPage} de ${totalPages}` : 'Pagina 0 de 0');
+    if (pageSizeSelect) pageSizeSelect.value = String(pageSize);
+    if (pageSizeSelect) pageSizeSelect.disabled = showAllRows;
+    if (btnToggleAll) btnToggleAll.textContent = showAllRows ? 'Usar paginas' : 'Ver todos';
+    if (btnPrevPage) btnPrevPage.disabled = showAllRows || totalRows === 0 || currentPage <= 1;
+    if (btnNextPage) btnNextPage.disabled = showAllRows || totalRows === 0 || currentPage >= totalPages;
+    msg.textContent = totalRows
+      ? `Total registros del dia: ${totalRows}. Mostrando ${visibleFrom}-${visibleTo}.`
+      : 'Total registros del dia: 0.';
     updateCardFilterUI();
     updateSortIndicators();
   }
 
   function setCardFilter(next) {
     cardFilter = cardFilter === next ? 'all' : next;
+    resetPagination();
     render();
   }
 
@@ -926,14 +999,16 @@ export const WhatsAppLive = (mount, deps = {}) => {
     unAttendance?.();
     unReplacements?.();
     unDailyMetrics?.();
-    stopRefreshTimer();
     attendance = [];
     replacements = [];
     statsAttendance = [];
     statsReplacements = [];
     dailyMetrics = null;
     lastLegacyBackfillAt = 0;
-    if (modeHint) modeHint.textContent = 'Vista completa del día';
+    attendanceSubscribed = false;
+    replacementsSubscribed = false;
+    fallbackMode = false;
+    updateModeHint();
     render();
     if (deps.streamDailyMetricsByDate) {
       unDailyMetrics = deps.streamDailyMetricsByDate(
@@ -943,11 +1018,13 @@ export const WhatsAppLive = (mount, deps = {}) => {
           loadLegacySnapshotIfNeeded();
           render();
         },
-        () => {}
+        null,
+        (status) => {
+          if (status === 'SUBSCRIBED') render();
+        }
       );
     }
     if (deps.streamAttendanceByDate && deps.streamImportReplacementsByDate) {
-      if (modeHint) modeHint.textContent = 'Vista en vivo';
       unAttendance = deps.streamAttendanceByDate(
         today,
         (rows) => {
@@ -956,29 +1033,64 @@ export const WhatsAppLive = (mount, deps = {}) => {
           loadLegacySnapshotIfNeeded();
           render();
         },
-        () => {}
+        (error, status) => {
+          enterFallbackMode(`asistencia ${status === 'LOAD_ERROR' ? 'carga inicial' : 'realtime'}`, error);
+        },
+        (status) => {
+          if (status !== 'SUBSCRIBED') return;
+          attendanceSubscribed = true;
+          if (attendanceSubscribed && replacementsSubscribed) fallbackMode = false;
+          updateModeHint();
+        }
       );
       unReplacements = deps.streamImportReplacementsByDate(
         today,
         (rows) => {
-          replacements = mergeReplacements(replacements, rows || []);
-          statsReplacements = mergeReplacements(statsReplacements, rows || []);
+          replacements = rows || [];
+          statsReplacements = replacements;
           render();
         },
-        () => {}
+        (error, status) => {
+          enterFallbackMode(`reemplazos ${status === 'LOAD_ERROR' ? 'carga inicial' : 'realtime'}`, error);
+        },
+        (status) => {
+          if (status !== 'SUBSCRIBED') return;
+          replacementsSubscribed = true;
+          if (attendanceSubscribed && replacementsSubscribed) fallbackMode = false;
+          updateModeHint();
+        }
       );
       return;
     }
-    if (modeHint) modeHint.textContent = 'Modo de respaldo';
-    startRefreshTimer();
+    fallbackMode = true;
+    updateModeHint();
     refreshCurrentDaySnapshot({ silent: false })
       .catch((err) => {
         msg.textContent = `Error cargando registro diario: ${err?.message || err}`;
       });
   }
 
-  searchInput.addEventListener('input', () => { render(); });
-  noveltyFilter?.addEventListener('change', () => { render(); });
+  searchInput.addEventListener('input', () => { resetPagination(); render(); });
+  noveltyFilter?.addEventListener('change', () => { resetPagination(); render(); });
+  pageSizeSelect?.addEventListener('change', () => {
+    pageSize = Number(pageSizeSelect.value || 50) || 50;
+    resetPagination();
+    render();
+  });
+  btnToggleAll?.addEventListener('click', () => {
+    showAllRows = !showAllRows;
+    resetPagination();
+    render();
+  });
+  btnPrevPage?.addEventListener('click', () => {
+    if (currentPage <= 1) return;
+    currentPage -= 1;
+    render();
+  });
+  btnNextPage?.addEventListener('click', () => {
+    currentPage += 1;
+    render();
+  });
   statNoveltyTotal?.addEventListener('click', () => setCardFilter('novelty_total'));
   statNoveltyHandled?.addEventListener('click', () => setCardFilter('novelty_handled'));
   statNoveltyPending?.addEventListener('click', () => setCardFilter('novelty_pending'));
@@ -1000,7 +1112,17 @@ export const WhatsAppLive = (mount, deps = {}) => {
         sortKey = key;
         sortDir = key === 'hora' ? -1 : 1;
       }
+      resetPagination();
       render();
+    });
+  });
+  btnManualRefresh?.addEventListener('click', () => {
+    refreshCurrentDaySnapshot({ silent: false })
+      .then(() => {
+        if (fallbackMode) msg.textContent = 'Vista actualizada manualmente.';
+      })
+      .catch((err) => {
+        msg.textContent = `Error cargando registro diario: ${err?.message || err}`;
     });
   });
   btnManualClose?.addEventListener('click', async () => {
@@ -1082,7 +1204,6 @@ export const WhatsAppLive = (mount, deps = {}) => {
     unEmployees?.();
     unSedes?.();
     unIncapacitados?.();
-    stopRefreshTimer();
   };
 };
 
