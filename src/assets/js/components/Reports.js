@@ -13,10 +13,11 @@ export const Reports = (mount, deps = {}, options = {}) => {
     },
     company: {
       title: 'Reportes Empresa',
-      subtitle: 'Reportes internos para control de personal y trazabilidad operativa.',
+      subtitle: '',
       reports: [
         { id: 'employees_current', title: 'Empleados', subtitle: 'Vigentes con cedula, nombre, cargo, zona, dependencia y sede' },
-        { id: 'hiring_by_sede', title: 'Contratacion por Sedes', subtitle: 'Dependencia, zona, sede, planeados y contratados por sede' }
+        { id: 'hiring_by_sede', title: 'Contratacion por Sedes', subtitle: 'Dependencia, zona, sede, planeados y contratados por sede' },
+        { id: 'novelties_consolidated', title: 'Consolidado Novedades', subtitle: 'Periodo de tiempo con personas reportadas en novedades distintas de Trabajando y Compensatorio' }
       ]
     }
   };
@@ -44,13 +45,22 @@ export const Reports = (mount, deps = {}, options = {}) => {
   let generatedEmployeesRows = [];
   let generatedDailyRows = [];
   let generatedHiringRows = [];
+  let generatedNoveltyRows = [];
   let generatedAbsenteeismRows = [];
   let generatedPayrollRows = [];
   let generatedPayrollDays = [];
   let running = false;
   let selectedDailyDate = todayBogota();
   let selectedAbsenteeismDate = todayBogota();
+  let selectedNoveltyDateFrom = `${todayBogota().slice(0, 7)}-01`;
+  let selectedNoveltyDateTo = todayBogota();
   let selectedPayrollMonth = todayBogota().slice(0, 7);
+  let employeesSortKey = 'nombre';
+  let employeesSortDir = 1;
+  let hiringSortKey = 'dependencia';
+  let hiringSortDir = 1;
+  let noveltiesSortKey = 'fecha';
+  let noveltiesSortDir = -1;
 
   function setMessage(text) {
     qs('#msg', ui).textContent = text || ' ';
@@ -258,6 +268,71 @@ export const Reports = (mount, deps = {}, options = {}) => {
       });
   }
 
+  function noveltyReplacementKeys(row = {}) {
+    const fecha = String(row?.fecha || '').trim();
+    const employeeId = String(row?.employeeId || row?.empleadoId || '').trim();
+    const documento = String(row?.documento || '').trim();
+    const keys = [];
+    if (fecha && employeeId) keys.push(`${fecha}|id|${employeeId}`);
+    if (fecha && documento) keys.push(`${fecha}|doc|${documento}`);
+    return keys;
+  }
+
+  function buildNoveltyReplacementMap(rows = []) {
+    const map = new Map();
+    (rows || []).forEach((row) => {
+      noveltyReplacementKeys(row).forEach((key) => {
+        if (!key) return;
+        map.set(key, row);
+      });
+    });
+    return map;
+  }
+
+  function noveltyCoverageDetail(row = {}, replacementMap = new Map()) {
+    const replacement = noveltyReplacementKeys(row).map((key) => replacementMap.get(key)).find(Boolean) || null;
+    const decision = String(replacement?.decision || '').trim().toLowerCase();
+    if (decision === 'reemplazo') {
+      const name = String(replacement?.supernumerarioNombre || '').trim();
+      const doc = String(replacement?.supernumerarioDocumento || '').trim();
+      if (name && doc) return `${name} (${doc})`;
+      if (name) return name;
+      if (doc) return doc;
+      return 'Reemplazo confirmado';
+    }
+    if (decision === 'ausentismo') return 'Ausentismo confirmado';
+    if (String(row?.decisionCobertura || '').trim().toLowerCase() === 'reemplazo') return 'Reemplazo pendiente';
+    if (String(row?.decisionCobertura || '').trim().toLowerCase() === 'ausentismo' || row?.cuentaPagoServicio === false) return 'Ausentismo pendiente';
+    return 'No aplica';
+  }
+
+  function normalizeNoveltyConsolidatedRows(statusRows = [], replacementRows = []) {
+    const replacementMap = buildNoveltyReplacementMap(replacementRows);
+    return (statusRows || [])
+      .filter((row) => {
+        const code = String(row?.novedadCodigo || '').trim();
+        const label = normalizeText(displayNovedadLabel(row));
+        if (code === '1' || code === '7') return false;
+        if (!code && (label === 'trabajando' || label === 'compensatorio' || label === '-')) return false;
+        return Boolean(code || label);
+      })
+      .map((row) => ({
+        fecha: String(row?.fecha || '').trim() || '-',
+        cedula: String(row?.documento || '').trim() || '-',
+        nombre: String(row?.nombre || '').trim() || '-',
+        sede: String(row?.sedeNombreSnapshot || row?.sedeCodigo || '-').trim() || '-',
+        novedad: displayNovedadLabel(row),
+        cobertura: noveltyCoverageDetail(row, replacementMap)
+      }))
+      .sort((a, b) => {
+        const byDate = String(a.fecha || '').localeCompare(String(b.fecha || ''));
+        if (byDate !== 0) return byDate;
+        const byName = String(a.nombre || '').localeCompare(String(b.nombre || ''));
+        if (byName !== 0) return byName;
+        return String(a.cedula || '').localeCompare(String(b.cedula || ''));
+      });
+  }
+
   function normalizeHiringRows(sedeRows = [], employeeRows = []) {
     const contractedBySede = new Map();
 
@@ -272,12 +347,15 @@ export const Reports = (mount, deps = {}, options = {}) => {
       .map((sede) => {
         const sedeCode = String(sede.codigo || '').trim();
         const planned = Number(sede.numeroOperarios ?? 0);
+        const empleadosPlaneados = Number.isFinite(planned) && planned > 0 ? planned : 0;
+        const empleadosContratados = Number(contractedBySede.get(sedeCode) || 0);
         return {
           dependencia: String(sede.dependenciaNombre || sede.dependenciaCodigo || '-').trim() || '-',
           zona: String(sede.zonaNombre || sede.zonaCodigo || '-').trim() || '-',
           sede: String(sede.nombre || sede.codigo || '-').trim() || '-',
-          empleadosPlaneados: Number.isFinite(planned) && planned > 0 ? planned : 0,
-          empleadosContratados: Number(contractedBySede.get(sedeCode) || 0)
+          empleadosPlaneados,
+          empleadosContratados,
+          diferencia: empleadosPlaneados - empleadosContratados
         };
       })
       .sort((a, b) => {
@@ -564,22 +642,145 @@ export const Reports = (mount, deps = {}, options = {}) => {
     return rows.map((r) => el('tr', {}, [el('td', {}, [r.cedula]), el('td', {}, [r.nombre]), el('td', {}, [r.cargo]), el('td', {}, [r.tipo]), el('td', {}, [r.zona]), el('td', {}, [r.dependencia]), el('td', {}, [r.sede])]));
   }
 
+  function getFilteredEmployeesRows() {
+    const search = normalizeText(qs('#employeesSearch', ui)?.value || '');
+    const dependency = String(qs('#employeesDependencyFilter', ui)?.value || '').trim();
+    const sede = String(qs('#employeesSedeFilter', ui)?.value || '').trim();
+    return (generatedEmployeesRows || []).filter((row) => {
+      if (dependency && row.dependencia !== dependency) return false;
+      if (sede && row.sede !== sede) return false;
+      if (!search) return true;
+      return normalizeText(`${row.cedula || ''} ${row.nombre || ''} ${row.cargo || ''} ${row.tipo || ''} ${row.zona || ''} ${row.dependencia || ''} ${row.sede || ''}`).includes(search);
+    });
+  }
+
+  function renderEmployeesTable() {
+    const tbody = qs('#employeesTbody', ui);
+    if (!tbody) return;
+    const filteredRows = getFilteredEmployeesRows();
+    const rows = sortRows(filteredRows, employeesSortKey, employeesSortDir);
+    if (!rows.length) {
+      tbody.replaceChildren(el('tr', {}, [el('td', { colSpan: 7, className: 'text-muted' }, ['Sin empleados para los filtros actuales.'])]));
+    } else {
+      tbody.replaceChildren(...renderEmployeesRows(rows));
+    }
+    const totalsNode = qs('#employeesFilteredTotal', ui);
+    if (totalsNode) totalsNode.textContent = `Registros filtrados: ${rows.length}`;
+    updateSortIndicators(ui, '#employeesTable th[data-sort-employees]', 'data-sort-employees', employeesSortKey, employeesSortDir);
+  }
+
+  function syncEmployeesDependencyOptions(rows = []) {
+    const select = qs('#employeesDependencyFilter', ui);
+    if (!select) return;
+    const previous = String(select.value || '').trim();
+    const options = Array.from(new Set((rows || []).map((row) => String(row?.dependencia || '').trim()).filter(Boolean))).sort((a, b) => a.localeCompare(b));
+    select.replaceChildren(
+      el('option', { value: '' }, ['Todas']),
+      ...options.map((value) => el('option', { value, selected: value === previous }, [value]))
+    );
+    select.value = options.includes(previous) ? previous : '';
+  }
+
+  function syncEmployeesSedeOptions(rows = []) {
+    const select = qs('#employeesSedeFilter', ui);
+    if (!select) return;
+    const previous = String(select.value || '').trim();
+    const options = Array.from(new Set((rows || []).map((row) => String(row?.sede || '').trim()).filter(Boolean))).sort((a, b) => a.localeCompare(b));
+    select.replaceChildren(
+      el('option', { value: '' }, ['Todas']),
+      ...options.map((value) => el('option', { value, selected: value === previous }, [value]))
+    );
+    select.value = options.includes(previous) ? previous : '';
+  }
+
   function renderDailyRows(rows = []) {
     if (!rows.length) return [el('tr', {}, [el('td', { colSpan: 7, className: 'text-muted' }, ['Sin registros para la fecha seleccionada.'])])];
     return rows.map((r) => el('tr', {}, [el('td', {}, [r.fecha]), el('td', {}, [r.hora]), el('td', {}, [r.cedula]), el('td', {}, [r.nombre]), el('td', {}, [r.sede]), el('td', {}, [r.novedad]), el('td', {}, [r.estado])]));
   }
 
+  function renderNoveltyRows(rows = []) {
+    if (!rows.length) return [el('tr', {}, [el('td', { colSpan: 6, className: 'text-muted' }, ['Sin novedades para el periodo seleccionado.'])])];
+    return rows.map((r) => el('tr', {}, [
+      el('td', {}, [r.fecha]),
+      el('td', {}, [r.cedula]),
+      el('td', {}, [r.nombre]),
+      el('td', {}, [r.sede]),
+      el('td', {}, [r.novedad]),
+      el('td', {}, [r.cobertura])
+    ]));
+  }
+
+  function renderNoveltiesTable() {
+    const tbody = qs('#noveltiesTbody', ui);
+    if (!tbody) return;
+    const rows = sortRows(generatedNoveltyRows, noveltiesSortKey, noveltiesSortDir);
+    tbody.replaceChildren(...renderNoveltyRows(rows));
+    updateSortIndicators(ui, '#noveltiesTable th[data-sort-novelties]', 'data-sort-novelties', noveltiesSortKey, noveltiesSortDir);
+  }
+
   function renderHiringRows(rows = []) {
-    if (!rows.length) return [el('tr', {}, [el('td', { colSpan: 5, className: 'text-muted' }, ['Sin sedes activas para mostrar.'])])];
+    if (!rows.length) return [el('tr', {}, [el('td', { colSpan: 6, className: 'text-muted' }, ['Sin sedes activas para mostrar.'])])];
     return rows.map((r) =>
       el('tr', {}, [
         el('td', {}, [r.dependencia]),
         el('td', {}, [r.zona]),
         el('td', {}, [r.sede]),
         el('td', {}, [String(r.empleadosPlaneados)]),
-        el('td', {}, [String(r.empleadosContratados)])
+        el('td', {}, [String(r.empleadosContratados)]),
+        el('td', {}, [String(r.diferencia)])
       ])
     );
+  }
+
+  function getFilteredHiringRows() {
+    const search = normalizeText(qs('#hiringSearch', ui)?.value || '');
+    const dependency = String(qs('#hiringDependencyFilter', ui)?.value || '').trim();
+    const sede = String(qs('#hiringSedeFilter', ui)?.value || '').trim();
+    return (generatedHiringRows || []).filter((row) => {
+      if (dependency && row.dependencia !== dependency) return false;
+      if (sede && row.sede !== sede) return false;
+      if (!search) return true;
+      return normalizeText(`${row.dependencia || ''} ${row.zona || ''} ${row.sede || ''}`).includes(search);
+    });
+  }
+
+  function renderHiringTable() {
+    const tbody = qs('#hiringTbody', ui);
+    if (!tbody) return;
+    const filteredRows = getFilteredHiringRows();
+    const rows = sortRows(filteredRows, hiringSortKey, hiringSortDir);
+    if (!rows.length) {
+      tbody.replaceChildren(el('tr', {}, [el('td', { colSpan: 6, className: 'text-muted' }, ['Sin sedes para los filtros actuales.'])]));
+    } else {
+      tbody.replaceChildren(...renderHiringRows(rows));
+    }
+    const totalsNode = qs('#hiringFilteredTotal', ui);
+    if (totalsNode) totalsNode.textContent = `Sedes filtradas: ${rows.length}`;
+    updateSortIndicators(ui, '#hiringTable th[data-sort-hiring]', 'data-sort-hiring', hiringSortKey, hiringSortDir);
+  }
+
+  function syncHiringDependencyOptions(rows = []) {
+    const select = qs('#hiringDependencyFilter', ui);
+    if (!select) return;
+    const previous = String(select.value || '').trim();
+    const options = Array.from(new Set((rows || []).map((row) => String(row?.dependencia || '').trim()).filter(Boolean))).sort((a, b) => a.localeCompare(b));
+    select.replaceChildren(
+      el('option', { value: '' }, ['Todas']),
+      ...options.map((value) => el('option', { value, selected: value === previous }, [value]))
+    );
+    select.value = options.includes(previous) ? previous : '';
+  }
+
+  function syncHiringSedeOptions(rows = []) {
+    const select = qs('#hiringSedeFilter', ui);
+    if (!select) return;
+    const previous = String(select.value || '').trim();
+    const options = Array.from(new Set((rows || []).map((row) => String(row?.sede || '').trim()).filter(Boolean))).sort((a, b) => a.localeCompare(b));
+    select.replaceChildren(
+      el('option', { value: '' }, ['Todas']),
+      ...options.map((value) => el('option', { value, selected: value === previous }, [value]))
+    );
+    select.value = options.includes(previous) ? previous : '';
   }
 
   function renderAbsenteeismRows(rows = []) {
@@ -630,10 +831,11 @@ export const Reports = (mount, deps = {}, options = {}) => {
       }, { empleados: 0, supernumerarios: 0, supervisores: 0 });
       const totalNode = qs('#employeesTotal', ui);
       if (totalNode) totalNode.textContent = `Total registros vigentes: ${generatedEmployeesRows.length} | Empleados: ${totals.empleados} | Supernumerarios: ${totals.supernumerarios} | Supervisores: ${totals.supervisores}`;
-      const tbody = qs('#employeesTbody', ui);
-      if (tbody) tbody.replaceChildren(...renderEmployeesRows(generatedEmployeesRows));
+      syncEmployeesDependencyOptions(generatedEmployeesRows);
+      syncEmployeesSedeOptions(generatedEmployeesRows);
+      renderEmployeesTable();
       if (btnExport) btnExport.disabled = generatedEmployeesRows.length === 0;
-      setMessage(`Reporte generado. Registros: ${generatedEmployeesRows.length}`);
+      setMessage(' ');
     } catch (e) {
       setMessage(`Error al generar reporte: ${e?.message || e}`);
     } finally {
@@ -704,16 +906,62 @@ export const Reports = (mount, deps = {}, options = {}) => {
       const totals = generatedHiringRows.reduce((acc, row) => {
         acc.planeados += Number(row.empleadosPlaneados || 0);
         acc.contratados += Number(row.empleadosContratados || 0);
+        acc.diferencia += Number(row.diferencia || 0);
         return acc;
-      }, { planeados: 0, contratados: 0 });
+      }, { planeados: 0, contratados: 0, diferencia: 0 });
       const totalNode = qs('#hiringTotal', ui);
-      if (totalNode) totalNode.textContent = `Sedes: ${generatedHiringRows.length} | Planeados: ${totals.planeados} | Contratados: ${totals.contratados}`;
-      const tbody = qs('#hiringTbody', ui);
-      if (tbody) tbody.replaceChildren(...renderHiringRows(generatedHiringRows));
+      if (totalNode) totalNode.textContent = `Sedes: ${generatedHiringRows.length} | Planeados: ${totals.planeados} | Contratados: ${totals.contratados} | Diferencia: ${totals.diferencia}`;
+      syncHiringDependencyOptions(generatedHiringRows);
+      syncHiringSedeOptions(generatedHiringRows);
+      renderHiringTable();
       if (btnExport) btnExport.disabled = generatedHiringRows.length === 0;
-      setMessage(`Reporte generado. Sedes: ${generatedHiringRows.length}`);
+      setMessage(' ');
     } catch (e) {
       setMessage(`Error al generar reporte de contratacion: ${e?.message || e}`);
+    } finally {
+      running = false;
+      if (btnGenerate) {
+        btnGenerate.disabled = false;
+        btnGenerate.textContent = 'Generar reporte';
+      }
+    }
+  }
+
+  async function generateNoveltyReport() {
+    if (running) return;
+    const dateFrom = String(qs('#noveltiesDateFrom', ui)?.value || '').trim();
+    const dateTo = String(qs('#noveltiesDateTo', ui)?.value || '').trim();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(dateFrom) || !/^\d{4}-\d{2}-\d{2}$/.test(dateTo)) {
+      setMessage('Selecciona un rango valido para generar el consolidado de novedades.');
+      return;
+    }
+    if (dateFrom > dateTo) {
+      setMessage('La fecha inicial no puede ser mayor que la fecha final.');
+      return;
+    }
+    running = true;
+    selectedNoveltyDateFrom = dateFrom;
+    selectedNoveltyDateTo = dateTo;
+    const btnGenerate = qs('#btnGenerateNovelties', ui);
+    const btnExport = qs('#btnExportNovelties', ui);
+    try {
+      if (btnGenerate) {
+        btnGenerate.disabled = true;
+        btnGenerate.textContent = 'Generando...';
+      }
+      const [statusRows, replacementRows] = await Promise.all([
+        deps.listEmployeeDailyStatusRange?.(dateFrom, dateTo) || [],
+        deps.listImportReplacementsRange?.(dateFrom, dateTo) || []
+      ]);
+      generatedNoveltyRows = normalizeNoveltyConsolidatedRows(statusRows, replacementRows);
+      const peopleCount = new Set(generatedNoveltyRows.map((row) => `${row.cedula}|${row.nombre}`)).size;
+      const totalNode = qs('#noveltiesTotal', ui);
+      if (totalNode) totalNode.textContent = `Periodo: ${dateFrom} a ${dateTo} | Registros: ${generatedNoveltyRows.length} | Personas: ${peopleCount}`;
+      renderNoveltiesTable();
+      if (btnExport) btnExport.disabled = generatedNoveltyRows.length === 0;
+      setMessage(' ');
+    } catch (e) {
+      setMessage(`Error al generar consolidado de novedades: ${e?.message || e}`);
     } finally {
       running = false;
       if (btnGenerate) {
@@ -906,10 +1154,11 @@ export const Reports = (mount, deps = {}, options = {}) => {
           Zona: r.zona,
           'Nombre Sede': r.sede,
           'Empleados Planeados': r.empleadosPlaneados,
-          'Empleados Contratados': r.empleadosContratados
+          'Empleados Contratados': r.empleadosContratados,
+          Diferencia: r.diferencia
         }))
       );
-      ws['!cols'] = [{ wch: 28 }, { wch: 24 }, { wch: 32 }, { wch: 20 }, { wch: 22 }];
+      ws['!cols'] = [{ wch: 28 }, { wch: 24 }, { wch: 32 }, { wch: 20 }, { wch: 22 }, { wch: 14 }];
       const wb = mod.utils.book_new();
       mod.utils.book_append_sheet(wb, ws, 'Contratacion por sedes');
       const date = new Date().toISOString().slice(0, 10);
@@ -921,6 +1170,41 @@ export const Reports = (mount, deps = {}, options = {}) => {
       const btn = qs('#btnExportHiring', ui);
       if (btn) {
         btn.disabled = generatedHiringRows.length === 0;
+        btn.textContent = 'Generar Excel';
+      }
+    }
+  }
+
+  async function exportNoveltyExcel() {
+    try {
+      if (!generatedNoveltyRows.length) throw new Error('Primero genera el reporte.');
+      const btn = qs('#btnExportNovelties', ui);
+      if (btn) {
+        btn.disabled = true;
+        btn.textContent = 'Generando...';
+      }
+      const mod = await import('https://cdn.jsdelivr.net/npm/xlsx@0.18.5/+esm');
+      const ws = mod.utils.json_to_sheet(
+        generatedNoveltyRows.map((r) => ({
+          Fecha: r.fecha,
+          Cedula: r.cedula,
+          Nombre: r.nombre,
+          Sede: r.sede,
+          Novedad: r.novedad,
+          'Reemplazo/Ausentismo': r.cobertura
+        }))
+      );
+      ws['!cols'] = [{ wch: 12 }, { wch: 18 }, { wch: 30 }, { wch: 30 }, { wch: 28 }, { wch: 24 }];
+      const wb = mod.utils.book_new();
+      mod.utils.book_append_sheet(wb, ws, 'Consolidado Novedades');
+      mod.writeFile(wb, `reporte_consolidado_novedades_${selectedNoveltyDateFrom}_a_${selectedNoveltyDateTo}.xlsx`);
+      setMessage(`Excel generado correctamente. Registros: ${generatedNoveltyRows.length}`);
+    } catch (e) {
+      setMessage(`Error al generar Excel: ${e?.message || e}`);
+    } finally {
+      const btn = qs('#btnExportNovelties', ui);
+      if (btn) {
+        btn.disabled = generatedNoveltyRows.length === 0;
         btn.textContent = 'Generar Excel';
       }
     }
@@ -1005,17 +1289,56 @@ export const Reports = (mount, deps = {}, options = {}) => {
         el('button', { id: 'btnGenerateEmployees', className: 'btn right', type: 'button' }, ['Generar reporte']),
         el('button', { id: 'btnExportEmployees', className: 'btn btn--primary', type: 'button', disabled: true }, ['Generar Excel'])
       ]),
-      el('p', { id: 'employeesTotal', className: 'text-muted mt-2' }, ['Genera el reporte para ver resultados.']),
+      el('div', { className: 'form-row mt-2' }, [
+        el('div', {}, [
+          el('label', { className: 'label' }, ['Buscar']),
+          el('input', { id: 'employeesSearch', className: 'input', placeholder: 'Cedula, nombre, cargo, dependencia o sede...' })
+        ]),
+        el('div', {}, [
+          el('label', { className: 'label' }, ['Dependencia']),
+          el('select', { id: 'employeesDependencyFilter', className: 'input' }, [el('option', { value: '' }, ['Todas'])])
+        ]),
+        el('div', {}, [
+          el('label', { className: 'label' }, ['Sede']),
+          el('select', { id: 'employeesSedeFilter', className: 'input' }, [el('option', { value: '' }, ['Todas'])])
+        ])
+      ]),
       el('div', { className: 'table-wrap mt-2' }, [
-        el('table', { className: 'table' }, [
-          el('thead', {}, [el('tr', {}, [el('th', {}, ['Cedula']), el('th', {}, ['Nombre']), el('th', {}, ['Cargo']), el('th', {}, ['Tipo']), el('th', {}, ['Zona']), el('th', {}, ['Dependencia']), el('th', {}, ['Sede'])])]),
+        el('table', { className: 'table', id: 'employeesTable' }, [
+          el('thead', {}, [el('tr', {}, [
+            el('th', { 'data-sort-employees': 'cedula', style: 'cursor:pointer' }, ['Cedula']),
+            el('th', { 'data-sort-employees': 'nombre', style: 'cursor:pointer' }, ['Nombre']),
+            el('th', { 'data-sort-employees': 'cargo', style: 'cursor:pointer' }, ['Cargo']),
+            el('th', { 'data-sort-employees': 'tipo', style: 'cursor:pointer' }, ['Tipo']),
+            el('th', { 'data-sort-employees': 'zona', style: 'cursor:pointer' }, ['Zona']),
+            el('th', { 'data-sort-employees': 'dependencia', style: 'cursor:pointer' }, ['Dependencia']),
+            el('th', { 'data-sort-employees': 'sede', style: 'cursor:pointer' }, ['Sede'])
+          ])]),
           el('tbody', { id: 'employeesTbody' }, [el('tr', {}, [el('td', { colSpan: 7, className: 'text-muted' }, ['Sin generar.'])])])
         ])
-      ])
+      ]),
+      el('p', { id: 'employeesTotal', className: 'text-muted mt-2' }, ['Genera el reporte para ver resultados.']),
+      el('p', { id: 'employeesFilteredTotal', className: 'text-muted' }, ['Registros filtrados: 0'])
     ]);
     qs('#reportContent', ui).replaceChildren(content);
     qs('#btnGenerateEmployees', ui)?.addEventListener('click', generateEmployeesReport);
     qs('#btnExportEmployees', ui)?.addEventListener('click', exportEmployeesExcel);
+    qs('#employeesSearch', ui)?.addEventListener('input', renderEmployeesTable);
+    qs('#employeesDependencyFilter', ui)?.addEventListener('change', renderEmployeesTable);
+    qs('#employeesSedeFilter', ui)?.addEventListener('change', renderEmployeesTable);
+    ui.querySelectorAll('#employeesTable th[data-sort-employees]').forEach((th) => {
+      th.addEventListener('click', () => {
+        const key = String(th.getAttribute('data-sort-employees') || '').trim();
+        if (!key) return;
+        if (employeesSortKey === key) employeesSortDir *= -1;
+        else {
+          employeesSortKey = key;
+          employeesSortDir = 1;
+        }
+        renderEmployeesTable();
+      });
+    });
+    updateSortIndicators(ui, '#employeesTable th[data-sort-employees]', 'data-sort-employees', employeesSortKey, employeesSortDir);
   }
 
   function renderDailyPanel() {
@@ -1043,20 +1366,80 @@ export const Reports = (mount, deps = {}, options = {}) => {
     const content = el('section', {}, [
       el('div', { className: 'form-row' }, [
         el('div', {}, [el('h3', { style: 'margin:0;' }, ['Reporte: Contratacion por Sedes'])]),
-        el('button', { id: 'btnGenerateHiring', className: 'btn', type: 'button' }, ['Generar reporte']),
+        el('button', { id: 'btnGenerateHiring', className: 'btn right', type: 'button' }, ['Generar reporte']),
         el('button', { id: 'btnExportHiring', className: 'btn btn--primary', type: 'button', disabled: true }, ['Generar Excel'])
       ]),
-      el('p', { id: 'hiringTotal', className: 'text-muted mt-2' }, ['Genera el reporte para ver resultados.']),
-      el('div', { className: 'table-wrap mt-2' }, [
-        el('table', { className: 'table' }, [
-          el('thead', {}, [el('tr', {}, [el('th', {}, ['Dependencia']), el('th', {}, ['Zona']), el('th', {}, ['Nombre Sede']), el('th', {}, ['Empleados Planeados']), el('th', {}, ['Empleados Contratados'])])]),
-          el('tbody', { id: 'hiringTbody' }, [el('tr', {}, [el('td', { colSpan: 5, className: 'text-muted' }, ['Sin generar.'])])])
+      el('div', { className: 'form-row mt-2' }, [
+        el('div', {}, [
+          el('label', { className: 'label' }, ['Buscar']),
+          el('input', { id: 'hiringSearch', className: 'input', placeholder: 'Dependencia, zona o sede...' })
+        ]),
+        el('div', {}, [
+          el('label', { className: 'label' }, ['Dependencia']),
+          el('select', { id: 'hiringDependencyFilter', className: 'input' }, [el('option', { value: '' }, ['Todas'])])
+        ]),
+        el('div', {}, [
+          el('label', { className: 'label' }, ['Sede']),
+          el('select', { id: 'hiringSedeFilter', className: 'input' }, [el('option', { value: '' }, ['Todas'])])
         ])
-      ])
+      ]),
+      el('div', { className: 'table-wrap mt-2' }, [
+        el('table', { className: 'table', id: 'hiringTable' }, [
+          el('thead', {}, [el('tr', {}, [
+            el('th', { 'data-sort-hiring': 'dependencia', style: 'cursor:pointer' }, ['Dependencia']),
+            el('th', { 'data-sort-hiring': 'zona', style: 'cursor:pointer' }, ['Zona']),
+            el('th', { 'data-sort-hiring': 'sede', style: 'cursor:pointer' }, ['Nombre Sede']),
+            el('th', { 'data-sort-hiring': 'empleadosPlaneados', style: 'cursor:pointer' }, ['Empleados Planeados']),
+            el('th', { 'data-sort-hiring': 'empleadosContratados', style: 'cursor:pointer' }, ['Empleados Contratados']),
+            el('th', { 'data-sort-hiring': 'diferencia', style: 'cursor:pointer' }, ['Diferencia'])
+          ])]),
+          el('tbody', { id: 'hiringTbody' }, [el('tr', {}, [el('td', { colSpan: 6, className: 'text-muted' }, ['Sin generar.'])])])
+        ])
+      ]),
+      el('p', { id: 'hiringTotal', className: 'text-muted mt-2' }, ['Genera el reporte para ver resultados.']),
+      el('p', { id: 'hiringFilteredTotal', className: 'text-muted' }, ['Sedes filtradas: 0'])
     ]);
     qs('#reportContent', ui).replaceChildren(content);
     qs('#btnGenerateHiring', ui)?.addEventListener('click', generateHiringReport);
     qs('#btnExportHiring', ui)?.addEventListener('click', exportHiringExcel);
+    qs('#hiringSearch', ui)?.addEventListener('input', renderHiringTable);
+    qs('#hiringDependencyFilter', ui)?.addEventListener('change', renderHiringTable);
+    qs('#hiringSedeFilter', ui)?.addEventListener('change', renderHiringTable);
+    ui.querySelectorAll('#hiringTable th[data-sort-hiring]').forEach((th) => {
+      th.addEventListener('click', () => {
+        const key = String(th.getAttribute('data-sort-hiring') || '').trim();
+        if (!key) return;
+        if (hiringSortKey === key) hiringSortDir *= -1;
+        else {
+          hiringSortKey = key;
+          hiringSortDir = 1;
+        }
+        renderHiringTable();
+      });
+    });
+    updateSortIndicators(ui, '#hiringTable th[data-sort-hiring]', 'data-sort-hiring', hiringSortKey, hiringSortDir);
+  }
+
+  function sortRows(rows = [], key = '', dir = 1) {
+    return [...(rows || [])].sort((a, b) => {
+      const av = sortableValue(a?.[key]);
+      const bv = sortableValue(b?.[key]);
+      if (av === bv) return 0;
+      return av > bv ? dir : -dir;
+    });
+  }
+
+  function sortableValue(value) {
+    if (typeof value === 'number') return value;
+    return String(value ?? '').toLowerCase();
+  }
+
+  function updateSortIndicators(scope, selector, attr, key, dir) {
+    scope.querySelectorAll(selector).forEach((th) => {
+      const base = th.dataset.baseLabel || String(th.textContent || '').replace(/\s[\^v\u25B2\u25BC]$/, '');
+      th.dataset.baseLabel = base;
+      th.textContent = String(th.getAttribute(attr) || '').trim() === key ? `${base} ${dir === 1 ? '\u25B2' : '\u25BC'}` : base;
+    });
   }
 
   function renderAbsenteeismPanel() {
@@ -1106,11 +1489,54 @@ export const Reports = (mount, deps = {}, options = {}) => {
     qs('#btnExportPayroll', ui)?.addEventListener('click', exportPayrollExcel);
   }
 
+  function renderNoveltiesPanel() {
+    const content = el('section', {}, [
+      el('div', { className: 'form-row' }, [
+        el('div', {}, [el('h3', { style: 'margin:0;' }, ['Reporte: Consolidado Novedades'])]),
+        el('div', {}, [el('label', { className: 'label' }, ['Desde']), el('input', { id: 'noveltiesDateFrom', className: 'input', type: 'date', value: selectedNoveltyDateFrom, max: todayBogota(), style: 'max-width:180px' })]),
+        el('div', {}, [el('label', { className: 'label' }, ['Hasta']), el('input', { id: 'noveltiesDateTo', className: 'input', type: 'date', value: selectedNoveltyDateTo, max: todayBogota(), style: 'max-width:180px' })]),
+        el('button', { id: 'btnGenerateNovelties', className: 'btn', type: 'button' }, ['Generar reporte']),
+        el('button', { id: 'btnExportNovelties', className: 'btn btn--primary', type: 'button', disabled: true }, ['Generar Excel'])
+      ]),
+      el('div', { className: 'table-wrap mt-2' }, [
+        el('table', { className: 'table', id: 'noveltiesTable' }, [
+          el('thead', {}, [el('tr', {}, [
+            el('th', { 'data-sort-novelties': 'fecha', style: 'cursor:pointer' }, ['Fecha']),
+            el('th', { 'data-sort-novelties': 'cedula', style: 'cursor:pointer' }, ['Cedula']),
+            el('th', { 'data-sort-novelties': 'nombre', style: 'cursor:pointer' }, ['Nombre']),
+            el('th', { 'data-sort-novelties': 'sede', style: 'cursor:pointer' }, ['Sede']),
+            el('th', { 'data-sort-novelties': 'novedad', style: 'cursor:pointer' }, ['Novedad']),
+            el('th', { 'data-sort-novelties': 'cobertura', style: 'cursor:pointer' }, ['Reemplazo/Ausentismo'])
+          ])]),
+          el('tbody', { id: 'noveltiesTbody' }, [el('tr', {}, [el('td', { colSpan: 6, className: 'text-muted' }, ['Sin generar.'])])])
+        ])
+      ]),
+      el('p', { id: 'noveltiesTotal', className: 'text-muted mt-2' }, ['Selecciona el periodo y genera el reporte.'])
+    ]);
+    qs('#reportContent', ui).replaceChildren(content);
+    qs('#btnGenerateNovelties', ui)?.addEventListener('click', generateNoveltyReport);
+    qs('#btnExportNovelties', ui)?.addEventListener('click', exportNoveltyExcel);
+    ui.querySelectorAll('#noveltiesTable th[data-sort-novelties]').forEach((th) => {
+      th.addEventListener('click', () => {
+        const key = String(th.getAttribute('data-sort-novelties') || '').trim();
+        if (!key) return;
+        if (noveltiesSortKey === key) noveltiesSortDir *= -1;
+        else {
+          noveltiesSortKey = key;
+          noveltiesSortDir = key === 'fecha' ? -1 : 1;
+        }
+        renderNoveltiesTable();
+      });
+    });
+    updateSortIndicators(ui, '#noveltiesTable th[data-sort-novelties]', 'data-sort-novelties', noveltiesSortKey, noveltiesSortDir);
+  }
+
   function openReport(reportId) {
     selectedReportId = String(reportId || '');
     generatedEmployeesRows = [];
     generatedDailyRows = [];
     generatedHiringRows = [];
+    generatedNoveltyRows = [];
     generatedAbsenteeismRows = [];
     generatedPayrollRows = [];
     generatedPayrollDays = [];
@@ -1127,6 +1553,11 @@ export const Reports = (mount, deps = {}, options = {}) => {
     }
     if (selectedReportId === 'hiring_by_sede') {
       renderHiringPanel();
+      setMessage(' ');
+      return;
+    }
+    if (selectedReportId === 'novelties_consolidated') {
+      renderNoveltiesPanel();
       setMessage(' ');
       return;
     }
