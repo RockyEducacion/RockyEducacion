@@ -2,6 +2,7 @@
 import crypto from 'node:crypto';
 import express from 'express';
 import { config } from './config.js';
+import { registerEmployeePortalRoutes } from './employee-portal.js';
 import { supabaseAdmin } from './supabase.js';
 
 const app = express();
@@ -59,6 +60,8 @@ const NO_REGISTERED_MESSAGE = 'No estás registrado en nuestra base de datos, po
 app.get('/health', (_req, res) => {
   res.json({ ok: true });
 });
+
+registerEmployeePortalRoutes(app);
 
 app.get(['/cron/close-daily-operation', '/api/cron/close-daily-operation'], async (req, res) => {
   try {

@@ -83,6 +83,10 @@
 .row-actions .btn{padding:.34rem .5rem;font-size:.82rem;line-height:1}
 .row-actions .btn--icon{padding:0}
 .form-row{display:flex;flex-wrap:wrap;gap:.5rem;align-items:end}
+.employee-panel{display:grid;gap:1rem}
+.employee-stat{padding:.85rem .95rem;border:1px solid var(--color-border);border-radius:12px;background:color-mix(in srgb,var(--color-primary) 6%, var(--color-surface))}
+.employee-stat__label{margin:0 0 .25rem 0;font-size:.78rem;text-transform:uppercase;letter-spacing:.04em;color:var(--color-muted)}
+.employee-stat__value{margin:0;font-size:1rem;color:var(--color-fg)}
 .divider{height:1px;background:var(--color-border);margin:.75rem 0}
 .link{color:var(--color-primary);cursor:pointer}
 .right{margin-left:auto}

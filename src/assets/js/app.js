@@ -87,7 +87,10 @@ const guardWrite=(perm,fn)=> async (...args)=>{
 
       fb.authState(async (user)=>{
         const syncToken = ++authSyncToken;
-        if(unsubRoleMatrix){unsubRoleMatrix();unsubRoleMatrix=null;} if(unsubUserOverrides){unsubUserOverrides();unsubUserOverrides=null;}
+        const prevUid = String(getState().user?.uid || '').trim();
+        const nextUid = String(user?.uid || '').trim();
+        const sameUser = Boolean(prevUid && nextUid && prevUid === nextUid);
+        if(!sameUser){ if(unsubRoleMatrix){unsubRoleMatrix();unsubRoleMatrix=null;} if(unsubUserOverrides){unsubUserOverrides();unsubUserOverrides=null;} }        
         if(!user){ setState({ user:null, userProfile:null, userOverrides:{} }); headerMount.replaceChildren(Header(deps)); sidebarMount.replaceChildren(Sidebar()); if(location.hash!=="#/login") navigate('/login'); else refreshRoute(); return; }
         await fb.ensureUserProfile(user); const profile=await fb.loadUserProfile(user.uid);
         if(syncToken!==authSyncToken) return;
@@ -98,11 +101,11 @@ const guardWrite=(perm,fn)=> async (...args)=>{
           return;
         }
         setState({ user, userProfile: profile });
-        unsubRoleMatrix=fb.streamRoleMatrix((map)=> setState({ roleMatrix: map }));
-        unsubUserOverrides=fb.streamUserOverrides(user.uid,(ov)=> setState({ userOverrides: ov||{} }));
+        if(!sameUser || !unsubRoleMatrix) unsubRoleMatrix=fb.streamRoleMatrix((map)=> setState({ roleMatrix: map }));
+        if(!sameUser || !unsubUserOverrides) unsubUserOverrides=fb.streamUserOverrides(user.uid,(ov)=> setState({ userOverrides: ov||{} }));
         headerMount.replaceChildren(Header(deps)); sidebarMount.replaceChildren(Sidebar());
         if(location.hash==='' || location.hash==="#/login") navigate('/');
-        else refreshRoute();
+        else if(!sameUser) refreshRoute();
       });
     })
     .catch((err) => {

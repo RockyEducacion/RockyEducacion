@@ -1,16 +1,96 @@
 <!DOCTYPE html>
-<html lang="es">
+<html lang="es" data-theme="light">
 <head>
   <meta charset="UTF-8" />
+  <title>Accesos Rocky | RockyEDU</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Redirigiendo a RockyEDU</title>
-  <meta http-equiv="refresh" content="0; url=app.html#/login" />
-  <link rel="canonical" href="app.html#/login" />
-  <script>
-    window.location.replace('app.html#/login');
-  </script>
+  <meta name="description" content="Centro de accesos de RockyDEMO para personal administrativo y empleados." />
+  <link rel="icon" type="image/png" href="src/assets/img/capcol-logo.png" />
+  <link rel="stylesheet" href="src/assets/css/base.css" />
+  <link rel="stylesheet" href="src/assets/css/components.css" />
+  <link rel="stylesheet" href="src/assets/css/layout.css" />
+  <link rel="stylesheet" href="src/assets/css/utils.css" />
+  <link rel="stylesheet" href="src/assets/css/access.css" />
 </head>
 <body>
-  <p>Redirigiendo a <a href="app.html#/login">RockyEDU</a>...</p>
+  <main class="access-shell">
+    <div class="access-shell__inner">
+      <section class="access-hero">
+        <div class="access-hero__copy">
+          <p class="access-hero__eyebrow">Bienvenido a Rocky</p>
+          <h1>Centro de accesos</h1>
+          <p>
+            Selecciona el tipo de ingreso que necesitas.
+          </p>
+        </div>
+        <div class="access-hero__art">
+          <img src="src/assets/img/rocky-logo.png" alt="Rocky" />
+        </div>
+      </section>
+
+      <section class="main-card access-section">
+        <div class="access-section__head">
+          <div>
+            <p class="access-section__eyebrow">Accesos</p>
+            <h2>Ingresa por el camino correcto</h2>
+          </div>
+          <a class="btn" href="index.html">Volver al inicio</a>
+        </div>
+
+        <div class="access-grid">
+          <article class="access-card access-card--admin">
+            <p class="access-card__tag">Administrativo</p>
+            <h3>Portal Administrativo y Operativo</h3>
+            <p>Para administradores, supervisores, editores, consultores y usuarios con permisos ampliados del sistema.</p>
+            <ul class="access-list">
+              <li>Login con usuario y contraseña</li>
+              <li>Acceso a modulos administrativos y operativos</li>
+            </ul>
+            <a class="btn btn--primary" href="app.html#/login">Entrar Administrativo</a>
+          </article>
+
+          <article class="access-card access-card--employee">
+            <p class="access-card__tag">Empleados</p>
+            <h3>Portal de empleados</h3>
+            <p>Espacio personal de los empleados</p>
+            <ul class="access-list">
+              <li>Ingreso con documento</li>
+              <li>Validacion con ultimos 4 del celular</li>
+            </ul>
+            <a class="btn btn--primary" href="employee.html">Entrar a Empleados</a>
+          </article>
+        </div>
+      </section>
+
+      <section class="main-card access-section">
+        <div class="access-section__head">
+          <div>
+            <p class="access-section__eyebrow">Novedades</p>
+            <h2>Lo mas reciente del ingreso a plataforma</h2>
+          </div>
+        </div>
+
+        <div class="news-grid">
+          <article class="news-card">
+            <span class="news-card__date">Actual</span>
+            <h3>Nuevo portal de empleados</h3>
+            <p>Se habilito un acceso separado para empleados para la gestiones personales.</p>
+          </article>
+
+          <article class="news-card">
+            <span class="news-card__date">Seguridad</span>
+            <h3>Validacion con celular registrado</h3>
+            <p>El ingreso de empleados ahora valida documento y ultimos 4 digitos del celular almacenado en la base de empleados.</p>
+          </article>
+
+          <article class="news-card">
+            <span class="news-card__date">Experiencia</span>
+            <h3>Separacion de accesos</h3>
+            <p>El acceso administrativo y el acceso de empleados quedaron diferenciados para guiar mejor a cada perfil desde el primer clic.</p>
+          </article>
+        </div>
+      </section>
+    </div>
+  </main>
 </body>
 </html>

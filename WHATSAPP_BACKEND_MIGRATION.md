@@ -17,18 +17,35 @@ Definir en Vercel para el proyecto backend:
 - `SUPABASE_URL`
 - `SUPABASE_SERVICE_ROLE_KEY`
 - `CRON_SECRET`
+- `EMPLOYEE_PORTAL_ALLOWED_ORIGINS`
+- `EMPLOYEE_PORTAL_SESSION_HOURS`
 - `WHATSAPP_VERIFY_TOKEN`
 - `WHATSAPP_ACCESS_TOKEN`
 - `WHATSAPP_PHONE_NUMBER_ID`
 - `WHATSAPP_GRAPH_VERSION`
 - `WHATSAPP_APP_SECRET`
 
+Tambien actualiza localmente `whatsapp-backend/.env` con esos mismos valores.
+
 ## Base de datos requerida
-Ejecutar al menos:
-- `supabase/schema_whatsapp_phase4.sql:1`
-- `supabase/schema_operations_phase3.sql:1`
-- `supabase/schema_operations_phase2.sql:1`
+Ejecutar en una base nueva:
+- `supabase/schema_foundation_phase0.sql:1`
+- `supabase/schema_initial.sql:1`
 - `supabase/schema_catalogs_phase1.sql:1`
+- `supabase/schema_operations_phase2.sql:1`
+- `supabase/schema_operations_phase3.sql:1`
+- `supabase/schema_whatsapp_phase4.sql:1`
+- `supabase/schema_constraints_phase5.sql:1`
+- `supabase/schema_governance_phase6.sql:1`
+- `supabase/schema_operations_phase6.sql:1`
+- `supabase/schema_operations_phase7.sql:1`
+- `supabase/schema_operations_phase8.sql:1`
+- `supabase/schema_operations_phase9.sql:1`
+- `supabase/schema_operations_phase10.sql:1`
+- `supabase/schema_operations_phase11.sql:1`
+- `supabase/schema_operations_phase12.sql:1`
+- `supabase/schema_operations_phase13.sql:1`
+- `supabase/schema_operations_phase14_employee_portal.sql:1`
 
 ## Flujo ya operativo
 - verificacion del webhook de Meta
@@ -56,10 +73,8 @@ Ejecutar al menos:
 - `attendance`
 - `absenteeism`
 - `daily_metrics`
+- `daily_sede_closures`
+- `employee_daily_status`
+- `audit_logs`
 - `supervisor_profile`
 - `incapacitados`
-
-## Pendiente
-- endurecer validacion final de firma con `WHATSAPP_APP_SECRET`
-- ampliar reglas finas de negocio
-- revisar rotacion de secretos expuestos historicamente

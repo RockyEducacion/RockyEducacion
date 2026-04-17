@@ -1,0 +1,94 @@
+.employee-shell{
+  min-height:100vh;
+  display:grid;
+  place-items:center;
+  padding:1.5rem;
+}
+
+.employee-shell__inner{
+  width:min(100%, 960px);
+  display:grid;
+  gap:1rem;
+}
+
+.employee-hero{
+  display:flex;
+  align-items:flex-start;
+  justify-content:space-between;
+  gap:1rem;
+  padding:1.2rem 1.3rem;
+  border:1px solid var(--color-border);
+  border-radius:16px;
+  background:linear-gradient(135deg, color-mix(in srgb,var(--color-primary) 16%, #ffffff), var(--color-surface) 62%);
+  box-shadow:var(--shadow);
+}
+
+.employee-hero__eyebrow{
+  margin:0 0 .35rem 0;
+  font-size:.8rem;
+  text-transform:uppercase;
+  letter-spacing:.08em;
+  color:var(--color-muted);
+}
+
+.employee-hero__title{
+  margin:0;
+  font-size:clamp(1.8rem, 4vw, 2.5rem);
+}
+
+.employee-hero__copy{
+  margin:.45rem 0 0 0;
+  max-width:640px;
+  color:var(--color-muted);
+  line-height:1.5;
+}
+
+.employee-card{
+  background:var(--color-surface);
+}
+
+.employee-grid{
+  display:grid;
+  grid-template-columns:repeat(2, minmax(0, 1fr));
+  gap:.75rem;
+}
+
+.employee-form{
+  display:grid;
+  gap:.85rem;
+}
+
+.employee-form__actions{
+  display:flex;
+  gap:.6rem;
+  flex-wrap:wrap;
+  align-items:center;
+}
+
+.employee-form .input{
+  max-width:none;
+  width:100%;
+}
+
+.employee-message{
+  min-height:1.4rem;
+  margin:0;
+}
+
+.employee-message[data-state="error"]{
+  color:#b91c1c;
+}
+
+.employee-message[data-state="ok"]{
+  color:#047857;
+}
+
+@media (max-width:720px){
+  .employee-hero{
+    flex-direction:column;
+  }
+
+  .employee-grid{
+    grid-template-columns:1fr;
+  }
+}
