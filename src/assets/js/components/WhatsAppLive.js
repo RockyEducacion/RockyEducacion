@@ -1,115 +1,146 @@
-import { el, qs } from '../utils/dom.js';
+import { el, qs, enableSectionToggles } from '../utils/dom.js';
 import { showInfoModal } from '../utils/infoModal.js';
 
 export const WhatsAppLive = (mount, deps = {}) => {
   const today = todayBogota();
   const closureDay = today;
-  const ui = el('section', { className: 'main-card' }, [
-    el('section', { className: 'wa-header' }, [
-      el('div', { className: 'wa-header__left' }, [
-        el('div', { className: 'wa-header__top' }, [
-          el('h2', {}, ['Registro Diario']),
-          el('div', { className: 'wa-date-pill' }, [
-            el('span', { className: 'wa-date-pill__label' }, ['Fecha']),
-            el('strong', { className: 'wa-date-pill__value' }, [today])
-          ])
-        ]),
-        el('div', { className: 'wa-filters wa-filters--wide' }, [
-          el('div', { className: 'wa-field wa-field--search' }, [
-            el('label', { className: 'label' }, ['Buscar']),
-            el('input', { id: 'waSearch', className: 'input wa-input', placeholder: 'Cedula, nombre, novedad o reemplazo...' })
+  const ui = el('div', {}, [
+    el('section', { className: 'main-card' }, [
+      el('section', { className: 'wa-header' }, [
+        el('div', { className: 'wa-header__left' }, [
+          el('div', { className: 'wa-header__top' }, [
+            el('h2', {}, ['Registro Diario']),
+            el('div', { className: 'wa-date-pill' }, [
+              el('span', { className: 'wa-date-pill__label' }, ['Fecha']),
+              el('strong', { className: 'wa-date-pill__value' }, [today])
+            ])
           ]),
-          el('div', { className: 'wa-field' }, [
-            el('label', { className: 'label' }, ['Filtro']),
-            el('select', { id: 'waNoveltyFilter', className: 'input wa-input' }, [
-              el('option', { value: 'all' }, ['Todas'])
+          el('div', { className: 'wa-filters wa-filters--wide' }, [
+            el('div', { className: 'wa-field wa-field--search' }, [
+              el('label', { className: 'label' }, ['Buscar']),
+              el('input', { id: 'waSearch', className: 'input wa-input', placeholder: 'Cedula, nombre, novedad o reemplazo...' })
+            ]),
+            el('div', { className: 'wa-field' }, [
+              el('label', { className: 'label' }, ['Filtro']),
+              el('select', { id: 'waNoveltyFilter', className: 'input wa-input' }, [
+                el('option', { value: 'all' }, ['Todas'])
+              ])
             ])
           ])
-        ])
-      ]),
-      el('div', { className: 'wa-header__right' }, [
-        el('div', { className: 'wa-stats wa-stats--summary wa-stats--summary-full' }, [
-          el('article', { className: 'wa-stat card wa-stat--wide wa-stat--summary-compact' }, [
-            el('small', { className: 'wa-stat__label wa-stat__label--title' }, ['Resumen Operativo']),
-            el('div', { className: 'wa-summary-groups' }, [
-              el('div', { className: 'wa-summary-group' }, [
-                el('small', { className: 'text-muted wa-summary-group__title' }, ['Planeacion']),
-                el('div', { className: 'wa-kpis wa-kpis--compact wa-kpis--three' }, [
-                  kpiItem('Planeados', 'waPlanned', '0'),
-                  kpiItem('Contratados', 'waExpected', '0'),
-                  kpiItem('Registros', 'waRegistered', '0')
-                ])
-              ]),
-              el('div', { className: 'wa-summary-group' }, [
-                el('small', { className: 'text-muted wa-summary-group__title' }, ['Operacion']),
-                el('div', { className: 'wa-kpis wa-kpis--compact wa-kpis--three' }, [
-                  kpiItem('Asistencias', 'waUnique', '0'),
-                  kpiItem('Pendientes', 'waPending', '0'),
-                  kpiItem('Ausentismo', 'waMissing', '0')
+        ]),
+        el('div', { className: 'wa-header__right' }, [
+          el('div', { className: 'wa-stats wa-stats--summary wa-stats--summary-full' }, [
+            el('article', { className: 'wa-stat card wa-stat--wide wa-stat--summary-compact' }, [
+              el('small', { className: 'wa-stat__label wa-stat__label--title' }, ['Resumen Operativo']),
+              el('div', { className: 'wa-summary-groups' }, [
+                el('div', { className: 'wa-summary-group' }, [
+                  el('small', { className: 'text-muted wa-summary-group__title' }, ['Planeacion']),
+                  el('div', { className: 'wa-kpis wa-kpis--compact wa-kpis--three' }, [
+                    kpiItem('Planeados', 'waPlanned', '0'),
+                    kpiItem('Contratados', 'waExpected', '0'),
+                    kpiItem('Registros', 'waRegistered', '0')
+                  ])
+                ]),
+                el('div', { className: 'wa-summary-group' }, [
+                  el('small', { className: 'text-muted wa-summary-group__title' }, ['Operacion']),
+                  el('div', { className: 'wa-kpis wa-kpis--compact wa-kpis--three' }, [
+                    kpiItem('Asistencias', 'waUnique', '0'),
+                    kpiItem('Pendientes', 'waPending', '0'),
+                    kpiItem('Ausentismo', 'waMissing', '0')
+                  ])
                 ])
               ])
             ])
           ])
         ])
-      ])
-    ]),
-    el('section', { className: 'wa-stats wa-stats--nov mt-2' }, [
-      statCard('Novedades', 'waNoveltyTotal', '0', 'statNoveltyTotal'),
-      statCard('Gestionadas', 'waNoveltyHandled', '0', 'statNoveltyHandled'),
-      statCard('Pendientes', 'waNoveltyPending', '0', 'statNoveltyPending')
-    ]),
-    el('div', { className: 'mt-2 table-wrap' }, [
-        el('table', { className: 'table wa-live-table' }, [
-          el('colgroup', {}, [
-            el('col', { style: 'width:90px' }),
-            el('col', { style: 'width:72px' }),
-            el('col', { style: 'width:106px' }),
-            el('col', { style: 'width:200px' }),
-            el('col', { style: 'width:220px' }),
-            el('col', { style: 'width:64px' }),
-            el('col', { style: 'width:220px' }),
-            el('col', { style: 'width:70px' })
+      ]),
+      el('section', { className: 'wa-stats wa-stats--nov mt-2' }, [
+        statCard('Novedades', 'waNoveltyTotal', '0', 'statNoveltyTotal'),
+        statCard('Gestionadas', 'waNoveltyHandled', '0', 'statNoveltyHandled'),
+        statCard('Pendientes', 'waNoveltyPending', '0', 'statNoveltyPending')
+      ]),
+      el('div', { className: 'mt-2 table-wrap' }, [
+          el('table', { className: 'table wa-live-table' }, [
+            el('colgroup', {}, [
+              el('col', { style: 'width:90px' }),
+              el('col', { style: 'width:72px' }),
+              el('col', { style: 'width:106px' }),
+              el('col', { style: 'width:200px' }),
+              el('col', { style: 'width:220px' }),
+              el('col', { style: 'width:64px' }),
+              el('col', { style: 'width:220px' }),
+              el('col', { style: 'width:70px' })
+            ]),
+            el('thead', {}, [
+              el('tr', {}, [
+                el('th', { 'data-sort': 'fecha', style: 'cursor:pointer' }, ['Fecha']),
+                el('th', { 'data-sort': 'hora', style: 'cursor:pointer' }, ['Hora']),
+                el('th', { 'data-sort': 'documento', style: 'cursor:pointer' }, ['Cedula']),
+                el('th', { 'data-sort': 'nombre', style: 'cursor:pointer' }, ['Nombre']),
+                el('th', { 'data-sort': 'novedad', style: 'cursor:pointer' }, ['Novedad']),
+                el('th', { 'data-sort': 'dias', style: 'cursor:pointer' }, ['Dias']),
+                el('th', { 'data-sort': 'reemplazo', style: 'cursor:pointer' }, ['Reemplazo'])
+                ,
+                el('th', {}, ['Info'])
+              ])
+            ]),
+          el('tbody', {})
+        ])
+      ]),
+      el('div', { id: 'waPagination', className: 'mt-2', style: 'display:flex;justify-content:space-between;gap:.75rem;align-items:center;flex-wrap:wrap;' }, [
+        el('div', { id: 'waPageSummary', className: 'text-muted', style: 'font-size:.86rem;' }, ['Mostrando 0 de 0']),
+        el('div', { style: 'display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;' }, [
+          el('label', { className: 'text-muted', for: 'waPageSize', style: 'font-size:.86rem;' }, ['Filas por pagina']),
+          el('select', { id: 'waPageSize', className: 'input wa-input', style: 'width:auto;min-width:88px;' }, [
+            el('option', { value: '25' }, ['25']),
+            el('option', { value: '50', selected: true }, ['50']),
+            el('option', { value: '100' }, ['100']),
+            el('option', { value: '200' }, ['200'])
           ]),
+          el('button', { id: 'waToggleAll', className: 'btn', type: 'button' }, ['Ver todos']),
+          el('button', { id: 'waPrevPage', className: 'btn', type: 'button' }, ['Anterior']),
+          el('span', { id: 'waPageIndicator', className: 'text-muted', style: 'font-size:.86rem;min-width:96px;text-align:center;' }, ['Pagina 1 de 1']),
+          el('button', { id: 'waNextPage', className: 'btn', type: 'button' }, ['Siguiente'])
+        ])
+      ]),
+      el('div', { className: 'mt-2', style: 'display:flex;justify-content:space-between;gap:.5rem;align-items:center;flex-wrap:wrap;' }, [
+        el('div', { id: 'waModeHint', className: 'text-muted', style: 'font-size:.86rem;' }, ['Vista completa del día']),
+        el('div', { style: 'display:flex;gap:.5rem;align-items:center;flex-wrap:wrap;' }, [
+          el('button', { id: 'btnManualRefresh', className: 'btn', type: 'button' }, ['Actualizar']),
+          el('button', { id: 'btnManualClose', className: 'btn btn--primary', type: 'button' }, ['Cerrar dia'])
+        ])
+      ]),
+      el('p', { id: 'waMsg', className: 'text-muted mt-2' }, ['Conectando...'])
+    ]),
+    el('section', { className: 'main-card section-block mt-2' }, [
+      el('h3', { className: 'section-title', style: 'margin:0;width:100%;' }, ['Pendientes de registro']),
+      el('div', { style: 'display:flex;justify-content:space-between;gap:.75rem;align-items:center;flex-wrap:wrap;' }, [
+        el('span', { id: 'waPendingSummary', className: 'text-muted', style: 'font-size:.86rem;' }, ['0 empleados pendientes']),
+        el('div', { className: 'wa-field', style: 'min-width:220px;' }, [
+          el('label', { className: 'label', for: 'waPendingZoneFilter' }, ['Zona']),
+          el('select', { id: 'waPendingZoneFilter', className: 'input wa-input' }, [
+            el('option', { value: 'all' }, ['Todas las zonas'])
+          ])
+        ])
+      ]),
+      el('div', { id: 'waPendingEmpty', className: 'text-muted mt-1', style: 'display:none;' }, ['Todos los empleados esperados para hoy ya realizaron su registro.']),
+      el('div', { id: 'waPendingWrap', className: 'mt-1 table-wrap' }, [
+        el('table', { className: 'table wa-live-table' }, [
           el('thead', {}, [
             el('tr', {}, [
-              el('th', { 'data-sort': 'fecha', style: 'cursor:pointer' }, ['Fecha']),
-              el('th', { 'data-sort': 'hora', style: 'cursor:pointer' }, ['Hora']),
-              el('th', { 'data-sort': 'documento', style: 'cursor:pointer' }, ['Cedula']),
-              el('th', { 'data-sort': 'nombre', style: 'cursor:pointer' }, ['Nombre']),
-              el('th', { 'data-sort': 'novedad', style: 'cursor:pointer' }, ['Novedad']),
-              el('th', { 'data-sort': 'dias', style: 'cursor:pointer' }, ['Dias']),
-              el('th', { 'data-sort': 'reemplazo', style: 'cursor:pointer' }, ['Reemplazo'])
-              ,
+              el('th', { 'data-pending-sort': 'documento', style: 'cursor:pointer' }, ['Cedula']),
+              el('th', { 'data-pending-sort': 'nombre', style: 'cursor:pointer' }, ['Nombre']),
+              el('th', { 'data-pending-sort': 'telefono', style: 'cursor:pointer' }, ['Telefono']),
+              el('th', { 'data-pending-sort': 'sede', style: 'cursor:pointer' }, ['Sede']),
+              el('th', { 'data-pending-sort': 'dependencia', style: 'cursor:pointer' }, ['Dependencia']),
+              el('th', { 'data-pending-sort': 'zona', style: 'cursor:pointer' }, ['Zona']),
               el('th', {}, ['Info'])
             ])
           ]),
-        el('tbody', {})
+          el('tbody', { id: 'waPendingBody' })
+        ])
       ])
-    ]),
-    el('div', { id: 'waPagination', className: 'mt-2', style: 'display:flex;justify-content:space-between;gap:.75rem;align-items:center;flex-wrap:wrap;' }, [
-      el('div', { id: 'waPageSummary', className: 'text-muted', style: 'font-size:.86rem;' }, ['Mostrando 0 de 0']),
-      el('div', { style: 'display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;' }, [
-        el('label', { className: 'text-muted', for: 'waPageSize', style: 'font-size:.86rem;' }, ['Filas por pagina']),
-        el('select', { id: 'waPageSize', className: 'input wa-input', style: 'width:auto;min-width:88px;' }, [
-          el('option', { value: '25' }, ['25']),
-          el('option', { value: '50', selected: true }, ['50']),
-          el('option', { value: '100' }, ['100']),
-          el('option', { value: '200' }, ['200'])
-        ]),
-        el('button', { id: 'waToggleAll', className: 'btn', type: 'button' }, ['Ver todos']),
-        el('button', { id: 'waPrevPage', className: 'btn', type: 'button' }, ['Anterior']),
-        el('span', { id: 'waPageIndicator', className: 'text-muted', style: 'font-size:.86rem;min-width:96px;text-align:center;' }, ['Pagina 1 de 1']),
-        el('button', { id: 'waNextPage', className: 'btn', type: 'button' }, ['Siguiente'])
-      ])
-    ]),
-    el('div', { className: 'mt-2', style: 'display:flex;justify-content:space-between;gap:.5rem;align-items:center;flex-wrap:wrap;' }, [
-      el('div', { id: 'waModeHint', className: 'text-muted', style: 'font-size:.86rem;' }, ['Vista completa del día']),
-      el('div', { style: 'display:flex;gap:.5rem;align-items:center;flex-wrap:wrap;' }, [
-        el('button', { id: 'btnManualRefresh', className: 'btn', type: 'button' }, ['Actualizar']),
-      el('button', { id: 'btnManualClose', className: 'btn btn--primary', type: 'button' }, ['Cerrar dia'])
-      ])
-    ]),
-    el('p', { id: 'waMsg', className: 'text-muted mt-2' }, ['Conectando...'])
+    ])
   ]);
 
   const tbody = qs('tbody', ui);
@@ -125,6 +156,11 @@ export const WhatsAppLive = (mount, deps = {}) => {
   const modeHint = qs('#waModeHint', ui);
   const btnManualRefresh = qs('#btnManualRefresh', ui);
   const btnManualClose = qs('#btnManualClose', ui);
+  const pendingBody = qs('#waPendingBody', ui);
+  const pendingSummary = qs('#waPendingSummary', ui);
+  const pendingZoneFilter = qs('#waPendingZoneFilter', ui);
+  const pendingEmpty = qs('#waPendingEmpty', ui);
+  const pendingWrap = qs('#waPendingWrap', ui);
   const statNoveltyTotal = qs('#statNoveltyTotal', ui);
   const statNoveltyHandled = qs('#statNoveltyHandled', ui);
   const statNoveltyPending = qs('#statNoveltyPending', ui);
@@ -138,6 +174,7 @@ export const WhatsAppLive = (mount, deps = {}) => {
   let employees = [];
   let sedes = [];
   let incapacitados = [];
+  let employeeDailyStatusRows = [];
 
   let unAttendance = null;
   let unReplacements = null;
@@ -149,6 +186,9 @@ export const WhatsAppLive = (mount, deps = {}) => {
   let unDailyMetrics = null;
   let sortKey = 'hora';
   let sortDir = -1;
+  let pendingSortKey = 'zona';
+  let pendingSortDir = 1;
+  let pendingZone = 'all';
   let lastLegacyBackfillAt = 0;
   let dailyMetrics = null;
   let cardFilter = 'all';
@@ -214,7 +254,7 @@ export const WhatsAppLive = (mount, deps = {}) => {
   }
 
   function canAssignReplacement(row) {
-    return classifyRow(row) === 'replace_yes';
+    return classifyRow(row) === 'replace_yes' && rowHasScheduledService(row);
   }
 
   function isSupernumerarioAttendance(row) {
@@ -272,9 +312,12 @@ export const WhatsAppLive = (mount, deps = {}) => {
     return Math.floor((eUtc - sUtc) / 86400000) + 1;
   }
 
-  function incapacidadDaysForRow(row) {
-    const byRange = inclusiveDaysBetween(row?.incapacidadInicio, row?.incapacidadFin);
-    if (byRange != null) return byRange;
+  function incapacidadRangeForRow(row) {
+    const directStart = normalizeIsoDate(row?.incapacidadInicio);
+    const directEnd = normalizeIsoDate(row?.incapacidadFin);
+    if (directStart && directEnd && directEnd >= directStart) {
+      return { start: directStart, end: directEnd };
+    }
     const doc = String(row?.documento || '').trim();
     const active = (incapacitados || []).find((item) => {
       if (String(item?.documento || '').trim() !== doc) return false;
@@ -283,11 +326,29 @@ export const WhatsAppLive = (mount, deps = {}) => {
       return Boolean(start && end && String(row?.fecha || '').trim() >= start && String(row?.fecha || '').trim() <= end);
     });
     if (active) {
-      const fromRegistry = inclusiveDaysBetween(active.fechaInicio, active.fechaFin);
-      if (fromRegistry != null) return fromRegistry;
+      const start = normalizeIsoDate(active.fechaInicio);
+      const end = normalizeIsoDate(active.fechaFin);
+      if (start && end && end >= start) return { start, end };
+    }
+    return null;
+  }
+
+  function incapacidadDaysForRow(row) {
+    const range = incapacidadRangeForRow(row);
+    if (range) {
+      const refDate = normalizeIsoDate(row?.fecha) || today;
+      const effectiveStart = refDate > range.start ? refDate : range.start;
+      const pendingDays = inclusiveDaysBetween(effectiveStart, range.end);
+      if (pendingDays != null) return pendingDays;
     }
     const byValue = Number(row?.incapacidadDias);
     return Number.isFinite(byValue) && byValue > 0 ? byValue : null;
+  }
+
+  function incapacidadTooltipForRow(row) {
+    const range = incapacidadRangeForRow(row);
+    if (!range) return '';
+    return `Inicio: ${range.start} | Fin: ${range.end}`;
   }
 
   function findNovedadCatalog(name) {
@@ -445,15 +506,17 @@ export const WhatsAppLive = (mount, deps = {}) => {
   }
 
   async function refreshCurrentDaySnapshot({ silent = true } = {}) {
-    if (!deps.listAttendanceRange && !deps.listImportReplacementsRange) return;
+    if (!deps.listAttendanceRange && !deps.listImportReplacementsRange && !deps.listEmployeeDailyStatusRange) return;
     if (!silent) msg.textContent = 'Actualizando registro diario...';
     try {
-      const [att, repl] = await Promise.all([
+      const [att, repl, statusRows] = await Promise.all([
         deps.listAttendanceRange?.(today, today) || [],
-        deps.listImportReplacementsRange?.(today, today) || []
+        deps.listImportReplacementsRange?.(today, today) || [],
+        deps.listEmployeeDailyStatusRange?.(today, today) || []
       ]);
       attendance = att || [];
       replacements = repl || [];
+      employeeDailyStatusRows = statusRows || [];
       statsAttendance = attendance;
       statsReplacements = replacements;
       render();
@@ -553,14 +616,38 @@ export const WhatsAppLive = (mount, deps = {}) => {
     return String(fallback || '').trim() || sedeCodigo;
   }
 
-  function employeeInfoSnapshot(row) {
-    const empleadoId = String(row?.empleadoId || '').trim();
+  function findEmployeeForRow(row) {
+    const empleadoId = String(row?.empleadoId || row?.employeeId || '').trim();
     const documento = String(row?.documento || '').trim();
-    const emp = (employees || []).find((e) => {
+    return (employees || []).find((e) => {
       if (empleadoId && String(e?.id || '').trim() === empleadoId) return true;
       if (documento && String(e?.documento || '').trim() === documento) return true;
       return false;
     }) || null;
+  }
+
+  function employeeDailyStatusForRow(row) {
+    const fecha = String(row?.fecha || '').trim() || today;
+    const empleadoId = String(row?.empleadoId || row?.employeeId || '').trim();
+    const documento = String(row?.documento || '').trim();
+    return (employeeDailyStatusRows || []).find((status) => {
+      if (String(status?.fecha || '').trim() !== fecha) return false;
+      if (empleadoId && String(status?.employeeId || '').trim() === empleadoId) return true;
+      if (documento && String(status?.documento || '').trim() === documento) return true;
+      return false;
+    }) || null;
+  }
+
+  function rowHasScheduledService(row) {
+    const status = employeeDailyStatusForRow(row);
+    if (status) return status.servicioProgramado === true;
+    const employee = findEmployeeForRow(row);
+    return employee ? isEmployeeExpectedForDate(employee, String(row?.fecha || '').trim() || today, sedes) : false;
+  }
+
+  function employeeInfoSnapshot(row) {
+    const documento = String(row?.documento || '').trim();
+    const emp = findEmployeeForRow(row);
     const sedeCodigo = String(row?.sedeCodigo || emp?.sedeCodigo || '').trim();
     const sedeNombre = sedeNameByCode(sedeCodigo, row?.sedeNombre || emp?.sedeNombre || '');
     const sede = (sedes || []).find((s) => String(s?.codigo || '').trim() === sedeCodigo) || null;
@@ -590,6 +677,59 @@ export const WhatsAppLive = (mount, deps = {}) => {
     return btn;
   }
 
+  function pendingEmployeesForToday() {
+    const registeredKeys = new Set();
+    (statsAttendance || []).forEach((row) => {
+      if (String(row?.fecha || '').trim() !== today) return;
+      if (isSupernumerarioAttendance(row)) return;
+      const employeeId = String(row?.empleadoId || row?.employeeId || '').trim();
+      const documento = String(row?.documento || '').trim();
+      if (employeeId) registeredKeys.add(`id:${employeeId}`);
+      if (documento) registeredKeys.add(`doc:${documento}`);
+    });
+
+    const pendingRows = [];
+    const seen = new Set();
+    (employees || []).forEach((emp) => {
+      if (String(emp?.estado || '').trim().toLowerCase() !== 'activo') return;
+      if (isSupernumerarioEmployee(emp, supernumerarios)) return;
+      if (!isEmployeeExpectedForDate(emp, today, sedes)) return;
+      const employeeId = String(emp?.id || '').trim();
+      const documento = String(emp?.documento || '').trim();
+      if ((employeeId && registeredKeys.has(`id:${employeeId}`)) || (documento && registeredKeys.has(`doc:${documento}`))) return;
+      const uniqueKey = employeeId || documento;
+      if (!uniqueKey || seen.has(uniqueKey)) return;
+      seen.add(uniqueKey);
+      pendingRows.push({
+        empleadoId: employeeId || null,
+        documento: documento || '-',
+        nombre: String(emp?.nombre || '-').trim() || '-',
+        telefono: String(emp?.telefono || '-').trim() || '-',
+        sedeCodigo: String(emp?.sedeCodigo || '').trim(),
+        sedeNombre: String(emp?.sedeNombre || '').trim()
+      });
+    });
+
+    return pendingRows.sort((a, b) => {
+      const sedeCmp = sedeNameByCode(a.sedeCodigo, a.sedeNombre).localeCompare(sedeNameByCode(b.sedeCodigo, b.sedeNombre));
+      if (sedeCmp !== 0) return sedeCmp;
+      return String(a.nombre || '').localeCompare(String(b.nombre || ''));
+    });
+  }
+
+  async function refreshEmployeeDailyStatusSnapshot({ silent = true } = {}) {
+    if (!deps.listEmployeeDailyStatusRange) return [];
+    try {
+      const rows = await deps.listEmployeeDailyStatusRange(today, today);
+      employeeDailyStatusRows = rows || [];
+      render();
+      return employeeDailyStatusRows;
+    } catch (err) {
+      if (!silent) msg.textContent = `Error cargando estado operativo del dia: ${err?.message || err}`;
+      throw err;
+    }
+  }
+
   function noveltyTypeLabel(row) {
     const raw = String(displayNovedad(row) || row.novedadNombre || row.novedad || '').trim();
     const code = String(row.novedadCodigo || '').trim();
@@ -613,6 +753,23 @@ export const WhatsAppLive = (mount, deps = {}) => {
     ];
     noveltyFilter.replaceChildren(...options);
     if ([...noveltyFilter.options].some((o) => o.value === current)) noveltyFilter.value = current;
+  }
+
+  function refreshPendingZoneOptions(pendingRows = []) {
+    if (!pendingZoneFilter) return;
+    const current = String(pendingZoneFilter.value || pendingZone || 'all').trim();
+    const labels = Array.from(new Set(
+      (pendingRows || [])
+        .map((row) => String(row?.zona || '').trim())
+        .filter(Boolean)
+    )).sort((a, b) => a.localeCompare(b));
+    pendingZoneFilter.replaceChildren(
+      el('option', { value: 'all' }, ['Todas las zonas']),
+      ...labels.map((label) => el('option', { value: label }, [label]))
+    );
+    if ([...pendingZoneFilter.options].some((o) => o.value === current)) pendingZoneFilter.value = current;
+    else pendingZoneFilter.value = 'all';
+    pendingZone = String(pendingZoneFilter.value || 'all').trim();
   }
 
   async function saveReplacement(row, selectedDoc, btn, selectEl = null) {
@@ -659,6 +816,7 @@ export const WhatsAppLive = (mount, deps = {}) => {
       clearPendingReplacementSelection(row);
       replacements = mergeReplacements(replacements, [assignment]);
       statsReplacements = mergeReplacements(statsReplacements, [assignment]);
+      await refreshEmployeeDailyStatusSnapshot({ silent: true });
       render();
       msg.textContent = selected ? 'Reemplazo guardado correctamente.' : 'Ausentismo guardado correctamente.';
       if (selectEl) selectEl.disabled = true;
@@ -685,6 +843,20 @@ export const WhatsAppLive = (mount, deps = {}) => {
       return va > vb ? sortDir : -sortDir;
     });
     const stats = calculateStats();
+    const pendingEmployees = pendingEmployeesForToday();
+    const pendingRows = pendingEmployees.map((row) => ({
+      row,
+      info: employeeInfoSnapshot(row)
+    }));
+    refreshPendingZoneOptions(pendingRows.map((entry) => entry.info));
+    const filteredPendingRows = pendingRows
+      .filter(({ info }) => pendingZone === 'all' || String(info?.zona || '').trim() === pendingZone)
+      .sort((a, b) => {
+        const va = pendingSortValue(a.info, pendingSortKey);
+        const vb = pendingSortValue(b.info, pendingSortKey);
+        if (va === vb) return 0;
+        return va > vb ? pendingSortDir : -pendingSortDir;
+      });
     const totalRows = rows.length;
     const effectivePageSize = showAllRows ? Math.max(totalRows, 1) : pageSize;
     const totalPages = Math.max(1, Math.ceil(totalRows / effectivePageSize));
@@ -702,12 +874,19 @@ export const WhatsAppLive = (mount, deps = {}) => {
         const canAssign = canAssignReplacement(r);
         const opts = canAssign ? optionsForRow(r) : [];
         const isSuperRow = rowClass === 'super_replacement';
+        const isReportOnly = !isSuperRow && rowClass === 'replace_yes' && !rowHasScheduledService(r);
         const baseNovedadText = String(r.novedadNombre || displayNovedad(r) || '-').trim() || '-';
-        const novedadText = isSuperRow ? `${baseNovedadText} · SUPERNUMERARIO` : baseNovedadText;
+        const novedadText = isSuperRow
+          ? `${baseNovedadText} · SUPERNUMERARIO`
+          : isReportOnly
+            ? `${baseNovedadText} · SOLO REPORTE`
+            : baseNovedadText;
         const novedadStyle = novedadTextStyleByClass(rowClass);
         const diasVal = incapacidadDaysForRow(r);
         const diasTxt = diasVal != null ? String(diasVal) : '-';
-        const replacementText = displayReplacementText(r, repl, rowClass, opts);
+        const diasTitle = incapacidadTooltipForRow(r);
+        const diasNode = el('span', diasTitle ? { title: diasTitle, style: 'cursor:help;' } : {}, [diasTxt]);
+        const replacementText = isReportOnly ? 'Solo reporte' : displayReplacementText(r, repl, rowClass, opts);
 
         if (isSuperRow) {
           return el('tr', { style: rowStyleByClass(rowClass) }, [
@@ -716,7 +895,7 @@ export const WhatsAppLive = (mount, deps = {}) => {
             el('td', {}, [r.documento || '-']),
             el('td', {}, [r.nombre || '-']),
             el('td', {}, [el('span', { style: novedadStyle }, [novedadText])]),
-            el('td', {}, [diasTxt]),
+            el('td', {}, [diasNode]),
             el('td', {}, [el('span', { style: 'color:#1d4ed8;' }, [replacementText])]),
             el('td', {}, [infoButtonForRow(r)])
           ]);
@@ -729,7 +908,7 @@ export const WhatsAppLive = (mount, deps = {}) => {
             el('td', {}, [r.documento || '-']),
             el('td', {}, [r.nombre || '-']),
             el('td', {}, [el('span', { style: novedadStyle }, [novedadText])]),
-            el('td', {}, [diasTxt]),
+            el('td', {}, [diasNode]),
             el('td', {}, [el('span', { className: 'text-muted' }, [replacementText])]),
             el('td', {}, [infoButtonForRow(r)])
           ]);
@@ -742,7 +921,7 @@ export const WhatsAppLive = (mount, deps = {}) => {
             el('td', {}, [r.documento || '-']),
             el('td', {}, [r.nombre || '-']),
             el('td', {}, [el('span', { style: novedadStyle }, [novedadText])]),
-            el('td', {}, [diasTxt]),
+            el('td', {}, [diasNode]),
             el('td', {}, [el('span', { style: 'color:#b91c1c;' }, [replacementText])]),
             el('td', {}, [infoButtonForRow(r)])
           ]);
@@ -755,7 +934,7 @@ export const WhatsAppLive = (mount, deps = {}) => {
             el('td', {}, [r.documento || '-']),
             el('td', {}, [r.nombre || '-']),
             el('td', {}, [el('span', { style: novedadStyle }, [novedadText])]),
-            el('td', {}, [diasTxt]),
+            el('td', {}, [diasNode]),
             el('td', {}, [el('span', { style: 'color:#15803d;' }, [replacementText])]),
             el('td', {}, [infoButtonForRow(r)])
           ]);
@@ -818,7 +997,7 @@ export const WhatsAppLive = (mount, deps = {}) => {
           el('td', {}, [r.documento || '-']),
           el('td', {}, [r.nombre || '-']),
           el('td', {}, [el('span', { style: novedadStyle }, [novedadText])]),
-          el('td', {}, [diasTxt]),
+          el('td', {}, [diasNode]),
           el('td', {}, [replacementCell]),
           el('td', {}, [infoButtonForRow(r)])
         ]);
@@ -834,6 +1013,33 @@ export const WhatsAppLive = (mount, deps = {}) => {
     qs('#waNoveltyTotal', ui).textContent = String(stats.noveltyTotal);
     qs('#waNoveltyHandled', ui).textContent = String(stats.noveltyHandled);
     qs('#waNoveltyPending', ui).textContent = String(stats.noveltyPending);
+    pendingBody.replaceChildren(
+      ...filteredPendingRows.map(({ row, info }) => {
+        return el('tr', {}, [
+          el('td', {}, [info.documento]),
+          el('td', {}, [info.nombre]),
+          el('td', {}, [info.telefono]),
+          el('td', {}, [info.sede]),
+          el('td', {}, [info.dependencia]),
+          el('td', {}, [info.zona]),
+          el('td', {}, [infoButtonForRow(row)])
+        ]);
+      })
+    );
+    if (pendingSummary) {
+      const totalPending = pendingEmployees.length;
+      const visiblePending = filteredPendingRows.length;
+      pendingSummary.textContent = pendingZone === 'all'
+        ? `${totalPending} empleado${totalPending === 1 ? '' : 's'} pendiente${totalPending === 1 ? '' : 's'}`
+        : `${visiblePending} de ${totalPending} empleado${totalPending === 1 ? '' : 's'} pendiente${totalPending === 1 ? '' : 's'}`;
+    }
+    if (pendingEmpty) {
+      pendingEmpty.textContent = pendingZone === 'all'
+        ? 'Todos los empleados esperados para hoy ya realizaron su registro.'
+        : 'No hay empleados pendientes para la zona seleccionada.';
+      pendingEmpty.style.display = filteredPendingRows.length ? 'none' : '';
+    }
+    if (pendingWrap) pendingWrap.style.display = filteredPendingRows.length ? '' : 'none';
     if (pageSummary) pageSummary.textContent = totalRows ? `Mostrando ${visibleFrom}-${visibleTo} de ${totalRows}` : 'Mostrando 0 de 0';
     if (pageIndicator) pageIndicator.textContent = showAllRows ? 'Todos los registros' : (totalRows ? `Pagina ${currentPage} de ${totalPages}` : 'Pagina 0 de 0');
     if (pageSizeSelect) pageSizeSelect.value = String(pageSize);
@@ -846,6 +1052,7 @@ export const WhatsAppLive = (mount, deps = {}) => {
       : 'Total registros del dia: 0.';
     updateCardFilterUI();
     updateSortIndicators();
+    updatePendingSortIndicators();
   }
 
   function setCardFilter(next) {
@@ -889,6 +1096,7 @@ export const WhatsAppLive = (mount, deps = {}) => {
       const sedeTxt = sedeNameByCode(row.sedeCodigo, row.sedeNombre || '');
       return `REEMPLAZO EN SEDE: ${sedeTxt}`;
     }
+    if (rowClass === 'replace_yes' && !rowHasScheduledService(row)) return 'Solo reporte';
     if (!canAssignReplacement(row)) return 'No aplica';
 
     const decision = String(repl?.decision || '').trim().toLowerCase();
@@ -913,8 +1121,28 @@ export const WhatsAppLive = (mount, deps = {}) => {
     });
   }
 
+  function pendingSortValue(info, key) {
+    if (key === 'documento') return String(info?.documento || '');
+    if (key === 'nombre') return normalize(info?.nombre || '');
+    if (key === 'telefono') return String(info?.telefono || '');
+    if (key === 'sede') return normalize(info?.sede || '');
+    if (key === 'dependencia') return normalize(info?.dependencia || '');
+    if (key === 'zona') return normalize(info?.zona || '');
+    return '';
+  }
+
+  function updatePendingSortIndicators() {
+    ui.querySelectorAll('th[data-pending-sort]').forEach((th) => {
+      const base = th.dataset.baseLabel || th.textContent.replace(/\s[\^v▲▼]$/, '');
+      th.dataset.baseLabel = base;
+      const key = th.getAttribute('data-pending-sort');
+      th.textContent = pendingSortKey === key ? `${base} ${pendingSortDir === 1 ? '▲' : '▼'}` : base;
+    });
+  }
+
   function calculateStats() {
     const dayRows = (statsAttendance || []).filter((r) => String(r.fecha || '').trim() === today);
+    const operationalDayRows = dayRows.filter((row) => rowHasScheduledService(row));
     const activeSedes = (sedes || []).filter((s) => String(s?.estado || 'activo').trim().toLowerCase() !== 'inactivo');
     const expectedLocal = (employees || []).filter((e) => {
       if (String(e?.estado || '').trim().toLowerCase() !== 'activo') return false;
@@ -923,20 +1151,8 @@ export const WhatsAppLive = (mount, deps = {}) => {
       if (!isSedeScheduledForDate(sede, today)) return false;
       return !isSupernumerarioEmployee(e, supernumerarios);
     }).length;
-    const expectedBase = (employees || []).filter((e) => {
-      if (String(e?.estado || '').trim().toLowerCase() !== 'activo') return false;
-      const sedeCodigo = String(e?.sedeCodigo || '').trim();
-      if (!sedeCodigo) return false;
-      const sede = activeSedes.find((row) => String(row?.codigo || '').trim() === sedeCodigo) || null;
-      if (!sede) return false;
-      return !isSupernumerarioEmployee(e, supernumerarios);
-    }).length;
     const plannedLocal = activeSedes.reduce((acc, s) => {
       if (!isSedeScheduledForDate(s, today)) return acc;
-      const n = parseOperatorCount(s?.numeroOperarios);
-      return acc + (Number.isFinite(n) && n > 0 ? n : 0);
-    }, 0);
-    const plannedBase = activeSedes.reduce((acc, s) => {
       const n = parseOperatorCount(s?.numeroOperarios);
       return acc + (Number.isFinite(n) && n > 0 ? n : 0);
     }, 0);
@@ -945,8 +1161,8 @@ export const WhatsAppLive = (mount, deps = {}) => {
       const key = replacementRowKey(r);
       replMap.set(key, r);
     });
-    const registeredLocal = dayRows.filter((row) => !isSupernumerarioAttendance(row)).length;
-    const attendanceLocal = dayRows.filter((row) => {
+    const registeredLocal = operationalDayRows.filter((row) => !isSupernumerarioAttendance(row)).length;
+    const attendanceLocal = operationalDayRows.filter((row) => {
       if (isSupernumerarioAttendance(row)) return false;
       const key = replacementRowKey({ fecha: row.fecha, empleadoId: row.empleadoId });
       const repl = replMap.get(key) || null;
@@ -956,7 +1172,7 @@ export const WhatsAppLive = (mount, deps = {}) => {
       }
       return true;
     }).length;
-    const absenteeismLocal = dayRows.filter((row) => {
+    const absenteeismLocal = operationalDayRows.filter((row) => {
       if (isSupernumerarioAttendance(row)) return false;
       const key = replacementRowKey({ fecha: row.fecha, empleadoId: row.empleadoId });
       const repl = replMap.get(key) || null;
@@ -964,8 +1180,8 @@ export const WhatsAppLive = (mount, deps = {}) => {
       if (kind !== 'replace_yes') return false;
       return String(repl?.decision || '').trim() !== 'reemplazo';
     }).length;
-    const noveltyTotal = dayRows.filter((r) => canAssignReplacement(r)).length;
-    const noveltyHandled = dayRows.filter((r) => {
+    const noveltyTotal = operationalDayRows.filter((r) => canAssignReplacement(r)).length;
+    const noveltyHandled = operationalDayRows.filter((r) => {
       if (!canAssignReplacement(r)) return false;
       const key = replacementRowKey(r);
       const repl = replMap.get(key);
@@ -974,16 +1190,17 @@ export const WhatsAppLive = (mount, deps = {}) => {
       return decision === 'reemplazo' || decision === 'ausentismo';
     }).length;
     const noveltyPending = Math.max(0, noveltyTotal - noveltyHandled);
-    const plannedMetric = dailyMetrics ? Number(dailyMetrics.planned || 0) : null;
-    const expectedMetric = dailyMetrics ? Number(dailyMetrics.expected || 0) : null;
-    const expected = expectedMetric != null && expectedMetric > 0 ? expectedMetric : (expectedLocal > 0 ? expectedLocal : expectedBase);
+    const plannedMetric = dailyMetrics?.planned == null || dailyMetrics?.planned === '' ? null : Number(dailyMetrics.planned);
+    const expectedMetric = dailyMetrics?.expected == null || dailyMetrics?.expected === '' ? null : Number(dailyMetrics.expected);
+    const expected = Number.isFinite(expectedMetric) ? expectedMetric : expectedLocal;
+    const pendingListCount = pendingEmployeesForToday().length;
     const registered = registeredLocal;
     const attendance = Math.min(registered, attendanceLocal);
-    const absenteeism = Math.min(Math.max(0, registered - attendance), absenteeismLocal);
-    const pending = Math.max(0, expected - registered);
+    const absenteeism = absenteeismLocal;
+    const pending = Math.max(0, pendingListCount);
 
     return {
-      planned: plannedMetric != null && plannedMetric > 0 ? plannedMetric : (plannedLocal > 0 ? plannedLocal : plannedBase),
+      planned: Number.isFinite(plannedMetric) ? plannedMetric : plannedLocal,
       expected,
       registered,
       unique: attendance,
@@ -1003,6 +1220,7 @@ export const WhatsAppLive = (mount, deps = {}) => {
     replacements = [];
     statsAttendance = [];
     statsReplacements = [];
+    employeeDailyStatusRows = [];
     dailyMetrics = null;
     lastLegacyBackfillAt = 0;
     attendanceSubscribed = false;
@@ -1015,6 +1233,7 @@ export const WhatsAppLive = (mount, deps = {}) => {
         today,
         (row) => {
           dailyMetrics = row || null;
+          refreshEmployeeDailyStatusSnapshot({ silent: true }).catch(() => {});
           loadLegacySnapshotIfNeeded();
           render();
         },
@@ -1072,6 +1291,10 @@ export const WhatsAppLive = (mount, deps = {}) => {
 
   searchInput.addEventListener('input', () => { resetPagination(); render(); });
   noveltyFilter?.addEventListener('change', () => { resetPagination(); render(); });
+  pendingZoneFilter?.addEventListener('change', () => {
+    pendingZone = String(pendingZoneFilter.value || 'all').trim();
+    render();
+  });
   pageSizeSelect?.addEventListener('change', () => {
     pageSize = Number(pageSizeSelect.value || 50) || 50;
     resetPagination();
@@ -1116,6 +1339,18 @@ export const WhatsAppLive = (mount, deps = {}) => {
       render();
     });
   });
+  ui.querySelectorAll('th[data-pending-sort]').forEach((th) => {
+    th.addEventListener('click', () => {
+      const key = String(th.getAttribute('data-pending-sort') || '').trim();
+      if (!key) return;
+      if (pendingSortKey === key) pendingSortDir *= -1;
+      else {
+        pendingSortKey = key;
+        pendingSortDir = 1;
+      }
+      render();
+    });
+  });
   btnManualRefresh?.addEventListener('click', () => {
     refreshCurrentDaySnapshot({ silent: false })
       .then(() => {
@@ -1123,7 +1358,7 @@ export const WhatsAppLive = (mount, deps = {}) => {
       })
       .catch((err) => {
         msg.textContent = `Error cargando registro diario: ${err?.message || err}`;
-    });
+      });
   });
   btnManualClose?.addEventListener('click', async () => {
     if (typeof deps.closeOperationDayManual !== 'function') {
@@ -1194,6 +1429,8 @@ export const WhatsAppLive = (mount, deps = {}) => {
 
   bindDateStreams();
   mount.replaceChildren(ui);
+  enableSectionToggles(ui);
+  refreshEmployeeDailyStatusSnapshot({ silent: true }).catch(() => {});
 
   return () => {
     unAttendance?.();

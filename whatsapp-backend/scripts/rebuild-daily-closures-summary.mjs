@@ -153,25 +153,24 @@ for (let day = from; day <= to; day = addOneDay(day)) {
     if (!sedeCode) continue;
     const bucket = bySede.get(sedeCode) || {
       contratados: 0,
-      asistencias: 0,
-      ausentismos: 0
+      asistencias: 0
     };
     bucket.contratados += 1;
     if (row?.cuenta_pago_servicio === true) bucket.asistencias += 1;
-    if (row?.cuenta_pago_servicio === false) bucket.ausentismos += 1;
     bySede.set(sedeCode, bucket);
   }
 
   const summary = sedes.reduce((acc, sede) => {
     const sedeCode = String(sede?.codigo || '').trim();
     const planned = Number(sede?.numero_operarios ?? 0) || 0;
-    const counts = bySede.get(sedeCode) || { contratados: 0, asistencias: 0, ausentismos: 0 };
+    const counts = bySede.get(sedeCode) || { contratados: 0, asistencias: 0 };
+    const ausentismos = computeOperationalAbsenteeism(planned, counts.contratados, counts.asistencias);
     acc.planeados += planned;
     acc.contratados += counts.contratados;
     acc.asistencias += counts.asistencias;
     acc.faltan += Math.max(0, planned - counts.contratados);
     acc.sobran += Math.max(0, counts.contratados - planned);
-    acc.ausentismos += counts.ausentismos;
+    acc.ausentismos += ausentismos;
     return acc;
   }, {
     planeados: 0,
@@ -184,9 +183,9 @@ for (let day = from; day <= to; day = addOneDay(day)) {
 
   if (summary.planeados === 0 && summary.contratados === 0 && actualRows.length) {
     summary.asistencias = actualRows.filter((row) => row?.asistio === true).length;
-    summary.ausentismos = actualRows.filter((row) => row?.asistio === false).length;
+    summary.ausentismos = 0;
     summary.faltan = 0;
-    summary.sobran = 0;
+    summary.sobran = actualRows.length;
   }
 
   const payload = {
@@ -211,4 +210,12 @@ for (let day = from; day <= to; day = addOneDay(day)) {
   if (upsertError) throw upsertError;
 
   console.log(day, JSON.stringify(payload));
+}
+
+function computeOperationalAbsenteeism(planeados, contratados, cubiertos) {
+  const planned = Math.max(0, Number(planeados || 0));
+  const contracted = Math.max(0, Number(contratados || 0));
+  const covered = Math.max(0, Number(cubiertos || 0));
+  if (planned <= 0) return 0;
+  return Math.max(0, Math.min(planned, contracted) - covered);
 }

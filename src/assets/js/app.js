@@ -45,6 +45,7 @@ footerMount.replaceChildren(Footer());
 
 let unsubRoleMatrix=null; let unsubUserOverrides=null; let unsubAudit=null;
 let authSyncToken = 0;
+let routerStarted = false;
 const guardWrite=(perm,fn)=> async (...args)=>{
   if(typeof fn!=='function') return undefined;
   if(!can(perm)) throw new Error('No tienes permiso de edicion para esta seccion.');
@@ -81,6 +82,12 @@ const guardWrite=(perm,fn)=> async (...args)=>{
         listDailyMetricsRange:fb.listDailyMetricsRange,
         streamDailyMetricsByDate:fb.streamDailyMetricsByDate,
         streamIncapacitadosByDate:fb.streamIncapacitadosByDate,
+        streamIncapacidades:fb.streamIncapacidades,
+        uploadIncapacidadSupport:fb.uploadIncapacidadSupport,
+        createIncapacidad:fb.createIncapacidad,
+        updateIncapacidad:fb.updateIncapacidad,
+        setIncapacidadStatus:fb.setIncapacidadStatus,
+        listIncapacidadesRange:fb.listIncapacidadesRange,
         streamImportHistory:fb.streamImportHistory, streamDailyClosures:fb.streamDailyClosures, streamWhatsAppIncoming:fb.streamWhatsAppIncoming,
         streamAttendanceByDate:fb.streamAttendanceByDate, streamAttendanceRecent:fb.streamAttendanceRecent, streamImportReplacementsByDate:fb.streamImportReplacementsByDate
       };
@@ -90,7 +97,7 @@ const guardWrite=(perm,fn)=> async (...args)=>{
         const prevUid = String(getState().user?.uid || '').trim();
         const nextUid = String(user?.uid || '').trim();
         const sameUser = Boolean(prevUid && nextUid && prevUid === nextUid);
-        if(!sameUser){ if(unsubRoleMatrix){unsubRoleMatrix();unsubRoleMatrix=null;} if(unsubUserOverrides){unsubUserOverrides();unsubUserOverrides=null;} }        
+        if(!sameUser){ if(unsubRoleMatrix){unsubRoleMatrix();unsubRoleMatrix=null;} if(unsubUserOverrides){unsubUserOverrides();unsubUserOverrides=null;} }
         if(!user){ setState({ user:null, userProfile:null, userOverrides:{} }); headerMount.replaceChildren(Header(deps)); sidebarMount.replaceChildren(Sidebar()); if(location.hash!=="#/login") navigate('/login'); else refreshRoute(); return; }
         await fb.ensureUserProfile(user); const profile=await fb.loadUserProfile(user.uid);
         if(syncToken!==authSyncToken) return;
@@ -107,9 +114,18 @@ const guardWrite=(perm,fn)=> async (...args)=>{
         if(location.hash==='' || location.hash==="#/login") navigate('/');
         else if(!sameUser) refreshRoute();
       });
+
+      if(!routerStarted){
+        startRouter();
+        routerStarted = true;
+      }
     })
     .catch((err) => {
       console.error('Supabase init failed:', err);
+      if(!routerStarted){
+        startRouter();
+        routerStarted = true;
+      }
     });
 
   addRoute('/login', ()=> Login(root, deps));
@@ -155,9 +171,7 @@ const guardWrite=(perm,fn)=> async (...args)=>{
   addRoute('/reports-company', ()=> requireAuth(()=> guard(PERMS.VIEW_REPORTS_COMPANY, ()=> Reports(root, deps, { variant: 'company' }))));
 
   // Supervisor/Empleado
-  addRoute('/upload', ()=> requireAuth(()=> guard(PERMS.UPLOAD_DATA, ()=> CargarDatos(root))));
-
-  startRouter();
+  addRoute('/upload', ()=> requireAuth(()=> guard(PERMS.UPLOAD_DATA, ()=> CargarDatos(root, deps))));
 })();
 function requireAuth(ok){ const { user }=getState(); if(!user){ navigate('/login'); return; } return ok?.(); }
 function guard(perm, ok){ if(!can(perm)) return block('No tienes permiso para acceder a esta sección.'); return ok?.(); }

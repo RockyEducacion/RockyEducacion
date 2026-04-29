@@ -58,7 +58,7 @@ const PERM_LABELS = {
   [PERMS.MANAGE_ABSENTEEISM]: 'Operacion - Ausentismo',
   [PERMS.VIEW_REPORTS_CLIENT]: 'Reportes - Cliente',
   [PERMS.VIEW_REPORTS_COMPANY]: 'Reportes - Empresa',
-  [PERMS.UPLOAD_DATA]: 'Carga de datos'
+  [PERMS.UPLOAD_DATA]: 'Incapacidades'
 };
 const LEGACY_FALLBACK_BY_NEW = {
   [PERMS.VIEW_USERS]: 'manageUsers',

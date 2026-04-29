@@ -576,6 +576,14 @@ export const Reports = (mount, deps = {}, options = {}) => {
     return String(row?.decisionCobertura || '').trim() === 'ausentismo' || row?.estadoDia === 'incapacidad' || row?.estadoDia === 'ausente_sin_reemplazo';
   }
 
+  function computeOperationalAbsenteeism(planeados, contratados, cubiertos) {
+    const planned = Math.max(0, Number(planeados || 0));
+    const contracted = Math.max(0, Number(contratados || 0));
+    const covered = Math.max(0, Number(cubiertos || 0));
+    if (planned <= 0) return 0;
+    return Math.max(0, Math.min(planned, contracted) - covered);
+  }
+
   function normalizeAbsenteeismRows(fecha, statusRows = [], sedeClosureRows = []) {
     const baseRows = (Array.isArray(statusRows) ? statusRows : []).filter((row) => String(row?.tipoPersonal || '').trim() === 'empleado');
     const sedeClosuresByCode = new Map((Array.isArray(sedeClosureRows) ? sedeClosureRows : []).map((row) => [String(row?.sedeCodigo || '').trim(), row]));
@@ -606,12 +614,9 @@ export const Reports = (mount, deps = {}, options = {}) => {
         const contratados = scheduledRows.length;
         const noContratado = Math.max(0, planeados - contratados);
         const novedadSinReemplazo = scheduledRows.filter((row) => isNoveltyWithoutReplacement(row)).length;
-        const totalAusentismo = scheduled
-          ? scheduledRows.filter((row) => row?.cuentaPagoServicio !== true).length
-          : actualRows.filter((row) => row?.asistio === false).length;
-        const totalPagar = scheduled
-          ? Math.max(0, planeados - noContratado - totalAusentismo)
-          : actualRows.filter((row) => row?.asistio === true).length;
+        const cubiertos = scheduledRows.filter((row) => row?.cuentaPagoServicio === true).length;
+        const totalAusentismo = computeOperationalAbsenteeism(planeados, contratados, cubiertos);
+        const totalPagar = Math.max(0, planeados - noContratado - totalAusentismo);
 
         return {
           fecha,

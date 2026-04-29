@@ -211,12 +211,9 @@ export const Absenteeism = (mount, deps = {}) => {
     const noContratado = Math.max(0, planeados - contratados);
     const noRegistrado = scheduledRows.filter((row) => isNoRegistroAbsenteeism(row)).length;
     const novSinReemplazo = scheduledRows.filter((row) => isNoveltyWithoutReplacement(row)).length;
-    const ausentismoTotal = scheduled
-      ? scheduledRows.filter((row) => row?.cuentaPagoServicio !== true).length
-      : actualRows.filter((row) => row?.asistio === false).length;
-    const totalPagar = scheduled
-      ? Math.max(0, planeados - noContratado - ausentismoTotal)
-      : actualRows.filter((row) => row?.asistio === true).length;
+    const cubiertos = scheduledRows.filter((row) => row?.cuentaPagoServicio === true).length;
+    const ausentismoTotal = computeOperationalAbsenteeism(planeados, contratados, cubiertos);
+    const totalPagar = Math.max(0, planeados - noContratado - ausentismoTotal);
     const dependenciaCodigo = String(sedeSnapshot?.dependenciaCodigo || firstRow?.dependenciaCodigoSnapshot || '').trim();
     const dependenciaNombre = String(sedeSnapshot?.dependenciaNombre || firstRow?.dependenciaNombreSnapshot || 'Sin dependencia').trim() || 'Sin dependencia';
 
@@ -324,13 +321,21 @@ export const Absenteeism = (mount, deps = {}) => {
     const rows = [...(employeeRowsBySede.get(summary.sedeCodigo) || [])]
       .filter((row) => String(row?.tipoPersonal || '').trim() === 'empleado')
       .sort((a, b) => String(a?.nombre || '').localeCompare(String(b?.nombre || '')));
+    const rankedScheduledRows = rows
+      .filter((row) => row?.servicioProgramado === true)
+      .sort((a, b) => {
+        const weight = detailCoverageWeight(a) - detailCoverageWeight(b);
+        if (weight !== 0) return weight;
+        return String(a?.nombre || '').localeCompare(String(b?.nombre || ''));
+      });
+    const plannedAssignments = new Set(rankedScheduledRows.slice(0, Math.max(0, Number(summary?.planeados || 0))));
 
     const detailRows = rows.map((row) => ({
       fecha: summary.fecha,
       sede: summary.sedeNombre,
       documento: row?.documento || '-',
       nombre: row?.nombre || '-',
-      estado: describeDetailStatus(row, summary.scheduled)
+      estado: describeDetailStatus(row, row?.servicioProgramado !== true || !plannedAssignments.has(row))
     }));
 
     for (let index = 0; index < Number(summary.noContratado || 0); index += 1) {
@@ -359,27 +364,28 @@ export const Absenteeism = (mount, deps = {}) => {
     updateSortIndicators('#tblDetail th[data-sort-detail]', 'data-sort-detail', detailSortKey, detailSortDir);
   }
 
-  function describeDetailStatus(row, scheduled) {
-    if (row?.servicioProgramado === true) {
-      if (row?.cuentaPagoServicio === true) {
-        const replacementName = String(row?.reemplazadoPorNombre || row?.reemplazadoPorDocumento || '').trim();
-        return replacementName ? 'Reemplazado por ' + replacementName : 'Trabajo';
-      }
-      if (isNoRegistroAbsenteeism(row)) return 'Ausentismo (sin registro / novedad 8)';
-      if (row?.estadoDia === 'incapacidad') return 'Incapacidad' + (row?.novedadNombre ? ': ' + row.novedadNombre : '');
-      if (row?.novedadNombre) return 'Ausentismo - ' + row.novedadNombre;
-      return 'Ausentismo';
-    }
-
-    const baseStatus = row?.asistio === true
+  function describeDetailStatus(row, isSurplus = row?.servicioProgramado !== true) {
+    const baseStatus = row?.servicioProgramado === true
+      ? row?.cuentaPagoServicio === true
+        ? (() => {
+            const replacementName = String(row?.reemplazadoPorNombre || row?.reemplazadoPorDocumento || '').trim();
+            return replacementName ? 'Reemplazado por ' + replacementName : 'Trabajo';
+          })()
+        : isNoRegistroAbsenteeism(row)
+          ? 'Ausentismo (sin registro / novedad 8)'
+          : row?.estadoDia === 'incapacidad'
+            ? 'Incapacidad' + (row?.novedadNombre ? ': ' + row.novedadNombre : '')
+            : row?.novedadNombre
+              ? 'Ausentismo - ' + row.novedadNombre
+              : 'Ausentismo'
+      : row?.asistio === true
       ? 'Trabajo'
       : row?.estadoDia === 'incapacidad'
         ? 'Incapacidad' + (row?.novedadNombre ? ': ' + row.novedadNombre : '')
         : row?.novedadNombre
           ? 'Ausentismo - ' + row.novedadNombre
           : 'Ausentismo';
-
-    return scheduled ? 'Sobrante - ' + baseStatus : baseStatus;
+    return isSurplus ? 'Sobrante - ' + baseStatus : baseStatus;
   }
 
   function isNoRegistroAbsenteeism(row) {
@@ -397,6 +403,20 @@ export const Absenteeism = (mount, deps = {}) => {
     if (row?.cuentaPagoServicio === true) return false;
     if (isNoRegistroAbsenteeism(row)) return false;
     return String(row?.decisionCobertura || '').trim() === 'ausentismo' || row?.estadoDia === 'incapacidad' || row?.estadoDia === 'ausente_sin_reemplazo';
+  }
+
+  function computeOperationalAbsenteeism(planeados, contratados, cubiertos) {
+    const planned = Math.max(0, Number(planeados || 0));
+    const contracted = Math.max(0, Number(contratados || 0));
+    const covered = Math.max(0, Number(cubiertos || 0));
+    if (planned <= 0) return 0;
+    return Math.max(0, Math.min(planned, contracted) - covered);
+  }
+
+  function detailCoverageWeight(row) {
+    if (row?.cuentaPagoServicio === true) return 0;
+    if (row?.estadoDia === 'incapacidad') return 1;
+    return 2;
   }
 
   async function exportSummaryExcel() {

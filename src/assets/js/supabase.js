@@ -20,6 +20,7 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
 const POSTGREST_PAGE_SIZE = 1000;
 const tableReloaders = new Map();
 const REALTIME_SUBSCRIBE_TIMEOUT_MS = 12000;
+const INCAPACITY_SUPPORT_BUCKET = 'incapacidades-soportes';
 let realtimeChannelSeq = 0;
 
 async function syncRealtimeAuth(session = null) {
@@ -549,10 +550,45 @@ function mapIncapacidadRow(row = {}) {
     fechaFin: row.fecha_fin || null,
     estado: row.estado || 'activo',
     source: row.source || null,
+    canalRegistro: row.canal_registro || null,
+    soporteUrl: row.soporte_url || null,
+    soporteNombre: row.soporte_nombre || null,
+    soporteTipo: row.soporte_tipo || null,
+    soporteStoragePath: row.soporte_storage_path || null,
     whatsappMessageId: row.whatsapp_message_id || null,
     createdAt: row.created_at || null,
     updatedAt: row.updated_at || null
   };
+}
+
+function incapacityOverlapsRange(row = {}, dateFrom = '', dateTo = '') {
+  const from = String(dateFrom || '').trim();
+  const to = String(dateTo || '').trim();
+  const start = String(row?.fechaInicio || row?.fecha_inicio || '').trim();
+  const end = String(row?.fechaFin || row?.fecha_fin || start).trim();
+  if (!start && !end) return true;
+  if (from && end && end < from) return false;
+  if (to && start && start > to) return false;
+  return true;
+}
+
+function sanitizeStoragePathPart(value, fallback = 'general') {
+  const clean = String(value || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-zA-Z0-9._-]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .trim();
+  return clean || fallback;
+}
+
+function buildIncapacitySupportPath(file, { documento = '', employeeId = '' } = {}) {
+  const rawName = String(file?.name || 'soporte').trim();
+  const extensionMatch = rawName.match(/(\.[a-zA-Z0-9]+)$/);
+  const extension = extensionMatch ? extensionMatch[1].toLowerCase() : '';
+  const safeName = sanitizeStoragePathPart(rawName.replace(/(\.[a-zA-Z0-9]+)?$/, ''), 'soporte');
+  const owner = sanitizeStoragePathPart(documento || employeeId || 'sin-documento');
+  return `${owner}/${Date.now()}_${crypto.randomUUID()}_${safeName}${extension}`;
 }
 
 function buildNovedadReplacementRules(rows = []) {
@@ -880,25 +916,24 @@ async function computeDailyClosureSnapshot(fecha) {
     if (!sedeCode) return;
     const bucket = bySede.get(sedeCode) || {
       contratados: 0,
-      asistencias: 0,
-      ausentismos: 0
+      asistencias: 0
     };
     bucket.contratados += 1;
     if (row.cuentaPagoServicio === true) bucket.asistencias += 1;
-    if (row.cuentaPagoServicio === false) bucket.ausentismos += 1;
     bySede.set(sedeCode, bucket);
   });
 
   const summary = sedes.reduce((acc, sede) => {
     const sedeCode = String(sede?.codigo || '').trim();
     const planned = Number(sede?.numeroOperarios ?? 0) || 0;
-    const counts = bySede.get(sedeCode) || { contratados: 0, asistencias: 0, ausentismos: 0 };
+    const counts = bySede.get(sedeCode) || { contratados: 0, asistencias: 0 };
+    const ausentismos = computeOperationalAbsenteeism(planned, counts.contratados, counts.asistencias);
     acc.planeados += planned;
     acc.contratados += counts.contratados;
     acc.registrados += counts.asistencias;
     acc.faltan += Math.max(0, planned - counts.contratados);
     acc.sobran += Math.max(0, counts.contratados - planned);
-    acc.ausentismos += counts.ausentismos;
+    acc.ausentismos += ausentismos;
     return acc;
   }, {
     planeados: 0,
@@ -912,13 +947,21 @@ async function computeDailyClosureSnapshot(fecha) {
 
   if (summary.planeados === 0 && summary.contratados === 0 && actualRows.length) {
     summary.registrados = actualRows.filter((row) => row.asistio === true).length;
-    summary.ausentismos = actualRows.filter((row) => row.asistio === false).length;
+    summary.ausentismos = 0;
     summary.faltan = 0;
-    summary.sobran = 0;
+    summary.sobran = actualRows.length;
   }
 
   summary.noContratados = Math.max(0, summary.planeados - summary.contratados);
   return summary;
+}
+
+function computeOperationalAbsenteeism(planeados, contratados, cubiertos) {
+  const planned = Math.max(0, Number(planeados || 0));
+  const contracted = Math.max(0, Number(contratados || 0));
+  const covered = Math.max(0, Number(cubiertos || 0));
+  if (planned <= 0) return 0;
+  return Math.max(0, Math.min(planned, contracted) - covered);
 }
 
 async function computeDailySedeClosureSnapshot(fecha) {
@@ -2645,7 +2688,7 @@ export async function updateEmployee(id, data = {}) {
   if (await getCargoCrudAlignmentByCode(updated.cargo_codigo, updated.cargo_nombre) === 'supervisor') {
     await upsertSupervisorProfileFromEmployee(mapEmployeeRow(updated));
   }
-    if (cargoChanged || sedeChanged || ingresoChanged || retiroChanged || estadoChanged || documentChanged) {
+  if (cargoChanged || sedeChanged || ingresoChanged || retiroChanged || estadoChanged || documentChanged) {
     await reconcileOperationalSnapshotsForEmployeeChange(currentRow, updated);
   }
   await notifyTableReload('employees');
@@ -3237,6 +3280,136 @@ export function streamIncapacitadosByDate(fecha, onData) {
     unregister();
     supabase.removeChannel(channel);
   };
+}
+
+export function streamIncapacidades(onData, onError = null, onStatus = null) {
+  return streamTable('incapacitados', mapIncapacidadRow, onData, { onError, onStatus });
+}
+
+export async function uploadIncapacidadSupport(file, context = {}) {
+  if (!file) throw new Error('Selecciona un soporte para cargar.');
+  const path = buildIncapacitySupportPath(file, context);
+  const { error } = await supabase
+    .storage
+    .from(INCAPACITY_SUPPORT_BUCKET)
+    .upload(path, file, {
+      upsert: false,
+      contentType: file.type || 'application/octet-stream'
+    });
+  if (error) throw error;
+  const { data } = supabase.storage.from(INCAPACITY_SUPPORT_BUCKET).getPublicUrl(path);
+  return {
+    path,
+    url: data?.publicUrl || '',
+    name: String(file.name || '').trim() || 'soporte',
+    mimeType: String(file.type || '').trim() || 'application/octet-stream'
+  };
+}
+
+export async function createIncapacidad({
+  employeeId = null,
+  documento = null,
+  nombre = null,
+  fechaInicio,
+  fechaFin,
+  estado = 'activo',
+  source = 'Incapacidad',
+  canalRegistro = 'portal_web',
+  soporteUrl = null,
+  soporteNombre = null,
+  soporteTipo = null,
+  soporteStoragePath = null,
+  whatsappMessageId = null
+} = {}) {
+  const payload = {
+    employee_id: employeeId || null,
+    documento: documento || null,
+    nombre: nombre || null,
+    fecha_inicio: fechaInicio || null,
+    fecha_fin: fechaFin || null,
+    estado: estado || 'activo',
+    source: source || 'Incapacidad',
+    canal_registro: canalRegistro || 'portal_web',
+    soporte_url: soporteUrl || null,
+    soporte_nombre: soporteNombre || null,
+    soporte_tipo: supportValueOrNull(soporteTipo),
+    soporte_storage_path: supportValueOrNull(soporteStoragePath),
+    whatsapp_message_id: whatsappMessageId || null
+  };
+  const { data, error } = await supabase
+    .from('incapacitados')
+    .insert(payload)
+    .select('*')
+    .single();
+  if (error) throw error;
+  await notifyTableReload('incapacitados');
+  return mapIncapacidadRow(data);
+}
+
+function supportValueOrNull(value) {
+  return value ? value : null;
+}
+
+export async function updateIncapacidad(id, {
+  employeeId,
+  documento,
+  nombre,
+  fechaInicio,
+  fechaFin,
+  estado,
+  source,
+  canalRegistro,
+  soporteUrl,
+  soporteNombre,
+  soporteTipo,
+  soporteStoragePath
+} = {}) {
+  const patch = {};
+  if (employeeId !== undefined) patch.employee_id = employeeId || null;
+  if (documento !== undefined) patch.documento = documento || null;
+  if (nombre !== undefined) patch.nombre = nombre || null;
+  if (fechaInicio !== undefined) patch.fecha_inicio = fechaInicio || null;
+  if (fechaFin !== undefined) patch.fecha_fin = fechaFin || null;
+  if (estado !== undefined) patch.estado = estado || 'activo';
+  if (source !== undefined) patch.source = source || null;
+  if (canalRegistro !== undefined) patch.canal_registro = canalRegistro || null;
+  if (soporteUrl !== undefined) patch.soporte_url = soporteUrl || null;
+  if (soporteNombre !== undefined) patch.soporte_nombre = soporteNombre || null;
+  if (soporteTipo !== undefined) patch.soporte_tipo = soporteTipo || null;
+  if (soporteStoragePath !== undefined) patch.soporte_storage_path = soporteStoragePath || null;
+  const { data, error } = await supabase
+    .from('incapacitados')
+    .update(patch)
+    .eq('id', id)
+    .select('*')
+    .single();
+  if (error) throw error;
+  await notifyTableReload('incapacitados');
+  return mapIncapacidadRow(data);
+}
+
+export async function setIncapacidadStatus(id, estado) {
+  const { data, error } = await supabase
+    .from('incapacitados')
+    .update({ estado: estado || 'activo' })
+    .eq('id', id)
+    .select('*')
+    .single();
+  if (error) throw error;
+  await notifyTableReload('incapacitados');
+  return mapIncapacidadRow(data);
+}
+
+export async function listIncapacidadesRange(dateFrom, dateTo) {
+  if (!dateFrom || !dateTo) return [];
+  const { data, error } = await supabase
+    .from('incapacitados')
+    .select('*')
+    .order('created_at', { ascending: false });
+  if (error) throw error;
+  return (data || [])
+    .map(mapIncapacidadRow)
+    .filter((row) => incapacityOverlapsRange(row, dateFrom, dateTo));
 }
 
 export async function listSedeStatusRange(dateFrom, dateTo) {

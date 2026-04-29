@@ -39,34 +39,72 @@ Accidente Laboral
 Calamidad
 Licencia No Remunerada
 Vacaciones
+Licencia Remunerada
 
 1.1.4.1. Si elige la Opción (Enfermedad General), Guarda Novedad=3 y continúa con la siguiente pregunta:
 
-Selecciona las fechas de incapacidad:
+Escribe las fechas de incapacidad:
 
 Fecha de inicio de incapacidad, por favor escribe DD/MM/AAAA: 
 
 Fecha de terminación de incapacidad, por favor escribe DD/MM/AAAA:
 
+Una vez la escriba, verificar que en la tabla incapacidades no exista una incapacidad que este dentro de las fechas registradas.
+
+1.4.1.1.1. Si existe otra incapacidad dentro de las fechas, informar:
+
+Usted ya registró una incapacidad para estas fechas, por favor corrija el registro escribiendo "Hola" o comunicate con el Supervisor.
+
+1.4.1.1.2. Si no existe otra incapacidad dentro de las fechas, informar:
+
+Por favor cargue el soporte de la incapacidad ingresando al siguiente link:
+Si > 3 = RECUERDA: Si es mayor a tres días debes cargar la historia clínica o Epicrisis
+
+https://www.capcol.com.co/employee.html
+
 (registra el documento y la fecha de inicio en tabla de incapacidades)
 
 1.1.4.2. Si elige la opción (Accidente Laboral) Guarda Novedad=2 y continúa con la siguiente pregunta:
 
-Selecciona las fechas de incapacidad:
+Escribe las fechas de incapacidad:
 
-Fecha de inicio de incapacidad, por favor escribe DD/MM/AAAA:
+Fecha de inicio de incapacidad, por favor escribe DD/MM/AAAA: 
 
 Fecha de terminación de incapacidad, por favor escribe DD/MM/AAAA:
 
-(registra el documento y la fecha de inicio en tabla de incapacidades)
+Una vez la escriba, verificar que en la tabla incapacidades no exista una incapacidad que este dentro de las fechas registradas.
+
+1.4.1.2.1. Si existe otra incapacidad dentro de las fechas, informar:
+
+Usted ya registró una incapacidad para estas fechas, por favor comuníquese con el supervisor.
+
+1.4.1.2.2. Si no existe otra incapacidad dentro de las fechas, informar:
+
+Por favor cargue el soporte de la incapacidad ingresando al siguiente link:
+Si > 3 = RECUERDA: Si es mayor a tres días debes cargar la historia clínica o Epicrisis
+
+https://www.capcol.com.co/employee.html
 
 1.1.4.3. Si elige opción (Calamidad) Guarda Novedad=4 y continúa con la siguiente pregunta:
 
-Selecciona las fechas de incapacidad:
+Escribe las fechas de incapacidad:
 
-Fecha de inicio de incapacidad, por favor escribe DD/MM/AAAA:
+Fecha de inicio de incapacidad, por favor escribe DD/MM/AAAA: 
 
 Fecha de terminación de incapacidad, por favor escribe DD/MM/AAAA:
+
+Una vez la escriba, verificar que en la tabla incapacidades no exista una incapacidad que este dentro de las fechas registradas.
+
+1.4.1.3.1. Si existe otra incapacidad dentro de las fechas, informar:
+
+Usted ya registró una incapacidad para estas fechas, por favor comuníquese con el supervisor.
+
+1.4.1.3.2. Si no existe otra incapacidad dentro de las fechas, informar:
+
+Por favor cargue el soporte de la incapacidad ingresando al siguiente link: 
+Si > 3 = RECUERDA: Si es mayor a tres días debes cargar la historia clínica o Epicrisis
+
+https://www.capcol.com.co/employee.html
 
 (registra el documento y la fecha de inicio en tabla de incapacidades)
 
@@ -79,6 +117,12 @@ Selecciona las fechas de vacaciones:
 Fecha de inicio de vacaciones, por favor escribe DD/MM/AAAA:
 
 Fecha de terminación de vacaciones, por favor escribe DD/MM/AAAA:
+
+1.1.4.6. Si elige la opción (Licencia Remunerada) Guarda Novedad=6 y continúa con la siguiente pregunta:
+
+Fecha de inicio de licencia, por favor escribe DD/MM/AAAA:
+
+Fecha de terminación de licencia, por favor escribe DD/MM/AAAA:
 
 1.1.2. Si elige (No Soy Yo) realiza la siguiente pregunta:
 
@@ -110,7 +154,6 @@ Diligencia el número de celular nuevo:
 Actualiza el número de teléfono en Empleados (verificando que tenga 57 por delante o se lo agrega) y responde:
 
 Información actualizada correctamente, si no haz realizado el registro por favor escribe nuevamente "Hola".
-
 
 1.2. Si la cédula identificada corresponde a un empleado con el cargo supernumerario responde:
 

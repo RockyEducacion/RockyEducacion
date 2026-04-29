@@ -3,6 +3,8 @@ import { config } from './config.js';
 import { supabaseAdmin } from './supabase.js';
 
 const PRIVILEGED_ROLES = ['superadmin', 'admin', 'editor', 'consultor', 'supervisor'];
+const INCAPACITY_SUPPORT_BUCKET = 'incapacidades-soportes';
+const MAX_SUPPORT_BYTES = 8 * 1024 * 1024;
 
 function mapErrorMessage(error) {
   const code = String(error?.message || '').trim();
@@ -29,6 +31,20 @@ function mapErrorMessage(error) {
       return 'La sesion expiro. Ingresa nuevamente.';
     case 'employee_inactive':
       return 'El empleado no se encuentra activo.';
+    case 'invalid_date':
+      return 'Debes indicar fechas validas para la incapacidad.';
+    case 'invalid_date_range':
+      return 'La fecha de terminacion no puede ser menor a la fecha de inicio.';
+    case 'invalid_support':
+      return 'Adjunta un soporte valido en PDF o imagen.';
+    case 'support_too_large':
+      return 'El soporte supera el tamano permitido.';
+    case 'incapacity_overlap':
+      return 'Ya existe una incapacidad activa que se cruza con ese rango.';
+    case 'invalid_incapacity_id':
+      return 'La incapacidad indicada no es valida.';
+    case 'incapacity_not_found':
+      return 'No encontramos la incapacidad seleccionada para este empleado.';
     default:
       return 'Ocurrio un error procesando el portal de empleados.';
   }
@@ -200,8 +216,197 @@ function sendPortalJson(res, statusCode, payload) {
   res.status(statusCode).json(payload);
 }
 
+function sanitizeIsoDate(value) {
+  const raw = String(value || '').trim();
+  return /^\d{4}-\d{2}-\d{2}$/.test(raw) ? raw : '';
+}
+
+function safeStoragePart(value, fallback = 'archivo') {
+  const clean = String(value || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-zA-Z0-9._-]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .trim();
+  return clean || fallback;
+}
+
+function extensionFromMimeType(value) {
+  const mime = String(value || '').trim().toLowerCase();
+  if (mime === 'application/pdf') return '.pdf';
+  if (mime === 'image/jpeg') return '.jpg';
+  if (mime === 'image/png') return '.png';
+  if (mime === 'image/webp') return '.webp';
+  return '';
+}
+
+function parseSupportDataUrl(dataUrl) {
+  const raw = String(dataUrl || '').trim();
+  const match = raw.match(/^data:([^;]+);base64,(.+)$/);
+  if (!match) {
+    const error = new Error('invalid_support');
+    error.statusCode = 400;
+    throw error;
+  }
+  const mimeType = String(match[1] || '').trim().toLowerCase();
+  if (!['application/pdf', 'image/jpeg', 'image/png', 'image/webp'].includes(mimeType)) {
+    const error = new Error('invalid_support');
+    error.statusCode = 400;
+    throw error;
+  }
+  const buffer = Buffer.from(match[2], 'base64');
+  if (!buffer.length) {
+    const error = new Error('invalid_support');
+    error.statusCode = 400;
+    throw error;
+  }
+  if (buffer.length > MAX_SUPPORT_BYTES) {
+    const error = new Error('support_too_large');
+    error.statusCode = 400;
+    throw error;
+  }
+  return { mimeType, buffer };
+}
+
+async function uploadIncapacitySupportFile({ documento, fileName, dataUrl }) {
+  const { mimeType, buffer } = parseSupportDataUrl(dataUrl);
+  const baseName = safeStoragePart(String(fileName || '').replace(/\.[a-zA-Z0-9]+$/, ''), 'soporte');
+  const extension = String(fileName || '').match(/\.[a-zA-Z0-9]+$/)?.[0]?.toLowerCase() || extensionFromMimeType(mimeType);
+  const owner = safeStoragePart(documento || 'sin-documento');
+  const storagePath = `portal-web/${owner}/${Date.now()}_${crypto.randomUUID()}_${baseName}${extension}`;
+  const { error } = await supabaseAdmin
+    .storage
+    .from(INCAPACITY_SUPPORT_BUCKET)
+    .upload(storagePath, buffer, {
+      upsert: false,
+      contentType: mimeType
+    });
+  if (error) throw error;
+  const { data } = supabaseAdmin.storage.from(INCAPACITY_SUPPORT_BUCKET).getPublicUrl(storagePath);
+  return {
+    url: data?.publicUrl || '',
+    name: String(fileName || '').trim() || `soporte${extension}`,
+    mimeType,
+    storagePath
+  };
+}
+
+function mapIncapacityRow(row = {}) {
+  return {
+    id: row.id,
+    employeeId: row.employee_id || null,
+    documento: row.documento || null,
+    nombre: row.nombre || null,
+    fechaInicio: row.fecha_inicio || null,
+    fechaFin: row.fecha_fin || null,
+    estado: row.estado || 'activo',
+    source: row.source || null,
+    canalRegistro: row.canal_registro || null,
+    soporteUrl: row.soporte_url || null,
+    soporteNombre: row.soporte_nombre || null,
+    soporteTipo: row.soporte_tipo || null,
+    soporteStoragePath: row.soporte_storage_path || null,
+    whatsappMessageId: row.whatsapp_message_id || null,
+    createdAt: row.created_at || null,
+    updatedAt: row.updated_at || null
+  };
+}
+
+function incapacityOverlapsRange(row = {}, dateFrom = '', dateTo = '') {
+  const from = String(dateFrom || '').trim();
+  const to = String(dateTo || '').trim();
+  const start = String(row?.fecha_inicio || row?.fechaInicio || '').trim();
+  const end = String(row?.fecha_fin || row?.fechaFin || start).trim();
+  if (!start && !end) return true;
+  if (from && end && end < from) return false;
+  if (to && start && start > to) return false;
+  return true;
+}
+
+async function getActiveEmployeePortalContext(req, { ip, userAgent } = {}) {
+  const token = getSessionTokenFromRequest(req);
+  if (!token) {
+    const error = new Error('missing_session');
+    error.statusCode = 401;
+    throw error;
+  }
+
+  const session = await getEmployeePortalSessionByHash(hashToken(token));
+  if (!session || session.revoked_at) {
+    const error = new Error('session_not_found');
+    error.statusCode = 401;
+    throw error;
+  }
+
+  if (new Date(session.expires_at).getTime() <= Date.now()) {
+    await revokeEmployeePortalSession(session.id);
+    await createEmployeePortalAudit({
+      employee_id: session.employee_id,
+      session_id: session.id,
+      documento: session.documento_snapshot,
+      action: 'employee_portal_session_expired',
+      detail: {},
+      ip,
+      user_agent: userAgent
+    });
+    const error = new Error('session_expired');
+    error.statusCode = 401;
+    throw error;
+  }
+
+  const employee = await getEmployeeById(session.employee_id);
+  if (!employee || String(employee.estado || '').trim().toLowerCase() !== 'activo') {
+    await revokeEmployeePortalSession(session.id);
+    await createEmployeePortalAudit({
+      employee_id: session.employee_id,
+      session_id: session.id,
+      documento: session.documento_snapshot,
+      action: 'employee_portal_session_revoked_employee_inactive',
+      detail: {},
+      ip,
+      user_agent: userAgent
+    });
+    const error = new Error('employee_inactive');
+    error.statusCode = 403;
+    throw error;
+  }
+
+  const documento = session.documento_snapshot || employee.documento;
+  const privilegedProfile = await getPrivilegedProfileByDocument(documento);
+  if (privilegedProfile) {
+    await revokeEmployeePortalSession(session.id);
+    await createEmployeePortalAudit({
+      employee_id: session.employee_id,
+      session_id: session.id,
+      documento,
+      action: 'employee_portal_session_redirect_main',
+      detail: {
+        role: privilegedProfile.role || null,
+        email: privilegedProfile.email || null
+      },
+      ip,
+      user_agent: userAgent
+    });
+    const error = new Error('use_main_portal');
+    error.statusCode = 403;
+    throw error;
+  }
+
+  await touchEmployeePortalSession(session.id);
+  return { session, employee };
+}
+
 export function registerEmployeePortalRoutes(app) {
-  app.use(['/employee-login', '/api/employee-login', '/employee-me', '/api/employee-me', '/employee-logout', '/api/employee-logout'], (req, res, next) => {
+  app.use([
+    '/employee-login',
+    '/api/employee-login',
+    '/employee-me',
+    '/api/employee-me',
+    '/employee-incapacities',
+    '/api/employee-incapacities',
+    '/employee-logout',
+    '/api/employee-logout'
+  ], (req, res, next) => {
     employeePortalCors(req, res);
     if (req.method === 'OPTIONS') return res.status(204).end();
     return next();
@@ -406,6 +611,221 @@ export function registerEmployeePortalRoutes(app) {
         session: buildEmployeeSessionPayload(session, employee)
       });
     } catch (error) {
+      handleEmployeePortalError(res, error);
+    }
+  });
+
+  app.get(['/employee-incapacities', '/api/employee-incapacities'], async (req, res) => {
+    const ip = getClientIp(req);
+    const userAgent = getUserAgent(req);
+
+    try {
+      const { session, employee } = await getActiveEmployeePortalContext(req, { ip, userAgent });
+      const documento = sanitizeDocument(employee?.documento || session?.documento_snapshot || '');
+      const dateFrom = sanitizeIsoDate(req.query?.dateFrom);
+      const dateTo = sanitizeIsoDate(req.query?.dateTo);
+      let query = supabaseAdmin
+        .from('incapacitados')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+      if (employee?.id && documento) {
+        query = query.or(`employee_id.eq.${employee.id},documento.eq.${documento}`);
+      } else if (employee?.id) {
+        query = query.eq('employee_id', employee.id);
+      } else {
+        query = query.eq('documento', documento);
+      }
+
+      const { data, error } = await query;
+      if (error) throw error;
+
+      sendPortalJson(res, 200, {
+        ok: true,
+        rows: (data || [])
+          .filter((row) => !dateFrom || !dateTo || incapacityOverlapsRange(row, dateFrom, dateTo))
+          .map(mapIncapacityRow)
+      });
+    } catch (error) {
+      console.error('Error consultando incapacidades del portal:', error);
+      handleEmployeePortalError(res, error);
+    }
+  });
+
+  app.post(['/employee-incapacities', '/api/employee-incapacities'], async (req, res) => {
+    const ip = getClientIp(req);
+    const userAgent = getUserAgent(req);
+
+    try {
+      const { session, employee } = await getActiveEmployeePortalContext(req, { ip, userAgent });
+      const fechaInicio = sanitizeIsoDate(req.body?.fechaInicio);
+      const fechaFin = sanitizeIsoDate(req.body?.fechaFin);
+      const soporte = req.body?.soporte && typeof req.body.soporte === 'object' ? req.body.soporte : null;
+
+      if (!fechaInicio || !fechaFin) {
+        const error = new Error('invalid_date');
+        error.statusCode = 400;
+        throw error;
+      }
+      if (fechaFin < fechaInicio) {
+        const error = new Error('invalid_date_range');
+        error.statusCode = 400;
+        throw error;
+      }
+      if (!soporte?.dataUrl) {
+        const error = new Error('invalid_support');
+        error.statusCode = 400;
+        throw error;
+      }
+
+      const documento = sanitizeDocument(employee?.documento || session?.documento_snapshot || '');
+      const { data: overlapRows, error: overlapError } = await supabaseAdmin
+        .from('incapacitados')
+        .select('id')
+        .eq('estado', 'activo')
+        .or(`employee_id.eq.${employee.id},documento.eq.${documento}`)
+        .lte('fecha_inicio', fechaFin)
+        .gte('fecha_fin', fechaInicio)
+        .limit(1);
+      if (overlapError) throw overlapError;
+      if (Array.isArray(overlapRows) && overlapRows.length) {
+        const error = new Error('incapacity_overlap');
+        error.statusCode = 409;
+        throw error;
+      }
+
+      const uploadedSupport = await uploadIncapacitySupportFile({
+        documento,
+        fileName: soporte?.name || 'soporte.pdf',
+        dataUrl: soporte?.dataUrl || ''
+      });
+
+      const { data, error } = await supabaseAdmin
+        .from('incapacitados')
+        .insert({
+          employee_id: employee.id,
+          documento,
+          nombre: employee.nombre || session?.nombre_snapshot || 'Empleado',
+          fecha_inicio: fechaInicio,
+          fecha_fin: fechaFin,
+          estado: 'activo',
+          source: 'Incapacidad',
+          canal_registro: 'portal_web',
+          soporte_url: uploadedSupport.url,
+          soporte_nombre: uploadedSupport.name,
+          soporte_tipo: uploadedSupport.mimeType,
+          soporte_storage_path: uploadedSupport.storagePath
+        })
+        .select('*')
+        .single();
+      if (error) throw error;
+
+      await createEmployeePortalAudit({
+        employee_id: employee.id,
+        session_id: session.id,
+        documento,
+        action: 'employee_portal_incapacity_created',
+        detail: {
+          incapacity_id: data.id,
+          fecha_inicio: fechaInicio,
+          fecha_fin: fechaFin,
+          canal_registro: 'portal_web'
+        },
+        ip,
+        user_agent: userAgent
+      });
+
+      sendPortalJson(res, 200, {
+        ok: true,
+        row: mapIncapacityRow(data)
+      });
+    } catch (error) {
+      console.error('Error creando incapacidad desde portal:', error);
+      handleEmployeePortalError(res, error);
+    }
+  });
+
+  app.post(['/employee-incapacities/:id/support', '/api/employee-incapacities/:id/support'], async (req, res) => {
+    const ip = getClientIp(req);
+    const userAgent = getUserAgent(req);
+
+    try {
+      const { session, employee } = await getActiveEmployeePortalContext(req, { ip, userAgent });
+      const incapacityId = String(req.params?.id || '').trim();
+      const soporte = req.body?.soporte && typeof req.body.soporte === 'object' ? req.body.soporte : null;
+
+      if (!incapacityId) {
+        const error = new Error('invalid_incapacity_id');
+        error.statusCode = 400;
+        throw error;
+      }
+      if (!soporte?.dataUrl) {
+        const error = new Error('invalid_support');
+        error.statusCode = 400;
+        throw error;
+      }
+
+      const documento = sanitizeDocument(employee?.documento || session?.documento_snapshot || '');
+      let query = supabaseAdmin
+        .from('incapacitados')
+        .select('*')
+        .eq('id', incapacityId);
+
+      if (employee?.id && documento) {
+        query = query.or(`employee_id.eq.${employee.id},documento.eq.${documento}`);
+      } else if (employee?.id) {
+        query = query.eq('employee_id', employee.id);
+      } else {
+        query = query.eq('documento', documento);
+      }
+
+      const { data: incapacityRow, error: incapacityError } = await query.maybeSingle();
+      if (incapacityError) throw incapacityError;
+      if (!incapacityRow) {
+        const error = new Error('incapacity_not_found');
+        error.statusCode = 404;
+        throw error;
+      }
+
+      const uploadedSupport = await uploadIncapacitySupportFile({
+        documento,
+        fileName: soporte?.name || 'soporte.pdf',
+        dataUrl: soporte?.dataUrl || ''
+      });
+
+      const { data, error } = await supabaseAdmin
+        .from('incapacitados')
+        .update({
+          soporte_url: uploadedSupport.url,
+          soporte_nombre: uploadedSupport.name,
+          soporte_tipo: uploadedSupport.mimeType,
+          soporte_storage_path: uploadedSupport.storagePath
+        })
+        .eq('id', incapacityId)
+        .select('*')
+        .single();
+      if (error) throw error;
+
+      await createEmployeePortalAudit({
+        employee_id: employee.id,
+        session_id: session.id,
+        documento,
+        action: 'employee_portal_incapacity_support_uploaded',
+        detail: {
+          incapacity_id: data.id,
+          soporte_nombre: uploadedSupport.name,
+          soporte_tipo: uploadedSupport.mimeType
+        },
+        ip,
+        user_agent: userAgent
+      });
+
+      sendPortalJson(res, 200, {
+        ok: true,
+        row: mapIncapacityRow(data)
+      });
+    } catch (error) {
+      console.error('Error cargando soporte desde portal:', error);
       handleEmployeePortalError(res, error);
     }
   });

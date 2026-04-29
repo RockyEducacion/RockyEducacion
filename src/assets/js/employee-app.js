@@ -149,10 +149,10 @@ function renderDashboardCard(session) {
   const uploadMount = el('div');
   const info = employeeCard([
     el('div', { className: 'form-row' }, [
-      el('div', {}, [
-        el('h2', { style: 'margin:0;' }, [`Hola, ${session?.nombre || 'Empleado'}`]),
-        el('p', { className: 'text-muted mt-1' }, ['Tu acceso esta limitado a la seccion de carga de datos del portal de empleados.'])
-      ]),
+        el('div', {}, [
+          el('h2', { style: 'margin:0;' }, [`Hola, ${session?.nombre || 'Empleado'}`]),
+          el('p', { className: 'text-muted mt-1' }, ['Tu acceso esta limitado a la seccion de incapacidades del portal de empleados.'])
+        ]),
       el('button', { className: 'btn right', type: 'button' }, ['Cerrar sesion'])
     ]),
     el('div', { className: 'employee-grid mt-2' }, [
@@ -165,7 +165,7 @@ function renderDashboardCard(session) {
 
   info.querySelector('button')?.addEventListener('click', logout);
   host.append(info);
-  CargarDatos(uploadMount);
+  CargarDatos(uploadMount, { apiRequest: request, portalSession: session });
   return host;
 }
 

@@ -8,55 +8,60 @@ export const Home = async (mount, deps = {}) => {
   const today = todayBogota();
   const monthStart = monthStartBogota(today);
 
-  const header = el('div', {
-    className: 'section-block',
-    style: [
-      'background:linear-gradient(135deg,#f8fafc 0%,#e0f2fe 52%,#ecfccb 100%)',
-      'border:1px solid #dbeafe',
-      'padding:1.5rem'
-    ].join(';')
-  }, [
-    el('p', {
-      className: 'text-muted',
-      style: 'margin:0 0 .35rem 0; letter-spacing:.08em; text-transform:uppercase;'
-    }, ['RockyEducacion']),
-    el('h2', { style: 'margin:0; font-size:2rem; line-height:1.05;' }, ['Inicio']),
-    el('p', { style: 'margin:.75rem 0 0 0; font-size:1rem;' }, [`Hola, ${displayName}.`]),
-    el('p', { className: 'text-muted', style: 'margin:.35rem 0 0 0;' }, [`Rol actual: ${role}.`]),
-    el('p', { className: 'mt-2', style: 'max-width:760px; margin-bottom:0;' }, [
-      'Este panel resume la planeacion activa, la contratacion base y el comportamiento diario del mes actual.'
-    ])
-  ]);
-
-  const summaryBlock = el('div', { className: 'section-block mt-2' }, [
-    el('div', { style: 'display:flex; justify-content:space-between; gap:1rem; align-items:flex-end; flex-wrap:wrap;' }, [
-      el('div', {}, [
-        el('h3', { className: 'section-title' }, ['Dashboard operativo']),
-        el('p', { className: 'text-muted', style: 'margin:.35rem 0 0 0;' }, ['Sedes activas, planeacion y contratacion base actual.'])
+  const hero = el('div', { className: 'home-hero' }, [
+    el('div', { className: 'home-hero__content' }, [
+      el('h2', { className: 'home-hero__title' }, ['Centro de control operativo']),
+      el('p', { className: 'home-hero__lead' }, [
+        `Hola, ${displayName}.`
       ]),
-      el('p', { id: 'homeSummaryNote', className: 'text-muted', style: 'margin:0;' }, ['Cargando datos...'])
-    ]),
-    el('div', { id: 'homeSummaryCards', className: 'mt-2', style: 'display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:1rem;' }, [
-      ...['Sedes activas', 'Planeados', 'Contratados', 'Sobran', 'Faltan'].map((label) => metricCard(label, '...'))
+      el('div', { className: 'home-hero__meta' }, [
+        heroPill('Rol activo', role),
+        heroPill('Fecha de corte', today),
+        heroPill('Plataforma', 'RockyEDU')
+      ])
     ])
   ]);
 
-  const chartBlock = el('div', { className: 'section-block mt-2' }, [
-    el('div', { style: 'display:flex; justify-content:space-between; gap:1rem; align-items:flex-end; flex-wrap:wrap;' }, [
-      el('div', {}, [
-        el('h3', { className: 'section-title' }, ['Tendencia mensual']),
-        el('p', { className: 'text-muted', style: 'margin:.35rem 0 0 0;' }, [`Del ${monthStart} al ${today}.`])
+  const summaryToggle = sectionToggle('Dashboard operativo');
+  const summaryBlock = el('div', { className: 'section-block' }, [
+    summaryToggle,
+    el('div', { className: 'section-content' }, [
+      el('div', { className: 'home-summary__top' }, [
+        el('div', {}, [
+          el('p', { className: 'text-muted', style: 'margin:0;' }, ['Sedes activas, planeacion base y contratacion institucional.'])
+        ]),
+        el('p', { id: 'homeSummaryNote', className: 'text-muted', style: 'margin:0;' }, ['Cargando datos...'])
       ]),
-      el('p', { id: 'homeChartNote', className: 'text-muted', style: 'margin:0;' }, ['Cargando grafico...'])
-    ]),
-    el('div', { id: 'homeChartLegend', className: 'mt-2', style: 'display:flex; gap:.75rem 1rem; flex-wrap:wrap;' }, []),
-    el('div', { id: 'homeChartMount', className: 'mt-2', style: 'overflow:auto;' }, [
-      el('p', { className: 'text-muted' }, ['Preparando informacion del mes actual...'])
+      el('div', { id: 'homeSummaryCards', className: 'home-summary__cards mt-2' }, [
+        metricCard('Sedes activas', '...', 'green'),
+        metricCard('Planeados', '...', 'blue'),
+        metricCard('Contratados', '...', 'indigo'),
+        metricCard('Sobran', '...', 'lime'),
+        metricCard('Faltan', '...', 'red')
+      ])
     ])
   ]);
 
-  const ui = el('section', { className: 'main-card' }, [header, summaryBlock, chartBlock]);
+  const chartToggle = sectionToggle('Tendencia mensual');
+  const chartBlock = el('div', { className: 'section-block' }, [
+    chartToggle,
+    el('div', { className: 'section-content' }, [
+      el('div', { className: 'home-chart__top' }, [
+        el('div', {}, [
+          el('p', { className: 'text-muted', style: 'margin:0;' }, [`Del ${monthStart} al ${today}.`])
+        ])
+      ]),
+      el('div', { id: 'homeChartLegend', className: 'home-chart__legend mt-2' }, []),
+      el('div', { id: 'homeChartMount', className: 'home-chart__mount mt-2' }, [
+        el('p', { className: 'text-muted' }, ['Preparando informacion del mes actual...'])
+      ])
+    ])
+  ]);
+
+  const ui = el('section', { className: 'main-card home-shell' }, [hero, summaryBlock, chartBlock]);
   mount.replaceChildren(ui);
+  bindSectionToggle(summaryBlock, summaryToggle);
+  bindSectionToggle(chartBlock, chartToggle);
 
   try {
     const [sedes, employees, metrics] = await Promise.all([
@@ -78,18 +83,32 @@ export const Home = async (mount, deps = {}) => {
   return () => {};
 };
 
-function metricCard(label, value, accent = '#0f766e') {
-  return el('div', {
-    style: [
-      'border:1px solid #e5e7eb',
-      'border-radius:16px',
-      'padding:1rem',
-      'background:#fff',
-      'box-shadow:0 10px 25px rgba(15,23,42,.05)'
-    ].join(';')
-  }, [
-    el('span', { className: 'text-muted', style: 'display:block; font-size:.82rem;' }, [label]),
-    el('strong', { style: `display:block; margin-top:.45rem; font-size:1.9rem; line-height:1; color:${accent};` }, [String(value || '0')])
+function heroPill(label, value) {
+  return el('span', { className: 'home-hero__pill' }, [
+    el('span', { className: 'home-hero__pill-label' }, [`${label}:`]),
+    el('span', { className: 'home-hero__pill-value' }, [String(value || '-')])
+  ]);
+}
+
+function sectionToggle(title) {
+  return el('button', {
+    className: 'section-title section-title--toggle home-section-toggle',
+    type: 'button',
+    'aria-expanded': 'true'
+  }, [title]);
+}
+
+function bindSectionToggle(block, toggle) {
+  toggle.addEventListener('click', () => {
+    const collapsed = block.classList.toggle('is-collapsed');
+    toggle.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+  });
+}
+
+function metricCard(label, value, tone = 'blue') {
+  return el('div', { className: `metric-tile metric-tile--${tone}` }, [
+    el('span', { className: 'metric-tile__label' }, [label]),
+    el('strong', { className: 'metric-tile__value' }, [String(value || '0')])
   ]);
 }
 
@@ -208,13 +227,13 @@ function renderSummary(block, summary) {
   const cardsMount = block.querySelector('#homeSummaryCards');
   const note = block.querySelector('#homeSummaryNote');
   cardsMount.replaceChildren(
-    metricCard('Sedes activas', summary.activeSedes, '#0f766e'),
-    metricCard('Planeados', summary.planned, '#0369a1'),
-    metricCard('Contratados', summary.contracted, '#1d4ed8'),
-    metricCard('Sobran', summary.surplus, '#7c3aed'),
-    metricCard('Faltan', summary.missing, '#dc2626')
+    metricCard('Sedes activas', summary.activeSedes, 'green'),
+    metricCard('Planeados', summary.planned, 'blue'),
+    metricCard('Contratados', summary.contracted, 'indigo'),
+    metricCard('Sobran', summary.surplus, 'lime'),
+    metricCard('Faltan', summary.missing, 'red')
   );
-  note.textContent = `Planeacion base por sede activa: ${summary.planned} cupos y ${summary.contracted} contratados sin supernumerarios.`;
+  note.textContent = `Planeacion institucional: ${summary.planned} cupos base y ${summary.contracted} contratados activos sin supernumerarios.`;
 }
 
 function buildMonthlySeries(from, to, metricsRows = []) {
@@ -256,6 +275,7 @@ function buildMonthlySeries(from, to, metricsRows = []) {
   ];
   return { rows, maxValue, mismatches, surplusDays, legend };
 }
+
 function listDaysInRange(from, to) {
   const out = [];
   let current = String(from || '').trim();
@@ -276,14 +296,10 @@ function addOneDay(value) {
 function renderMonthlyChart(block, chartData, from, to) {
   const legend = block.querySelector('#homeChartLegend');
   const mount = block.querySelector('#homeChartMount');
-  const note = block.querySelector('#homeChartNote');
   const rows = chartData?.rows || [];
   const maxValue = Math.max(1, Number(chartData?.maxValue || 0));
 
   legend.replaceChildren(...(chartData?.legend || []).map((item) => legendChip(item.label, item.color, item.kind)));
-  note.textContent = chartData?.mismatches
-    ? `Mes actual: ${from} a ${to}. La linea negra muestra planeados. Las barras muestran la cobertura diaria. Hay ${chartData.mismatches} dia(s) con diferencia y ${chartData?.surplusDays || 0} dia(s) donde los contratados base superan la planeacion.`
-    : `Mes actual: ${from} a ${to}. La linea negra muestra planeados y las barras la cobertura diaria sin supernumerarios ni inactivos.`;
 
   if (!rows.length) {
     mount.replaceChildren(el('p', { className: 'text-muted' }, ['Sin datos para el mes actual.']));
@@ -308,7 +324,7 @@ function renderMonthlyChart(block, chartData, from, to) {
 
   gridValues.forEach((value) => {
     const y = yFor(value);
-    svg.push(`<line x1="${margin.left}" y1="${y}" x2="${width - margin.right}" y2="${y}" stroke="#e5e7eb" stroke-dasharray="4 4" />`);
+    svg.push(`<line x1="${margin.left}" y1="${y}" x2="${width - margin.right}" y2="${y}" stroke="#d9e3ed" stroke-dasharray="4 4" />`);
     svg.push(`<text x="${margin.left - 10}" y="${y + 4}" text-anchor="end" font-size="11" fill="#64748b">${value}</text>`);
   });
 
@@ -320,13 +336,13 @@ function renderMonthlyChart(block, chartData, from, to) {
     svg.push(`<g class="home-chart-day" data-day="${row.day}" data-planned="${row.planned}" data-expected="${row.expected}" data-attendance="${row.attendance}" data-absenteeism="${row.absenteeism}" data-no-contracted="${row.noContracted}" data-total="${row.stackedTotal}" data-surplus="${row.surplus}" data-closed="${row.closed ? 'true' : 'false'}" style="cursor:pointer;">`);
     svg.push(`<rect x="${hitX}" y="${margin.top}" width="${hitWidth}" height="${plotHeight}" fill="transparent" />`);
     if (index < rows.length - 1) {
-      svg.push(`<line x1="${x + barWidth / 2}" y1="${margin.top}" x2="${x + barWidth / 2}" y2="${height - margin.bottom}" stroke="#f8fafc" />`);
+      svg.push(`<line x1="${x + barWidth / 2}" y1="${margin.top}" x2="${x + barWidth / 2}" y2="${height - margin.bottom}" stroke="#f4f7fa" />`);
     }
 
     const segments = [
-      { value: row.attendance, color: '#2563eb', label: 'Asistencias' },
-      { value: row.absenteeism, color: '#ea580c', label: 'Ausentismos' },
-      { value: row.noContracted, color: '#7c3aed', label: 'No contratados' }
+      { value: row.attendance, color: '#2563eb' },
+      { value: row.absenteeism, color: '#ea580c' },
+      { value: row.noContracted, color: '#7c3aed' }
     ];
     let accumulated = 0;
     segments.forEach((segment) => {
@@ -341,7 +357,7 @@ function renderMonthlyChart(block, chartData, from, to) {
     const plannedY = yFor(row.planned);
     svg.push(`<line x1="${x - 2}" y1="${plannedY}" x2="${x + barWidth + 2}" y2="${plannedY}" stroke="#0f172a" stroke-width="2.5" stroke-linecap="round" />`);
     if (row.planned !== row.stackedTotal) {
-      const markerColor = row.stackedTotal > row.planned ? '#7c3aed' : '#b91c1c';
+      const markerColor = row.stackedTotal > row.planned ? '#2f9a47' : '#b91c1c';
       svg.push(`<circle cx="${x + barWidth / 2}" cy="${plannedY}" r="3.2" fill="${markerColor}" />`);
     }
     svg.push(`<text x="${x + barWidth / 2}" y="${height - 18}" text-anchor="middle" font-size="10" fill="#64748b">${dayLabel}</text>`);
@@ -350,11 +366,8 @@ function renderMonthlyChart(block, chartData, from, to) {
 
   svg.push('</svg>');
 
-  const chartShell = el('div', { style: 'position:relative; min-width:760px;' }, []);
-  const detailBox = el('div', {
-    className: 'mt-2',
-    style: 'padding:.8rem 1rem; border:1px solid #e5e7eb; border-radius:14px; background:#f8fafc; font-size:.92rem;'
-  }, []);
+  const chartShell = el('div', { className: 'home-chart__canvas-shell' }, []);
+  const detailBox = el('div', { className: 'home-chart__detail mt-2' }, []);
   mount.replaceChildren(chartShell, detailBox);
   chartShell.innerHTML = `${svg.join('')}<div id="homeChartTooltip" style="position:absolute; display:none; pointer-events:none; z-index:4; max-width:280px; background:#0f172a; color:#fff; border-radius:12px; padding:.65rem .8rem; box-shadow:0 18px 40px rgba(15,23,42,.24); font-size:.82rem; line-height:1.35;"></div>`;
 
@@ -409,6 +422,7 @@ function renderMonthlyChart(block, chartData, from, to) {
     });
   });
 }
+
 function chartDayDataFromNode(node) {
   const data = node?.dataset || {};
   return {
@@ -440,6 +454,7 @@ function chartDayDetailHtml(data, prefix = 'Detalle del dia') {
     `<span style="display:block; opacity:.82;">Balance vs planeacion: ${balance}</span>`
   ].join('');
 }
+
 function positionChartTooltip(container, tooltip, clientX, clientY) {
   if (!container || !tooltip) return;
   const containerRect = container.getBoundingClientRect();
@@ -457,29 +472,15 @@ function legendChip(label, color, kind = 'fill') {
   const swatchStyle = kind === 'line'
     ? `width:18px; height:0; border-top:3px solid ${color}; display:inline-block; border-radius:999px;`
     : `width:10px; height:10px; border-radius:999px; background:${color}; display:inline-block;`;
-  return el('span', {
-    style: [
-      'display:inline-flex',
-      'align-items:center',
-      'gap:.45rem',
-      'padding:.35rem .6rem',
-      'border:1px solid #e5e7eb',
-      'border-radius:999px',
-      'font-size:.85rem',
-      'background:#fff'
-    ].join(';')
-  }, [
-    el('span', {
-      style: swatchStyle
-    }, []),
+  return el('span', { className: 'legend-chip' }, [
+    el('span', { style: swatchStyle }, []),
     label
   ]);
 }
+
 function renderChartError(block, error) {
   const mount = block.querySelector('#homeChartMount');
-  const note = block.querySelector('#homeChartNote');
   const legend = block.querySelector('#homeChartLegend');
   legend.replaceChildren();
-  note.textContent = 'No fue posible cargar el grafico del mes actual.';
   mount.replaceChildren(el('p', { className: 'text-muted' }, [`Error: ${error?.message || error}`]));
 }

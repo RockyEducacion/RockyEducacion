@@ -107,7 +107,7 @@ export const ImportHistory = (mount, deps = {}) => {
     ].join('|');
   }
 
-  function statusDetailState(row) {
+  function statusDetailState(row, isSurplus = row?.servicioProgramado !== true) {
     const estadoDia = String(row?.estadoDia || '').trim();
     const decision = String(row?.decisionCobertura || '').trim().toLowerCase();
     const tipoPersonal = String(row?.tipoPersonal || 'empleado').trim().toLowerCase();
@@ -120,33 +120,66 @@ export const ImportHistory = (mount, deps = {}) => {
     if (decision === 'reemplazo') {
       return `Reemplazado por ${reemplazadoPor}`;
     }
-    if (row?.asistio === true) {
-      return tipoPersonal === 'supernumerario' ? 'Trabajo supernumerario' : 'Trabajo';
-    }
-    if (decision === 'ausentismo' || row?.cuentaPagoServicio === false) {
-      return 'Ausentismo';
-    }
-    if (estadoDia === 'sin_registro') {
-      return 'Sin registro';
-    }
-    if (estadoDia === 'incapacidad') {
-      return 'Incapacidad';
-    }
-    if (estadoDia === 'vacaciones') {
-      return 'Vacaciones';
-    }
-    if (estadoDia === 'compensatorio') {
-      return 'Compensatorio';
-    }
-    if (estadoDia === 'ausente_con_novedad') {
-      return 'Ausente con novedad';
-    }
-    if (estadoDia === 'ausente_sin_reemplazo') {
-      return 'Ausentismo';
-    }
-    if (estadoDia === 'no_programado') {
-      return 'No programado';
-    }
+    const baseStatus = row?.asistio === true
+      ? tipoPersonal === 'supernumerario' ? 'Trabajo supernumerario' : 'Trabajo'
+      : estadoDia === 'sin_registro'
+        ? 'Sin registro'
+        : estadoDia === 'incapacidad'
+          ? 'Incapacidad'
+          : estadoDia === 'vacaciones'
+            ? 'Vacaciones'
+            : estadoDia === 'compensatorio'
+              ? 'Compensatorio'
+              : estadoDia === 'ausente_con_novedad'
+                ? 'Ausente con novedad'
+                : estadoDia === 'ausente_sin_reemplazo' || decision === 'ausentismo' || row?.cuentaPagoServicio === false
+                  ? 'Ausentismo'
+                  : estadoDia === 'no_programado'
+                    ? 'No programado'
+                    : humanizeEstadoDia(estadoDia);
+    return isSurplus ? `Sobrante - ${baseStatus}` : baseStatus;
+  }
+
+  function coverageWeight(row) {
+    if (row?.cuentaPagoServicio === true) return 0;
+    if (String(row?.estadoDia || '').trim() === 'incapacidad') return 1;
+    return 2;
+  }
+
+  function surplusStatusKeys(statusRows = [], sedeClosures = []) {
+    const plannedBySede = new Map(
+      (sedeClosures || []).map((row) => [String(row?.sedeCodigo || '').trim(), Number(row?.planeados || 0)])
+    );
+    const rowsBySede = new Map();
+    (statusRows || []).forEach((row) => {
+      const sedeCode = String(row?.sedeCodigo || '').trim();
+      if (!sedeCode) return;
+      if (!rowsBySede.has(sedeCode)) rowsBySede.set(sedeCode, []);
+      rowsBySede.get(sedeCode).push(row);
+    });
+
+    const surplusKeys = new Set();
+    rowsBySede.forEach((rows, sedeCode) => {
+      const planned = Math.max(0, Number(plannedBySede.get(sedeCode) || 0));
+      const rankedScheduledRows = rows
+        .filter((row) => row?.servicioProgramado === true)
+        .sort((a, b) => {
+          const weight = coverageWeight(a) - coverageWeight(b);
+          if (weight !== 0) return weight;
+          return String(a?.nombre || '').localeCompare(String(b?.nombre || ''));
+        });
+      const plannedAssignments = new Set(rankedScheduledRows.slice(0, planned));
+      rows.forEach((row) => {
+        const isReplacementSupernumerario = String(row?.tipoPersonal || '').trim().toLowerCase() === 'supernumerario'
+          && String(row?.estadoDia || '').trim() === 'trabajado_reemplazo';
+        const isSurplus = !isReplacementSupernumerario && (row?.servicioProgramado !== true || !plannedAssignments.has(row));
+        if (isSurplus) surplusKeys.add(attendanceKey(row));
+      });
+    });
+    return surplusKeys;
+  }
+
+  function humanizeEstadoDia(estadoDia) {
     return estadoDia
       ? estadoDia.replace(/_/g, ' ').replace(/\b\w/g, (ch) => ch.toUpperCase())
       : '-';
@@ -158,17 +191,19 @@ export const ImportHistory = (mount, deps = {}) => {
     qs('#detailTitle', ui).textContent = `Detalle del dia ${date}`;
     qs('#msg', ui).textContent = 'Cargando detalle...';
     try {
-      const [statusRows, attendance] = await Promise.all([
+      const [statusRows, attendance, sedeClosures] = await Promise.all([
         deps.listEmployeeDailyStatusRange?.(date, date) || [],
-        deps.listAttendanceRange?.(date, date) || []
+        deps.listAttendanceRange?.(date, date) || [],
+        deps.listDailySedeClosuresRange?.(date, date) || []
       ]);
 
       const attendanceByKey = new Map();
       (attendance || []).forEach((item) => {
         attendanceByKey.set(attendanceKey(item), item);
       });
+      const surplusKeys = surplusStatusKeys(statusRows || [], sedeClosures || []);
 
-      detailSnapshot = (statusRows || [])
+      const mappedStatusRows = (statusRows || [])
         .slice()
         .sort((a, b) => {
           const hourA = String(attendanceByKey.get(attendanceKey(a))?.hora || '');
@@ -188,9 +223,23 @@ export const ImportHistory = (mount, deps = {}) => {
             documento: statusRow.documento || '-',
             nombre: statusRow.nombre || '-',
             novedad: statusRow.novedadNombre || statusRow.novedadCodigo || '-',
-            estado: statusDetailState(statusRow)
+            estado: statusDetailState(statusRow, surplusKeys.has(attendanceKey(statusRow)))
           };
         });
+      const missingRows = (sedeClosures || []).flatMap((closure) => {
+        const missingCount = Math.max(0, Number(closure?.faltantes || 0));
+        const sede = String(closure?.sedeNombre || closure?.sedeCodigo || '-').trim() || '-';
+        return Array.from({ length: missingCount }, (_, index) => ({
+          fecha: date,
+          hora: '-',
+          sede,
+          documento: '-',
+          nombre: `No contratado ${index + 1}`,
+          novedad: '-',
+          estado: 'No contratado'
+        }));
+      });
+      detailSnapshot = [...mappedStatusRows, ...missingRows];
       renderDetail();
       qs('#msg', ui).textContent = 'Consulta OK';
     } catch (err) {

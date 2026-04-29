@@ -8,6 +8,7 @@ import { supabaseAdmin } from './supabase.js';
 const app = express();
 
 app.use(express.json({
+  limit: '12mb',
   verify: (req, _res, buffer) => {
     req.rawBody = buffer;
   }
@@ -30,13 +31,14 @@ const SESSION = {
 };
 
 const NOVELTIES = {
-  WORKING: { code: '1', label: 'Trabajando', absenteeism: false, requiresDates: false },
-  ACCIDENT: { code: '2', label: 'Accidente Laboral', absenteeism: true, requiresDates: true },
-  SICKNESS: { code: '3', label: 'Enfermedad General', absenteeism: true, requiresDates: true },
-  CALAMITY: { code: '4', label: 'Calamidad', absenteeism: true, requiresDates: true },
-  UNPAID_LEAVE: { code: '5', label: 'Licencia No Remunerada', absenteeism: true, requiresDates: false },
-  COMPENSATORY: { code: '7', label: 'Compensatorio', absenteeism: false, requiresDates: false },
-  VACATIONS: { code: '9', label: 'Vacaciones', absenteeism: true, requiresDates: true }
+  WORKING: { code: '1', label: 'Trabajando', absenteeism: false, requiresDates: false, tracksIncapacity: false, requiresSupport: false, dateContext: 'incapacidad' },
+  ACCIDENT: { code: '2', label: 'Accidente Laboral', absenteeism: true, requiresDates: true, tracksIncapacity: true, requiresSupport: true, dateContext: 'incapacidad' },
+  SICKNESS: { code: '3', label: 'Enfermedad General', absenteeism: true, requiresDates: true, tracksIncapacity: true, requiresSupport: true, dateContext: 'incapacidad' },
+  CALAMITY: { code: '4', label: 'Calamidad', absenteeism: true, requiresDates: true, tracksIncapacity: true, requiresSupport: true, dateContext: 'incapacidad' },
+  UNPAID_LEAVE: { code: '5', label: 'Licencia No Remunerada', absenteeism: true, requiresDates: true, tracksIncapacity: true, requiresSupport: false, dateContext: 'licencia' },
+  PAID_LEAVE: { code: '6', label: 'Licencia Remunerada', absenteeism: true, requiresDates: true, tracksIncapacity: true, requiresSupport: false, dateContext: 'licencia' },
+  COMPENSATORY: { code: '7', label: 'Compensatorio', absenteeism: false, requiresDates: false, tracksIncapacity: false, requiresSupport: false, dateContext: 'incapacidad' },
+  VACATIONS: { code: '9', label: 'Vacaciones', absenteeism: true, requiresDates: true, tracksIncapacity: true, requiresSupport: false, dateContext: 'vacaciones' }
 };
 
 const MENU_IDS = {
@@ -52,10 +54,12 @@ const MENU_IDS = {
   NOVELTY_ACCIDENT: 'novelty_2',
   NOVELTY_CALAMITY: 'novelty_4',
   NOVELTY_UNPAID: 'novelty_5',
+  NOVELTY_PAID: 'novelty_6',
   NOVELTY_VACATIONS: 'novelty_9'
 };
 
 const NO_REGISTERED_MESSAGE = 'No estás registrado en nuestra base de datos, por favor comunícate con tu supervisor.';
+const EMPLOYEE_PORTAL_URL = 'https://rockyedu.capcol.com.co/employee.html';
 
 app.get('/health', (_req, res) => {
   res.json({ ok: true });
@@ -108,7 +112,7 @@ app.post('/webhooks/whatsapp', async (req, res) => {
         await markIncomingProcessed(incomingId, 'processed', null);
       } catch (error) {
         console.error('Error procesando mensaje WhatsApp:', error);
-        await markIncomingProcessed(incomingId, 'failed', describeError(error));
+        await markIncomingProcessed(incomingId, 'failed', error.message || 'processing_failed');
       }
     }
 
@@ -204,7 +208,7 @@ async function processIncomingMessage(message) {
 
 
   if (normalizeKey(parsed.value) === 'hola') {
-    await resetSession(phone, session, {}, { clearIdentity: true });
+    await resetSession(phone, session, {});
     await startIdentificationFlow(phone);
     return;
   }
@@ -253,21 +257,7 @@ async function processIncomingMessage(message) {
   }
 }
 async function startIdentificationFlow(phone) {
-  let employeeByPhone = null;
-  try {
-    employeeByPhone = await findEmployeeByPhone(phone);
-  } catch (error) {
-    console.error('Error identificando empleado por telefono:', error);
-    await storeSession(phone, {
-      employee_id: null,
-      documento: null,
-      session_state: SESSION.AWAITING_DOCUMENT,
-      session_data: { identifiedBy: 'phone_lookup_failed' }
-    });
-    await sendText(phone, 'Hola, no pudimos validar tu número en este momento. Por favor escribe tu cédula sin puntos.');
-    return;
-  }
-
+  const employeeByPhone = await findEmployeeByPhone(phone);
   if (employeeByPhone) {
     await storeSession(phone, {
       employee_id: employeeByPhone.id,
@@ -280,8 +270,6 @@ async function startIdentificationFlow(phone) {
   }
 
   await storeSession(phone, {
-    employee_id: null,
-    documento: null,
     session_state: SESSION.AWAITING_DOCUMENT,
     session_data: { identifiedBy: 'unknown_phone' }
   });
@@ -428,13 +416,7 @@ async function handleActionSelection(phone, session, parsed) {
     });
     await sendList(phone, 'Selecciona la novedad que presentas:', 'Seleccionar novedad', [{
       title: 'Novedades',
-      rows: [
-        { id: MENU_IDS.NOVELTY_SICKNESS, title: 'Enfermedad General' },
-        { id: MENU_IDS.NOVELTY_ACCIDENT, title: 'Accidente Laboral' },
-        { id: MENU_IDS.NOVELTY_CALAMITY, title: 'Calamidad' },
-        { id: MENU_IDS.NOVELTY_UNPAID, title: 'Licencia No Remunerada' },
-        { id: MENU_IDS.NOVELTY_VACATIONS, title: 'Vacaciones' }
-      ]
+      rows: buildNoveltyRows(employee.isSupernumerario)
     }]);
     return;
   }
@@ -603,7 +585,8 @@ async function handleNoveltySelection(phone, session, parsed) {
     session_state: SESSION.AWAITING_DATE_START,
     session_data: { ...(session.session_data || {}), employee: sessionEmployee(employee), pendingNovelty: novelty }
   });
-  await sendText(phone, 'Selecciona las fechas de incapacidad:\n\nFecha de inicio de incapacidad, por favor escribe DD/MM/AAAA:');
+  const prompts = getNoveltyDatePrompts(novelty);
+  await sendText(phone, prompts.startIntro);
 }
 
 async function handleDateStart(phone, session, value) {
@@ -617,7 +600,7 @@ async function handleDateStart(phone, session, value) {
   }
 
   if (!parsedDate) {
-    await sendText(phone, 'Fecha de inicio de incapacidad, por favor escribe DD/MM/AAAA:');
+    await sendText(phone, getNoveltyDatePrompts(novelty).startOnly);
     return;
   }
 
@@ -627,7 +610,7 @@ async function handleDateStart(phone, session, value) {
     session_state: SESSION.AWAITING_DATE_END,
     session_data: { ...(session.session_data || {}), employee: sessionEmployee(employee), pendingNovelty: novelty, incapacityStart: parsedDate }
   });
-  await sendText(phone, 'Fecha de terminación de incapacidad, por favor escribe DD/MM/AAAA:');
+  await sendText(phone, getNoveltyDatePrompts(novelty).endOnly);
 }
 
 async function handleDateEnd(phone, session, value) {
@@ -641,8 +624,13 @@ async function handleDateEnd(phone, session, value) {
     return;
   }
 
-  if (!endDate || endDate < startDate) {
-    await sendText(phone, 'Fecha de terminación de incapacidad, por favor escribe DD/MM/AAAA:');
+  if (!endDate) {
+    await sendText(phone, getNoveltyDatePrompts(novelty).endOnly);
+    return;
+  }
+
+  if (endDate < startDate) {
+    await sendText(phone, `La fecha de terminación no puede ser menor a la fecha de inicio (${formatDateForHumans(startDate)}).\n\n${getNoveltyDatePrompts(novelty).endOnly}`);
     return;
   }
 
@@ -659,6 +647,20 @@ async function registerNovelty(phone, employee, novelty, selectedSede = null, in
   const sedeNombre = selectedSede?.nombre || freshEmployee.sede_nombre || null;
   if (!sedeCodigo) {
     throw new Error(`attendance_missing_sede:${freshEmployee.id || 'no_id'}:${documento || 'no_doc'}`);
+  }
+
+  if (novelty.tracksIncapacity && incapacity?.startDate && incapacity?.endDate) {
+    const overlapping = await findOverlappingIncapacity(documento, incapacity.startDate, incapacity.endDate);
+    if (overlapping) {
+      await storeSession(phone, {
+        employee_id: freshEmployee.id,
+        documento: freshEmployee.documento,
+        session_state: SESSION.COMPLETED,
+        session_data: { employee: sessionEmployee(freshEmployee) }
+      });
+      await sendText(phone, buildOverlapMessage(novelty));
+      return;
+    }
   }
 
   const { error: attendanceError } = await supabaseAdmin.from('attendance').upsert({
@@ -686,9 +688,11 @@ async function registerNovelty(phone, employee, novelty, selectedSede = null, in
       estado: 'reportado_whatsapp'
     }, { onConflict: 'id' });
     if (absenteeismError) throw absenteeismError;
+  } else {
+    await clearDailyOperationalAbsenceArtifacts(attendanceId);
   }
 
-  if (incapacity?.startDate && incapacity?.endDate) {
+  if (novelty.tracksIncapacity && incapacity?.startDate && incapacity?.endDate) {
     const { error: incapacityError } = await supabaseAdmin.from('incapacitados').insert({
       employee_id: freshEmployee.id,
       documento,
@@ -697,19 +701,44 @@ async function registerNovelty(phone, employee, novelty, selectedSede = null, in
       fecha_fin: incapacity.endDate,
       estado: 'activo',
       source: novelty.label,
+      canal_registro: 'whatsapp',
       whatsapp_message_id: `${attendanceId}_${novelty.code}`
     });
     if (incapacityError) throw incapacityError;
   }
 
-  await recomputeDailyMetrics(date);
+  await refreshOperationalState(date);
   await storeSession(phone, {
     employee_id: freshEmployee.id,
     documento: freshEmployee.documento,
     session_state: SESSION.COMPLETED,
     session_data: { employee: sessionEmployee(freshEmployee) }
   });
+
+  const supportMessage = buildSupportMessage(novelty, incapacity);
+  if (supportMessage) {
+    await sendText(phone, supportMessage);
+    return;
+  }
+
   await sendText(phone, `Registro confirmado. Fecha: ${formatDateForHumans(date)}, Hora: ${time}, Novedad: ${novelty.label}, Muchas Gracias.`);
+}
+
+async function clearDailyOperationalAbsenceArtifacts(recordId) {
+  const dailyId = String(recordId || '').trim();
+  if (!dailyId) return;
+
+  const { error: absenteeismError } = await supabaseAdmin
+    .from('absenteeism')
+    .delete()
+    .eq('id', dailyId);
+  if (absenteeismError) throw absenteeismError;
+
+  const { error: replacementError } = await supabaseAdmin
+    .from('import_replacements')
+    .delete()
+    .eq('id', dailyId);
+  if (replacementError) throw replacementError;
 }
 
 function isMissingRpcError(error) {
@@ -868,8 +897,9 @@ async function recomputeDailyMetrics(date) {
   const attRows = Array.isArray(attendance) ? attendance : [];
   const repRows = Array.isArray(replacements) ? replacements : [];
   const sedes = (sedesRows || []).filter((row) => String(row?.estado || 'activo').trim().toLowerCase() !== 'inactivo');
+  const scheduledSedes = sedes.filter((row) => isSedeScheduledForDate(row, day));
   const activeSedeCodes = new Set(
-    sedes
+    scheduledSedes
       .map((row) => String(row?.codigo || '').trim())
       .filter(Boolean)
   );
@@ -885,7 +915,7 @@ async function recomputeDailyMetrics(date) {
     if (!sedeCodigo || !activeSedeCodes.has(sedeCodigo)) return false;
     return !isEmployeeSupernumerarioByCargoMap(emp, cargoMap);
   }).length;
-  const planned = sedes.reduce((sum, sede) => {
+  const planned = scheduledSedes.reduce((sum, sede) => {
     const count = Number(sede?.numero_operarios ?? 0);
     return sum + (Number.isFinite(count) && count > 0 ? count : 0);
   }, 0);
@@ -1299,25 +1329,24 @@ async function computeDailyClosureSummary(date) {
     if (!sedeCode) continue;
     const bucket = bySede.get(sedeCode) || {
       contratados: 0,
-      asistencias: 0,
-      ausentismos: 0
+      asistencias: 0
     };
     bucket.contratados += 1;
     if (row?.cuenta_pago_servicio === true) bucket.asistencias += 1;
-    if (row?.cuenta_pago_servicio === false) bucket.ausentismos += 1;
     bySede.set(sedeCode, bucket);
   }
 
   const summary = sedes.reduce((acc, sede) => {
     const sedeCode = String(sede?.codigo || '').trim();
     const planned = Number(sede?.numero_operarios ?? 0) || 0;
-    const counts = bySede.get(sedeCode) || { contratados: 0, asistencias: 0, ausentismos: 0 };
+    const counts = bySede.get(sedeCode) || { contratados: 0, asistencias: 0 };
+    const ausentismos = computeOperationalAbsenteeism(planned, counts.contratados, counts.asistencias);
     acc.planeados += planned;
     acc.contratados += counts.contratados;
     acc.asistencias += counts.asistencias;
     acc.faltan += Math.max(0, planned - counts.contratados);
     acc.sobran += Math.max(0, counts.contratados - planned);
-    acc.ausentismos += counts.ausentismos;
+    acc.ausentismos += ausentismos;
     return acc;
   }, {
     planeados: 0,
@@ -1331,13 +1360,21 @@ async function computeDailyClosureSummary(date) {
 
   if (summary.planeados === 0 && summary.contratados === 0 && actualRows.length) {
     summary.asistencias = actualRows.filter((row) => row?.asistio === true).length;
-    summary.ausentismos = actualRows.filter((row) => row?.asistio === false).length;
+    summary.ausentismos = 0;
     summary.faltan = 0;
-    summary.sobran = 0;
+    summary.sobran = actualRows.length;
   }
 
   summary.noContratados = Math.max(0, summary.planeados - summary.contratados);
   return summary;
+}
+
+function computeOperationalAbsenteeism(planeados, contratados, cubiertos) {
+  const planned = Math.max(0, Number(planeados || 0));
+  const contracted = Math.max(0, Number(contratados || 0));
+  const covered = Math.max(0, Number(cubiertos || 0));
+  if (planned <= 0) return 0;
+  return Math.max(0, Math.min(planned, contracted) - covered);
 }
 
 async function computeDailySedeClosureSnapshot(date) {
@@ -2024,6 +2061,21 @@ async function findActiveIncapacity(documento, date) {
   return data || null;
 }
 
+async function findOverlappingIncapacity(documento, startDate, endDate) {
+  const { data, error } = await supabaseAdmin
+    .from('incapacitados')
+    .select('*')
+    .eq('documento', documento)
+    .eq('estado', 'activo')
+    .lte('fecha_inicio', endDate)
+    .gte('fecha_fin', startDate)
+    .order('fecha_inicio', { ascending: true })
+    .limit(1)
+    .maybeSingle();
+  if (error) throw error;
+  return data || null;
+}
+
 async function reloadEmployeeForAttendance(employee) {
   const employeeId = String(employee?.id || '').trim();
   if (employeeId) {
@@ -2066,11 +2118,10 @@ async function storeSession(phone, patch = {}) {
   if (error) throw error;
 }
 
-async function resetSession(phone, session, extraData, options = {}) {
-  const clearIdentity = options?.clearIdentity === true;
+async function resetSession(phone, session, extraData) {
   await storeSession(phone, {
-    employee_id: clearIdentity ? null : session?.employee_id || null,
-    documento: clearIdentity ? null : session?.documento || null,
+    employee_id: session?.employee_id || null,
+    documento: session?.documento || null,
     session_state: SESSION.IDLE,
     session_data: extraData || {}
   });
@@ -2127,18 +2178,6 @@ function extractMessageText(payload) {
   return null;
 }
 
-function describeError(error) {
-  if (error instanceof Error) {
-    return String(error.stack || error.message || error.name || 'processing_failed');
-  }
-  if (typeof error === 'string') return error;
-  try {
-    return JSON.stringify(error);
-  } catch {
-    return String(error || 'processing_failed');
-  }
-}
-
 function mapActionChoice(parsed, isSupernumerario, hasMainMenu) {
   const normalizedId = normalizeKey(parsed.id);
   const normalizedValue = normalizeKey(parsed.value);
@@ -2172,8 +2211,65 @@ function mapNovelty(parsed) {
   if (normalizedId === normalizeKey(MENU_IDS.NOVELTY_ACCIDENT) || normalizedValue === 'accidentelaboral') return NOVELTIES.ACCIDENT;
   if (normalizedId === normalizeKey(MENU_IDS.NOVELTY_CALAMITY) || normalizedValue === 'calamidad') return NOVELTIES.CALAMITY;
   if (normalizedId === normalizeKey(MENU_IDS.NOVELTY_UNPAID) || normalizedValue === 'licencianoremunerada') return NOVELTIES.UNPAID_LEAVE;
+  if (normalizedId === normalizeKey(MENU_IDS.NOVELTY_PAID) || normalizedValue === 'licenciaremunerada') return NOVELTIES.PAID_LEAVE;
   if (normalizedId === normalizeKey(MENU_IDS.NOVELTY_VACATIONS) || normalizedValue === 'vacaciones') return NOVELTIES.VACATIONS;
   return null;
+}
+
+function buildNoveltyRows(isSupernumerario) {
+  const rows = [
+    { id: MENU_IDS.NOVELTY_SICKNESS, title: 'Enfermedad General' },
+    { id: MENU_IDS.NOVELTY_ACCIDENT, title: 'Accidente Laboral' },
+    { id: MENU_IDS.NOVELTY_CALAMITY, title: 'Calamidad' },
+    { id: MENU_IDS.NOVELTY_UNPAID, title: 'Licencia No Remunerada' },
+    { id: MENU_IDS.NOVELTY_VACATIONS, title: 'Vacaciones' }
+  ];
+  if (!isSupernumerario) {
+    rows.push({ id: MENU_IDS.NOVELTY_PAID, title: 'Licencia Remunerada' });
+  }
+  return rows;
+}
+
+function getNoveltyDatePrompts(novelty) {
+  if (novelty?.dateContext === 'vacaciones') {
+    return {
+      startIntro: 'Selecciona las fechas de vacaciones:\n\nFecha de inicio de vacaciones, por favor escribe DD/MM/AAAA:',
+      startOnly: 'Fecha de inicio de vacaciones, por favor escribe DD/MM/AAAA:',
+      endOnly: 'Fecha de terminación de vacaciones, por favor escribe DD/MM/AAAA:'
+    };
+  }
+
+  if (novelty?.dateContext === 'licencia') {
+    return {
+      startIntro: 'Selecciona las fechas de licencia:\n\nFecha de inicio de licencia, por favor escribe DD/MM/AAAA:',
+      startOnly: 'Fecha de inicio de licencia, por favor escribe DD/MM/AAAA:',
+      endOnly: 'Fecha de terminación de licencia, por favor escribe DD/MM/AAAA:'
+    };
+  }
+
+  return {
+    startIntro: 'Selecciona las fechas de incapacidad:\n\nFecha de inicio de incapacidad, por favor escribe DD/MM/AAAA:',
+    startOnly: 'Fecha de inicio de incapacidad, por favor escribe DD/MM/AAAA:',
+    endOnly: 'Fecha de terminación de incapacidad, por favor escribe DD/MM/AAAA:'
+  };
+}
+
+function buildOverlapMessage(novelty) {
+  if (novelty?.requiresSupport) {
+    return 'Usted ya registró una incapacidad para estas fechas, por favor corrija el registro escribiendo "Hola" o comunícate con el Supervisor.';
+  }
+  return 'Usted ya registró una novedad para estas fechas, por favor corrija el registro escribiendo "Hola" o comunícate con el Supervisor.';
+}
+
+function buildSupportMessage(novelty, incapacity) {
+  if (!novelty?.requiresSupport || !incapacity?.startDate || !incapacity?.endDate) return null;
+
+  const days = countInclusiveDays(incapacity.startDate, incapacity.endDate);
+  const reminder = days > 3
+    ? '\n\nRECUERDA: Si es mayor a tres días debes cargar la historia clínica o Epicrisis.'
+    : '';
+
+  return `Por favor cargue el soporte ingresando al siguiente link:\n${EMPLOYEE_PORTAL_URL}${reminder}`;
 }
 
 function resolveSedeSelection(session, parsed, prefix) {
@@ -2275,12 +2371,18 @@ function normalizeKey(value) {
 }
 
 function parseInputDate(value) {
-  const match = String(value || '').trim().match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+  const match = String(value || '').trim().match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/);
   if (!match) return null;
-  const [, day, month, year] = match;
+  const [, rawDay, rawMonth, year] = match;
+  const day = String(rawDay).padStart(2, '0');
+  const month = String(rawMonth).padStart(2, '0');
   const iso = `${year}-${month}-${day}`;
   const date = new Date(`${iso}T00:00:00Z`);
   if (Number.isNaN(date.getTime())) return null;
+  const utcYear = date.getUTCFullYear();
+  const utcMonth = String(date.getUTCMonth() + 1).padStart(2, '0');
+  const utcDay = String(date.getUTCDate()).padStart(2, '0');
+  if (`${utcYear}-${utcMonth}-${utcDay}` !== iso) return null;
   return iso;
 }
 
@@ -2306,6 +2408,14 @@ function formatDateForHumans(value) {
   const [year, month, day] = String(value || '').split('-');
   if (!year || !month || !day) return value;
   return `${day}/${month}/${year}`;
+}
+
+function countInclusiveDays(startDate, endDate) {
+  const start = new Date(`${startDate}T00:00:00Z`);
+  const end = new Date(`${endDate}T00:00:00Z`);
+  const diffMs = end.getTime() - start.getTime();
+  if (Number.isNaN(diffMs) || diffMs < 0) return 0;
+  return Math.floor(diffMs / 86400000) + 1;
 }
 
 function truncate(value, max) {
