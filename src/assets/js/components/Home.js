@@ -244,7 +244,8 @@ function buildMonthlySeries(from, to, metricsRows = []) {
     const planned = Number(row?.planned || 0);
     const expected = Number(row?.expected || 0);
     const attendance = Number(row?.attendanceCount || 0);
-    const absenteeism = Number(row?.absenteeism || 0);
+    const rawAbsenteeism = Number(row?.absenteeism || 0);
+    const absenteeism = planned <= 0 ? 0 : rawAbsenteeism;
     const noContracted = Number(row?.noContracted || 0);
     const stackedTotal = attendance + absenteeism + noContracted;
     const surplus = Math.max(expected - planned, 0);

@@ -8,6 +8,7 @@ export const Reports = (mount, deps = {}, options = {}) => {
       subtitle: 'Reportes operativos y de servicio para entregar al cliente.',
       reports: [
         { id: 'daily_registry', title: 'Registro diario', subtitle: 'Fecha, hora, cedula, nombre, sede, novedad y reemplazo/ausentismo' },
+        { id: 'services_without_fs', title: 'Consolidado servicios (Sin FS)', subtitle: 'Rango de fechas con servicios planeados, cedulas atendidas y ausentismos confirmados' },
         { id: 'daily_absenteeism', title: 'Ausentismo diario', subtitle: 'Dependencia, zona, sede, planeados, contratados, ausentismo y total a pagar' }
       ]
     },
@@ -16,6 +17,7 @@ export const Reports = (mount, deps = {}, options = {}) => {
       subtitle: '',
       reports: [
         { id: 'employees_current', title: 'Empleados', subtitle: 'Vigentes con cedula, nombre, cargo, zona, dependencia y sede' },
+        { id: 'attendance_without_fs', title: 'Consolidado asistencia (Sin FS)', subtitle: 'Rango de fechas con sede trabajada, AUS-novedad y total de asistencias' },
         { id: 'hiring_by_sede', title: 'Contratacion por Sedes', subtitle: 'Dependencia, zona, sede, planeados y contratados por sede' },
         { id: 'novelties_consolidated', title: 'Consolidado Novedades', subtitle: 'Periodo de tiempo con personas reportadas en novedades distintas de Trabajando y Compensatorio' }
       ]
@@ -47,14 +49,22 @@ export const Reports = (mount, deps = {}, options = {}) => {
   let generatedHiringRows = [];
   let generatedNoveltyRows = [];
   let generatedAbsenteeismRows = [];
+  let generatedServicesWithoutFsRows = [];
+  let generatedServicesWithoutFsDays = [];
   let generatedPayrollRows = [];
   let generatedPayrollDays = [];
+  let generatedAttendanceWithoutFsRows = [];
+  let generatedAttendanceWithoutFsDays = [];
   let running = false;
   let selectedDailyDate = todayBogota();
   let selectedAbsenteeismDate = todayBogota();
+  let selectedServicesWithoutFsDateFrom = `${todayBogota().slice(0, 7)}-01`;
+  let selectedServicesWithoutFsDateTo = todayBogota();
   let selectedNoveltyDateFrom = `${todayBogota().slice(0, 7)}-01`;
   let selectedNoveltyDateTo = todayBogota();
   let selectedPayrollMonth = todayBogota().slice(0, 7);
+  let selectedAttendanceWithoutFsDateFrom = `${todayBogota().slice(0, 7)}-01`;
+  let selectedAttendanceWithoutFsDateTo = todayBogota();
   let employeesSortKey = 'nombre';
   let employeesSortDir = 1;
   let hiringSortKey = 'dependencia';
@@ -161,7 +171,7 @@ export const Reports = (mount, deps = {}, options = {}) => {
           tipo: alignment === 'supernumerario' ? 'Supernumerario' : alignment === 'supervisor' ? 'Supervisor' : 'Empleado',
           zona: String(sede.zonaNombre || sede.zonaCodigo || '-').trim() || '-',
           dependencia: String(sede.dependenciaNombre || sede.dependenciaCodigo || '-').trim() || '-',
-          sede: String(e.sedeNombre || sede.nombre || e.sedeCodigo || '-').trim() || '-'
+          sede: String(sede.nombre || e.sedeNombre || e.sedeCodigo || '-').trim() || '-'
         };
       })
       .sort((a, b) => {
@@ -376,6 +386,542 @@ export const Reports = (mount, deps = {}, options = {}) => {
     const to = `${raw}-${String(lastDay).padStart(2, '0')}`;
     const days = Array.from({ length: lastDay }, (_, idx) => `${raw}-${String(idx + 1).padStart(2, '0')}`);
     return { from, to, days, month: raw };
+  }
+
+  const colombiaHolidayCache = new Map();
+
+  function makeUtcDate(year, month, day) {
+    return new Date(Date.UTC(year, month - 1, day));
+  }
+
+  function addUtcDays(date, days) {
+    const next = new Date(date.getTime());
+    next.setUTCDate(next.getUTCDate() + Number(days || 0));
+    return next;
+  }
+
+  function moveToFollowingMondayUtc(date) {
+    const next = new Date(date.getTime());
+    const day = next.getUTCDay();
+    if (day === 1) return next;
+    const delta = day === 0 ? 1 : 8 - day;
+    next.setUTCDate(next.getUTCDate() + delta);
+    return next;
+  }
+
+  function formatUtcDate(date) {
+    return date.toISOString().slice(0, 10);
+  }
+
+  function easterSundayUtc(year) {
+    const a = year % 19;
+    const b = Math.floor(year / 100);
+    const c = year % 100;
+    const d = Math.floor(b / 4);
+    const e = b % 4;
+    const f = Math.floor((b + 8) / 25);
+    const g = Math.floor((b - f + 1) / 3);
+    const h = (19 * a + b - d - g + 15) % 30;
+    const i = Math.floor(c / 4);
+    const k = c % 4;
+    const l = (32 + 2 * e + 2 * i - h - k) % 7;
+    const m = Math.floor((a + 11 * h + 22 * l) / 451);
+    const month = Math.floor((h + l - 7 * m + 114) / 31);
+    const day = ((h + l - 7 * m + 114) % 31) + 1;
+    return makeUtcDate(year, month, day);
+  }
+
+  function getColombiaHolidaySet(year) {
+    if (colombiaHolidayCache.has(year)) return colombiaHolidayCache.get(year);
+
+    const easter = easterSundayUtc(year);
+    const holidays = new Set([
+      formatUtcDate(makeUtcDate(year, 1, 1)),
+      formatUtcDate(makeUtcDate(year, 5, 1)),
+      formatUtcDate(makeUtcDate(year, 7, 20)),
+      formatUtcDate(makeUtcDate(year, 8, 7)),
+      formatUtcDate(makeUtcDate(year, 12, 8)),
+      formatUtcDate(makeUtcDate(year, 12, 25)),
+      formatUtcDate(moveToFollowingMondayUtc(makeUtcDate(year, 1, 6))),
+      formatUtcDate(moveToFollowingMondayUtc(makeUtcDate(year, 3, 19))),
+      formatUtcDate(moveToFollowingMondayUtc(makeUtcDate(year, 6, 29))),
+      formatUtcDate(moveToFollowingMondayUtc(makeUtcDate(year, 8, 15))),
+      formatUtcDate(moveToFollowingMondayUtc(makeUtcDate(year, 10, 12))),
+      formatUtcDate(moveToFollowingMondayUtc(makeUtcDate(year, 11, 1))),
+      formatUtcDate(moveToFollowingMondayUtc(makeUtcDate(year, 11, 11))),
+      formatUtcDate(addUtcDays(easter, -3)),
+      formatUtcDate(addUtcDays(easter, -2)),
+      formatUtcDate(addUtcDays(easter, 43)),
+      formatUtcDate(moveToFollowingMondayUtc(addUtcDays(easter, 64))),
+      formatUtcDate(moveToFollowingMondayUtc(addUtcDays(easter, 71))),
+      formatUtcDate(moveToFollowingMondayUtc(addUtcDays(easter, 68)))
+    ]);
+
+    colombiaHolidayCache.set(year, holidays);
+    return holidays;
+  }
+
+  function isColombiaHolidayDate(selectedDate) {
+    const iso = toISODate(selectedDate);
+    if (!iso) return false;
+    const year = Number(iso.slice(0, 4));
+    if (!Number.isFinite(year)) return false;
+    return getColombiaHolidaySet(year).has(iso);
+  }
+
+  function buildDateRange(dateFrom, dateTo) {
+    const start = String(dateFrom || '').trim();
+    const end = String(dateTo || '').trim();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(start) || !/^\d{4}-\d{2}-\d{2}$/.test(end) || start > end) return null;
+    const days = [];
+    const cursor = new Date(`${start}T00:00:00Z`);
+    const limit = new Date(`${end}T00:00:00Z`);
+    while (cursor.getTime() <= limit.getTime()) {
+      days.push(cursor.toISOString().slice(0, 10));
+      cursor.setUTCDate(cursor.getUTCDate() + 1);
+    }
+    return { from: start, to: end, days };
+  }
+
+  function shiftIsoDate(iso, offsetDays) {
+    const clean = String(iso || '').trim();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(clean)) return '';
+    const cursor = new Date(`${clean}T00:00:00Z`);
+    cursor.setUTCDate(cursor.getUTCDate() + Number(offsetDays || 0));
+    return cursor.toISOString().slice(0, 10);
+  }
+
+  function weekdayShortLabel(iso) {
+    const labels = ['Dom', 'Lun', 'Mar', 'Mie', 'Jue', 'Vie', 'Sab'];
+    const [year, month, day] = String(iso || '').split('-').map((part) => Number(part));
+    const index = new Date(Date.UTC(year, (month || 1) - 1, day || 1)).getUTCDay();
+    return labels[index] || '';
+  }
+
+  function buildAttendanceWithoutFsDays(dateFrom, dateTo) {
+    const range = buildDateRange(dateFrom, dateTo);
+    if (!range) throw new Error('Selecciona un rango de fechas valido.');
+    return range.days.map((iso, index) => {
+      const weekday = weekdayShortLabel(iso);
+      const isHoliday = isColombiaHolidayDate(iso);
+      const isSaturday = weekday === 'Sab';
+      const isSunday = weekday === 'Dom';
+      const specialLabel = isHoliday ? 'FES' : isSunday ? 'DOM' : isSaturday ? 'SAB' : weekday.toUpperCase();
+      return {
+        iso,
+        key: 'd' + String(index + 1),
+        label: `${iso.slice(-2)} ${specialLabel}`,
+        exportLabel: `${iso} ${specialLabel}`,
+        isHoliday,
+        isSaturday,
+        isSunday,
+        isSpecial: isHoliday || isSaturday || isSunday
+      };
+    });
+  }
+
+  function specialDayStyle(day = {}) {
+    if (day.isHoliday) return 'background:#dbeafe;';
+    if (day.isSunday) return 'background:#fee2e2;';
+    if (day.isSaturday) return 'background:#fef3c7;';
+    return '';
+  }
+
+  function isEmployeeActiveInRange(emp, dateFrom, dateTo) {
+    const estado = String(emp?.estado || 'activo').trim().toLowerCase();
+    if (estado === 'eliminado') return false;
+    const ingreso = toISODate(emp?.fechaIngreso);
+    const retiro = toISODate(emp?.fechaRetiro);
+    if (ingreso && ingreso > dateTo) return false;
+    if (retiro && retiro < dateFrom) return false;
+    return true;
+  }
+
+  function buildEmployeeStatusLookupKey(day, kind, value) {
+    const cleanDay = String(day || '').trim();
+    const cleanKind = String(kind || '').trim();
+    const cleanValue = String(value || '').trim();
+    if (!cleanDay || !cleanKind || !cleanValue) return '';
+    return `${cleanDay}|${cleanKind}|${cleanValue}`;
+  }
+
+  function resolveAttendanceWithoutFsAbsenceCode(row = {}) {
+    const direct = String(row?.novedadCodigo || '').trim();
+    if (direct) return direct;
+    const raw = String(row?.novedadNombre || '').trim();
+    const match = raw.match(/\d+/);
+    if (match?.[0]) return match[0];
+    const fallback = String(row?.estadoDia || '').trim().toUpperCase();
+    return fallback || 'SN';
+  }
+
+  function shouldUseAbsenceMarker(row = {}) {
+    if (!row) return false;
+    if (row.asistio === true) return false;
+    if (row.servicioProgramado === true) return true;
+    const estado = String(row?.estadoDia || '').trim();
+    return ['incapacidad', 'vacaciones', 'compensatorio', 'ausente_con_novedad', 'ausente_sin_reemplazo', 'sin_registro'].includes(estado);
+  }
+
+  function isAttendanceWithoutFsWorked(row = {}) {
+    if (!row) return false;
+    if (row.asistio === true) return true;
+    return String(row?.tipoPersonal || '').trim() === 'supernumerario'
+      && String(row?.estadoDia || '').trim() === 'trabajado_reemplazo';
+  }
+
+  function normalizeAttendanceWithoutFsRows(dateFrom, dateTo, employeeRows = [], statusRows = [], cargoRows = []) {
+    const days = buildAttendanceWithoutFsDays(dateFrom, dateTo);
+    const cargoByCode = new Map((cargoRows || []).map((cargo) => [String(cargo?.codigo || '').trim(), cargo || {}]).filter(([key]) => Boolean(key)));
+    const statusByKey = new Map();
+    const lastAttendanceBeforeRangeById = new Map();
+    const lastAttendanceBeforeRangeByDoc = new Map();
+    const replacementSuperKeysInRange = new Set();
+    const syntheticSupernumerariosByKey = new Map();
+    (statusRows || []).forEach((row) => {
+      const day = String(row?.fecha || '').trim();
+      const employeeId = String(row?.employeeId || '').trim();
+      const document = String(row?.documento || '').trim();
+      const idKey = buildEmployeeStatusLookupKey(day, 'id', employeeId);
+      const docKey = buildEmployeeStatusLookupKey(day, 'doc', document);
+      if (idKey && !statusByKey.has(idKey)) statusByKey.set(idKey, row);
+      if (docKey && !statusByKey.has(docKey)) statusByKey.set(docKey, row);
+      if (day >= dateFrom && day <= dateTo && String(row?.tipoPersonal || '').trim() === 'supernumerario' && String(row?.estadoDia || '').trim() === 'trabajado_reemplazo') {
+        const employeeKey = employeeId ? `id:${employeeId}` : document ? `doc:${document}` : '';
+        if (employeeId) replacementSuperKeysInRange.add(`id:${employeeId}`);
+        if (document) replacementSuperKeysInRange.add(`doc:${document}`);
+        if (employeeKey && !syntheticSupernumerariosByKey.has(employeeKey)) {
+          syntheticSupernumerariosByKey.set(employeeKey, {
+            id: employeeId || null,
+            documento: document || null,
+            nombre: String(row?.nombre || '-').trim() || '-',
+            cargoCodigo: null,
+            cargoNombre: 'Supernumerario',
+            estado: 'activo'
+          });
+        }
+      }
+      if (day && day < dateFrom && isAttendanceWithoutFsWorked(row)) {
+        const sedeCode = String(row?.sedeCodigo || '').trim();
+        if (employeeId && sedeCode) lastAttendanceBeforeRangeById.set(employeeId, sedeCode);
+        if (document && sedeCode) lastAttendanceBeforeRangeByDoc.set(document, sedeCode);
+      }
+    });
+
+    const reportEmployees = [];
+    const reportEmployeeKeys = new Set();
+    (employeeRows || [])
+      .filter((employee) => isEmployeeActiveInRange(employee, dateFrom, dateTo))
+      .forEach((employee) => {
+        const employeeId = String(employee?.id || '').trim();
+        const document = String(employee?.documento || '').trim();
+        const cargoCode = String(employee?.cargoCodigo || '').trim();
+        const cargo = cargoByCode.get(cargoCode) || null;
+        const isSupernumerario = normalizeCargoAlignment(cargo?.alineacionCrud || cargo?.alineacion_crud || employee?.cargoNombre || '') === 'supernumerario';
+        if (isSupernumerario && !replacementSuperKeysInRange.has(`id:${employeeId}`) && !replacementSuperKeysInRange.has(`doc:${document}`)) return;
+        const key = employeeId ? `id:${employeeId}` : document ? `doc:${document}` : '';
+        if (key && reportEmployeeKeys.has(key)) return;
+        if (key) reportEmployeeKeys.add(key);
+        reportEmployees.push(employee);
+      });
+    syntheticSupernumerariosByKey.forEach((employee, key) => {
+      if (reportEmployeeKeys.has(key)) return;
+      reportEmployeeKeys.add(key);
+      reportEmployees.push(employee);
+    });
+
+    const rows = reportEmployees
+      .sort((a, b) => {
+        const byName = String(a?.nombre || '').localeCompare(String(b?.nombre || ''));
+        if (byName !== 0) return byName;
+        return String(a?.documento || '').localeCompare(String(b?.documento || ''));
+      })
+      .map((employee) => {
+        const employeeId = String(employee?.id || '').trim();
+        const document = String(employee?.documento || '').trim();
+        const cargoCode = String(employee?.cargoCodigo || '').trim();
+        const cargo = cargoByCode.get(cargoCode) || null;
+        const isSupernumerario = normalizeCargoAlignment(cargo?.alineacionCrud || cargo?.alineacion_crud || employee?.cargoNombre || '') === 'supernumerario';
+        const displayName = String(employee?.nombre || '-').trim() || '-';
+        const row = {
+          cedula: document || '-',
+          nombre: isSupernumerario ? `${displayName} SNUM` : displayName,
+          isSupernumerario,
+          asistencias: 0
+        };
+        let lastAttendanceSedeCode = lastAttendanceBeforeRangeById.get(employeeId) || lastAttendanceBeforeRangeByDoc.get(document) || '';
+
+        days.forEach((day) => {
+          const dayStatus =
+            statusByKey.get(buildEmployeeStatusLookupKey(day.iso, 'id', employeeId))
+            || statusByKey.get(buildEmployeeStatusLookupKey(day.iso, 'doc', document))
+            || null;
+
+          let value = '';
+          if (isAttendanceWithoutFsWorked(dayStatus)) {
+            value = String(dayStatus?.sedeCodigo || '').trim() || '-';
+            row.asistencias += 1;
+            if (value && value !== '-') lastAttendanceSedeCode = value;
+          } else if (shouldUseAbsenceMarker(dayStatus)) {
+            value = `AUS-${resolveAttendanceWithoutFsAbsenceCode(dayStatus)}`;
+          } else if (day.isSpecial && lastAttendanceSedeCode && !row.isSupernumerario) {
+            value = lastAttendanceSedeCode;
+            row.asistencias += 1;
+          }
+
+          row[day.key] = value;
+        });
+
+        return row;
+      });
+
+    return { rows, days };
+  }
+
+  function buildServiceWithoutFsKey(row = {}) {
+    const sedeCode = String(row?.sedeCodigo || '').trim();
+    const employeeId = String(row?.employeeId || '').trim();
+    const document = String(row?.documento || '').trim();
+    const identity = employeeId || document;
+    if (!sedeCode || !identity) return '';
+    return `${sedeCode}|${identity}`;
+  }
+
+  function buildServiceWithoutFsIdentity(row = {}) {
+    const employeeId = String(row?.employeeId || '').trim();
+    const document = String(row?.documento || '').trim();
+    return employeeId || document || '';
+  }
+
+  function resolveServiceWithoutFsWorkedDocument(row = {}) {
+    const replacementDoc = String(row?.reemplazadoPorDocumento || '').trim();
+    if (replacementDoc) return replacementDoc;
+    if (row?.asistio === true) return String(row?.documento || '').trim();
+    return '';
+  }
+
+  function resolveServiceWithoutFsOwnDocument(row = {}) {
+    return String(row?.documento || '').trim();
+  }
+
+  function resolveServiceWithoutFsNovedadCode(row = {}) {
+    return String(row?.novedadCodigo || '').trim();
+  }
+
+  function isServiceWithoutFsCompensatory(row = {}) {
+    return String(row?.estadoDia || '').trim().toLowerCase() === 'compensatorio';
+  }
+
+  function isConfirmedServiceWithoutFsAbsence(row = {}) {
+    return String(row?.decisionCobertura || '').trim().toLowerCase() === 'ausentismo';
+  }
+
+  function resolveSpecialServiceWithoutFsValue(previousValues = []) {
+    const prev = String(previousValues[previousValues.length - 1] || '').trim();
+    if (!prev) return '';
+    if (prev === 'NOCON') return 'NOCON';
+    if (prev === 'AUS') {
+      const prev2 = String(previousValues[previousValues.length - 2] || '').trim();
+      if (!prev2 || prev2 === 'AUS') return 'AUS';
+      if (prev2 === 'NOCON') return 'NOCON';
+      return prev2;
+    }
+    return prev;
+  }
+
+  function resolveSaturdayServiceWithoutFsValue(row = {}) {
+    if (!row) return '';
+    const ownDoc = resolveServiceWithoutFsOwnDocument(row);
+    const novedadCode = resolveServiceWithoutFsNovedadCode(row);
+    if (row?.asistio === true || isServiceWithoutFsCompensatory(row) || novedadCode === '8') {
+      return { value: ownDoc, counts: Boolean(ownDoc) };
+    }
+    if (['2', '3', '4', '5', '6', '9'].includes(novedadCode)) {
+      const replacementDoc = String(row?.reemplazadoPorDocumento || '').trim();
+      if (replacementDoc) return { value: replacementDoc, counts: true };
+      return { value: 'AUS', counts: false };
+    }
+    if (ownDoc) return { value: ownDoc, counts: true };
+    return { value: 'NOCON', counts: false };
+  }
+
+  function resolveSundayHolidayServiceWithoutFsValue(row = {}) {
+    if (!row) return '';
+    const replacementDoc = String(row?.reemplazadoPorDocumento || '').trim();
+    if (replacementDoc) return { value: replacementDoc, counts: true };
+    const ownDoc = resolveServiceWithoutFsOwnDocument(row);
+    if (ownDoc) return { value: ownDoc, counts: true };
+    return { value: 'NOCON', counts: false };
+  }
+
+  function normalizeServicesWithoutFsRows(dateFrom, dateTo, statusRows = [], sedeRows = []) {
+    const days = buildAttendanceWithoutFsDays(dateFrom, dateTo);
+    const sedeByCode = new Map(
+      (sedeRows || [])
+        .filter((row) => String(row?.estado || 'activo').trim().toLowerCase() !== 'inactivo')
+        .map((row) => [String(row?.codigo || '').trim(), row])
+        .filter(([key]) => Boolean(key))
+    );
+    const plannedBySede = new Map();
+    const scheduledByDaySede = new Map();
+    const historicalBeforeRangeBySedeSlot = new Map();
+
+    (statusRows || [])
+      .filter((row) => String(row?.tipoPersonal || '').trim() === 'empleado')
+      .filter((row) => row?.servicioProgramado === true)
+      .forEach((row) => {
+        const sedeCode = String(row?.sedeCodigo || '').trim();
+        const day = String(row?.fecha || '').trim();
+        if (!sedeCode || !day) return;
+        const bucketKey = `${day}|${sedeCode}`;
+        if (!scheduledByDaySede.has(bucketKey)) scheduledByDaySede.set(bucketKey, []);
+        scheduledByDaySede.get(bucketKey).push(row);
+      });
+
+    Array.from(sedeByCode.entries()).forEach(([sedeCode, sede]) => {
+      plannedBySede.set(sedeCode, parseOperatorCount(sede?.numeroOperarios));
+    });
+
+    scheduledByDaySede.forEach((rows, key) => {
+      rows.sort((a, b) => {
+        const byName = String(a?.nombre || '').localeCompare(String(b?.nombre || ''));
+        if (byName !== 0) return byName;
+        return String(a?.documento || '').localeCompare(String(b?.documento || ''));
+      });
+      const [, sedeCode] = key.split('|');
+      const currentPlanned = Number(plannedBySede.get(sedeCode) || 0);
+      if (rows.length > currentPlanned) plannedBySede.set(sedeCode, rows.length);
+    });
+
+    const assignedByDaySede = new Map();
+    Array.from(plannedBySede.keys()).forEach((sedeCode) => {
+      const slotCount = Math.max(0, Number(plannedBySede.get(sedeCode) || 0));
+      const sedeDays = Array.from(scheduledByDaySede.keys())
+        .map((key) => key.split('|'))
+        .filter((parts) => parts[1] === sedeCode)
+        .map((parts) => parts[0])
+        .sort();
+      const slotIdentities = Array.from({ length: slotCount }, () => '');
+
+      sedeDays.forEach((day) => {
+        const bucketKey = `${day}|${sedeCode}`;
+        const sourceRows = [...(scheduledByDaySede.get(bucketKey) || [])];
+        const assignedRows = Array.from({ length: slotCount }, () => null);
+
+        slotIdentities.forEach((identity, slotIndex) => {
+          if (!identity) return;
+          const matchIndex = sourceRows.findIndex((row) => buildServiceWithoutFsIdentity(row) === identity);
+          if (matchIndex < 0) return;
+          assignedRows[slotIndex] = sourceRows.splice(matchIndex, 1)[0];
+        });
+
+        sourceRows.forEach((row) => {
+          const emptyIndex = assignedRows.findIndex((candidate) => candidate == null);
+          if (emptyIndex < 0) return;
+          assignedRows[emptyIndex] = row;
+        });
+
+        assignedRows.forEach((row, slotIndex) => {
+          const identity = buildServiceWithoutFsIdentity(row);
+          if (identity) slotIdentities[slotIndex] = identity;
+        });
+
+        assignedByDaySede.set(bucketKey, assignedRows);
+      });
+    });
+
+    assignedByDaySede.forEach((rows, key) => {
+      const [day, sedeCode] = key.split('|');
+      if (!day || !sedeCode || day >= dateFrom) return;
+      rows.forEach((row, index) => {
+        if (!row) return;
+        const workedDoc = resolveServiceWithoutFsWorkedDocument(row);
+        const slotKey = `${sedeCode}|${index}`;
+        if (!historicalBeforeRangeBySedeSlot.has(slotKey)) historicalBeforeRangeBySedeSlot.set(slotKey, []);
+        const history = historicalBeforeRangeBySedeSlot.get(slotKey);
+        if (workedDoc) history.push(workedDoc);
+        else if (isConfirmedServiceWithoutFsAbsence(row)) history.push('AUS');
+        else history.push('NOCON');
+      });
+    });
+
+    const rows = Array.from(plannedBySede.entries())
+      .sort((a, b) => {
+        const left = sedeByCode.get(a[0]) || {};
+        const right = sedeByCode.get(b[0]) || {};
+        const byDependency = String(left?.dependenciaNombre || '').localeCompare(String(right?.dependenciaNombre || ''));
+        if (byDependency !== 0) return byDependency;
+        const byZone = String(left?.zonaNombre || '').localeCompare(String(right?.zonaNombre || ''));
+        if (byZone !== 0) return byZone;
+        return String(left?.nombre || '').localeCompare(String(right?.nombre || ''));
+      })
+      .flatMap(([sedeCode, plannedCount]) => {
+        const sede = sedeByCode.get(sedeCode) || {};
+        const count = Math.max(0, Number(plannedCount || 0));
+        return Array.from({ length: count }, (_, slotIndex) => {
+          let serviceName = `Servicio ${slotIndex + 1}`;
+          let serviceDoc = 'NOCON';
+
+          for (const day of days) {
+            const scheduled = assignedByDaySede.get(`${day.iso}|${sedeCode}`) || [];
+            const current = scheduled[slotIndex] || null;
+            if (current) {
+              serviceDoc = String(current?.documento || serviceDoc).trim() || serviceDoc;
+              break;
+            }
+          }
+
+          const row = {
+            dependencia: String(sede?.dependenciaNombre || sede?.dependenciaCodigo || '-').trim() || '-',
+            zona: String(sede?.zonaNombre || sede?.zonaCodigo || '-').trim() || '-',
+            sede: String(sede?.nombre || sedeCode || '-').trim() || '-',
+            servicio: serviceName,
+            servicioDocumento: serviceDoc,
+            asistencias: 0
+          };
+          const previousValues = [...(historicalBeforeRangeBySedeSlot.get(`${sedeCode}|${slotIndex}`) || [])];
+
+          days.forEach((day) => {
+            const scheduled = assignedByDaySede.get(`${day.iso}|${sedeCode}`) || [];
+            const current = scheduled[slotIndex] || null;
+            let value = '';
+
+            if (day.isSpecial) {
+              if (current) {
+                const resolved = day.isSaturday
+                  ? resolveSaturdayServiceWithoutFsValue(current)
+                  : resolveSundayHolidayServiceWithoutFsValue(current);
+                value = String(resolved?.value || '').trim();
+                if (resolved?.counts) row.asistencias += 1;
+              } else {
+                value = resolveSpecialServiceWithoutFsValue(previousValues);
+                if (value && value !== 'AUS' && value !== 'NOCON') {
+                  row.asistencias += 1;
+                }
+              }
+            } else if (!current) {
+              value = 'NOCON';
+            } else {
+              const workedDoc = resolveServiceWithoutFsWorkedDocument(current);
+              if (workedDoc) {
+                value = workedDoc;
+                row.asistencias += 1;
+              } else if (isConfirmedServiceWithoutFsAbsence(current)) {
+                value = 'AUS';
+              } else {
+                value = 'NOCON';
+              }
+            }
+
+            row[day.key] = value;
+            previousValues.push(value);
+          });
+
+          return row;
+        });
+      });
+
+    return { rows, days };
   }
 
   function buildPersonMaps(rows = []) {
@@ -816,6 +1362,28 @@ export const Reports = (mount, deps = {}, options = {}) => {
     ]));
   }
 
+  function renderAttendanceWithoutFsRows(rows = [], days = []) {
+    if (!rows.length) return [el('tr', {}, [el('td', { colSpan: 3 + days.length, className: 'text-muted' }, ['Sin empleados activos para el rango seleccionado.'])])];
+    return rows.map((r) => el('tr', {}, [
+      el('td', { style: 'white-space:nowrap;' }, [r.cedula]),
+      el('td', { style: `white-space:nowrap;${r.isSupernumerario ? 'color:#1d4ed8;font-weight:700;background:#eff6ff;' : ''}`, title: r.isSupernumerario ? 'Supernumerario' : '' }, [r.nombre]),
+      ...days.map((day) => el('td', { style: `white-space:nowrap;${specialDayStyle(day)}` }, [r[day.key] || ''])),
+      el('td', { style: 'white-space:nowrap;text-align:right;' }, [String(r.asistencias || 0)])
+    ]));
+  }
+
+  function renderServicesWithoutFsRows(rows = [], days = []) {
+    if (!rows.length) return [el('tr', {}, [el('td', { colSpan: 5 + days.length, className: 'text-muted' }, ['Sin servicios planeados para el rango seleccionado.'])])];
+    return rows.map((r) => el('tr', {}, [
+      el('td', { style: 'white-space:nowrap;' }, [r.dependencia]),
+      el('td', { style: 'white-space:nowrap;' }, [r.zona]),
+      el('td', { style: 'white-space:nowrap;' }, [r.sede]),
+      el('td', { style: 'white-space:nowrap;' }, [r.servicio]),
+      ...days.map((day) => el('td', { style: `white-space:nowrap;text-align:center;${specialDayStyle(day)}` }, [r[day.key] || ''])),
+      el('td', { style: 'white-space:nowrap;text-align:right;' }, [String(r.asistencias || 0)])
+    ]));
+  }
+
   async function generateEmployeesReport() {
     if (running) return;
     running = true;
@@ -843,6 +1411,117 @@ export const Reports = (mount, deps = {}, options = {}) => {
       setMessage(' ');
     } catch (e) {
       setMessage(`Error al generar reporte: ${e?.message || e}`);
+    } finally {
+      running = false;
+      if (btnGenerate) {
+        btnGenerate.disabled = false;
+        btnGenerate.textContent = 'Generar reporte';
+      }
+    }
+  }
+
+  async function generateAttendanceWithoutFsReport() {
+    if (running) return;
+    const dateFrom = String(qs('#attendanceWithoutFsDateFrom', ui)?.value || '').trim();
+    const dateTo = String(qs('#attendanceWithoutFsDateTo', ui)?.value || '').trim();
+    const range = buildDateRange(dateFrom, dateTo);
+    if (!range) {
+      setMessage('Selecciona un rango valido para generar el consolidado de asistencia.');
+      return;
+    }
+    running = true;
+    selectedAttendanceWithoutFsDateFrom = dateFrom;
+    selectedAttendanceWithoutFsDateTo = dateTo;
+    const btnGenerate = qs('#btnGenerateAttendanceWithoutFs', ui);
+    const btnExport = qs('#btnExportAttendanceWithoutFs', ui);
+    try {
+      if (btnGenerate) {
+        btnGenerate.disabled = true;
+        btnGenerate.textContent = 'Generando...';
+      }
+      const contextFrom = shiftIsoDate(dateFrom, -31) || dateFrom;
+      const [rawEmployees, statusRows, rawCargos] = await Promise.all([
+        streamOnce((ok, fail) => deps.streamEmployees?.(ok, fail)),
+        deps.listEmployeeDailyStatusRange?.(contextFrom, dateTo) || [],
+        streamOnce((ok, fail) => deps.streamCargos?.(ok, fail))
+      ]);
+      const normalized = normalizeAttendanceWithoutFsRows(dateFrom, dateTo, rawEmployees, statusRows, rawCargos);
+      generatedAttendanceWithoutFsRows = normalized.rows;
+      generatedAttendanceWithoutFsDays = normalized.days;
+      const headRow = qs('#attendanceWithoutFsHeadRow', ui);
+      if (headRow) {
+        headRow.replaceChildren(
+          el('th', {}, ['Cedula']),
+          el('th', {}, ['Nombre']),
+          ...normalized.days.map((day) => el('th', { style: specialDayStyle(day) }, [day.label])),
+          el('th', {}, ['Asistencias'])
+        );
+      }
+      const tbody = qs('#attendanceWithoutFsTbody', ui);
+      if (tbody) tbody.replaceChildren(...renderAttendanceWithoutFsRows(normalized.rows, normalized.days));
+      const totalAttendance = normalized.rows.reduce((acc, row) => acc + Number(row.asistencias || 0), 0);
+      const totalNode = qs('#attendanceWithoutFsTotal', ui);
+      if (totalNode) totalNode.textContent = `Periodo: ${dateFrom} a ${dateTo} | Empleados: ${normalized.rows.length} | Dias: ${normalized.days.length} | Asistencias: ${totalAttendance}`;
+      if (btnExport) btnExport.disabled = normalized.rows.length === 0;
+      setMessage(`Consolidado generado para ${dateFrom} a ${dateTo}. Empleados: ${normalized.rows.length}`);
+    } catch (e) {
+      setMessage(`Error al generar consolidado de asistencia: ${e?.message || e}`);
+    } finally {
+      running = false;
+      if (btnGenerate) {
+        btnGenerate.disabled = false;
+        btnGenerate.textContent = 'Generar reporte';
+      }
+    }
+  }
+
+  async function generateServicesWithoutFsReport() {
+    if (running) return;
+    const dateFrom = String(qs('#servicesWithoutFsDateFrom', ui)?.value || '').trim();
+    const dateTo = String(qs('#servicesWithoutFsDateTo', ui)?.value || '').trim();
+    const range = buildDateRange(dateFrom, dateTo);
+    if (!range) {
+      setMessage('Selecciona un rango valido para generar el consolidado de servicios.');
+      return;
+    }
+    running = true;
+    selectedServicesWithoutFsDateFrom = dateFrom;
+    selectedServicesWithoutFsDateTo = dateTo;
+    const btnGenerate = qs('#btnGenerateServicesWithoutFs', ui);
+    const btnExport = qs('#btnExportServicesWithoutFs', ui);
+    try {
+      if (btnGenerate) {
+        btnGenerate.disabled = true;
+        btnGenerate.textContent = 'Generando...';
+      }
+      const contextFrom = shiftIsoDate(dateFrom, -31) || dateFrom;
+      const [statusRows, rawSedes] = await Promise.all([
+        deps.listEmployeeDailyStatusRange?.(contextFrom, dateTo) || [],
+        streamOnce((ok, fail) => deps.streamSedes?.(ok, fail))
+      ]);
+      const normalized = normalizeServicesWithoutFsRows(dateFrom, dateTo, statusRows, rawSedes);
+      generatedServicesWithoutFsRows = normalized.rows;
+      generatedServicesWithoutFsDays = normalized.days;
+      const headRow = qs('#servicesWithoutFsHeadRow', ui);
+      if (headRow) {
+        headRow.replaceChildren(
+          el('th', {}, ['Dependencia']),
+          el('th', {}, ['Zona']),
+          el('th', {}, ['Sede']),
+          el('th', {}, ['Servicio planeado']),
+          ...normalized.days.map((day) => el('th', { style: specialDayStyle(day) }, [day.label])),
+          el('th', {}, ['Asistencias'])
+        );
+      }
+      const tbody = qs('#servicesWithoutFsTbody', ui);
+      if (tbody) tbody.replaceChildren(...renderServicesWithoutFsRows(normalized.rows, normalized.days));
+      const totalAttendance = normalized.rows.reduce((acc, row) => acc + Number(row.asistencias || 0), 0);
+      const totalNode = qs('#servicesWithoutFsTotal', ui);
+      if (totalNode) totalNode.textContent = `Periodo: ${dateFrom} a ${dateTo} | Servicios: ${normalized.rows.length} | Dias: ${normalized.days.length} | Asistencias: ${totalAttendance}`;
+      if (btnExport) btnExport.disabled = normalized.rows.length === 0;
+      setMessage(`Consolidado de servicios generado para ${dateFrom} a ${dateTo}. Servicios: ${normalized.rows.length}`);
+    } catch (e) {
+      setMessage(`Error al generar consolidado de servicios: ${e?.message || e}`);
     } finally {
       running = false;
       if (btnGenerate) {
@@ -1108,6 +1787,94 @@ export const Reports = (mount, deps = {}, options = {}) => {
     }
   }
 
+  async function exportAttendanceWithoutFsExcel() {
+    try {
+      if (!generatedAttendanceWithoutFsRows.length) throw new Error('Primero genera el reporte.');
+      const btn = qs('#btnExportAttendanceWithoutFs', ui);
+      if (btn) {
+        btn.disabled = true;
+        btn.textContent = 'Generando...';
+      }
+      const mod = await import('https://cdn.jsdelivr.net/npm/xlsx@0.18.5/+esm');
+      const exportRows = generatedAttendanceWithoutFsRows.map((row) => {
+        const item = {
+          Cedula: row.cedula,
+          Nombre: row.nombre
+        };
+        generatedAttendanceWithoutFsDays.forEach((day) => {
+          item[day.exportLabel] = row[day.key] || '';
+        });
+        item.Asistencias = Number(row.asistencias || 0);
+        return item;
+      });
+      const ws = mod.utils.json_to_sheet(exportRows);
+      ws['!cols'] = [
+        { wch: 18 },
+        { wch: 32 },
+        ...generatedAttendanceWithoutFsDays.map(() => ({ wch: 14 })),
+        { wch: 12 }
+      ];
+      const wb = mod.utils.book_new();
+      mod.utils.book_append_sheet(wb, ws, 'Consolidado asistencia');
+      mod.writeFile(wb, `consolidado_asistencia_sin_fs_${selectedAttendanceWithoutFsDateFrom}_a_${selectedAttendanceWithoutFsDateTo}.xlsx`);
+      setMessage(`Excel generado correctamente. Empleados: ${generatedAttendanceWithoutFsRows.length}`);
+    } catch (e) {
+      setMessage(`Error al generar Excel del consolidado de asistencia: ${e?.message || e}`);
+    } finally {
+      const btn = qs('#btnExportAttendanceWithoutFs', ui);
+      if (btn) {
+        btn.disabled = generatedAttendanceWithoutFsRows.length === 0;
+        btn.textContent = 'Generar Excel';
+      }
+    }
+  }
+
+  async function exportServicesWithoutFsExcel() {
+    try {
+      if (!generatedServicesWithoutFsRows.length) throw new Error('Primero genera el reporte.');
+      const btn = qs('#btnExportServicesWithoutFs', ui);
+      if (btn) {
+        btn.disabled = true;
+        btn.textContent = 'Generando...';
+      }
+      const mod = await import('https://cdn.jsdelivr.net/npm/xlsx@0.18.5/+esm');
+      const exportRows = generatedServicesWithoutFsRows.map((row) => {
+        const item = {
+          Dependencia: row.dependencia,
+          Zona: row.zona,
+          Sede: row.sede,
+          'Servicio planeado': row.servicio
+        };
+        generatedServicesWithoutFsDays.forEach((day) => {
+          item[day.exportLabel] = row[day.key] || '';
+        });
+        item.Asistencias = Number(row.asistencias || 0);
+        return item;
+      });
+      const ws = mod.utils.json_to_sheet(exportRows);
+      ws['!cols'] = [
+        { wch: 24 },
+        { wch: 18 },
+        { wch: 28 },
+        { wch: 30 },
+        ...generatedServicesWithoutFsDays.map(() => ({ wch: 14 })),
+        { wch: 12 }
+      ];
+      const wb = mod.utils.book_new();
+      mod.utils.book_append_sheet(wb, ws, 'Consolidado servicios');
+      mod.writeFile(wb, `consolidado_servicios_sin_fs_${selectedServicesWithoutFsDateFrom}_a_${selectedServicesWithoutFsDateTo}.xlsx`);
+      setMessage(`Excel generado correctamente. Servicios: ${generatedServicesWithoutFsRows.length}`);
+    } catch (e) {
+      setMessage(`Error al generar Excel del consolidado de servicios: ${e?.message || e}`);
+    } finally {
+      const btn = qs('#btnExportServicesWithoutFs', ui);
+      if (btn) {
+        btn.disabled = generatedServicesWithoutFsRows.length === 0;
+        btn.textContent = 'Generar Excel';
+      }
+    }
+  }
+
   async function exportDailyExcel() {
     try {
       if (!generatedDailyRows.length) throw new Error('Primero genera el reporte.');
@@ -1346,6 +2113,60 @@ export const Reports = (mount, deps = {}, options = {}) => {
     updateSortIndicators(ui, '#employeesTable th[data-sort-employees]', 'data-sort-employees', employeesSortKey, employeesSortDir);
   }
 
+  function renderAttendanceWithoutFsPanel() {
+    const content = el('section', {}, [
+      el('div', { className: 'form-row' }, [
+        el('div', {}, [el('h3', { style: 'margin:0;' }, ['Reporte: Consolidado asistencia (Sin FS)'])]),
+        el('div', {}, [el('label', { className: 'label' }, ['Desde']), el('input', { id: 'attendanceWithoutFsDateFrom', className: 'input', type: 'date', value: selectedAttendanceWithoutFsDateFrom, max: todayBogota(), style: 'max-width:180px' })]),
+        el('div', {}, [el('label', { className: 'label' }, ['Hasta']), el('input', { id: 'attendanceWithoutFsDateTo', className: 'input', type: 'date', value: selectedAttendanceWithoutFsDateTo, max: todayBogota(), style: 'max-width:180px' })]),
+        el('button', { id: 'btnGenerateAttendanceWithoutFs', className: 'btn', type: 'button' }, ['Generar reporte']),
+        el('button', { id: 'btnExportAttendanceWithoutFs', className: 'btn btn--primary', type: 'button', disabled: true }, ['Generar Excel'])
+      ]),
+      el('p', { id: 'attendanceWithoutFsTotal', className: 'text-muted mt-2' }, ['Selecciona el rango y genera el reporte.']),
+      el('div', { className: 'table-wrap mt-2' }, [
+        el('table', { className: 'table' }, [
+          el('thead', {}, [el('tr', { id: 'attendanceWithoutFsHeadRow' }, [
+            el('th', {}, ['Cedula']),
+            el('th', {}, ['Nombre']),
+            el('th', {}, ['Asistencias'])
+          ])]),
+          el('tbody', { id: 'attendanceWithoutFsTbody' }, [el('tr', {}, [el('td', { colSpan: 3, className: 'text-muted' }, ['Sin generar.'])])])
+        ])
+      ])
+    ]);
+    qs('#reportContent', ui).replaceChildren(content);
+    qs('#btnGenerateAttendanceWithoutFs', ui)?.addEventListener('click', generateAttendanceWithoutFsReport);
+    qs('#btnExportAttendanceWithoutFs', ui)?.addEventListener('click', exportAttendanceWithoutFsExcel);
+  }
+
+  function renderServicesWithoutFsPanel() {
+    const content = el('section', {}, [
+      el('div', { className: 'form-row' }, [
+        el('div', {}, [el('h3', { style: 'margin:0;' }, ['Reporte: Consolidado servicios (Sin FS)'])]),
+        el('div', {}, [el('label', { className: 'label' }, ['Desde']), el('input', { id: 'servicesWithoutFsDateFrom', className: 'input', type: 'date', value: selectedServicesWithoutFsDateFrom, max: todayBogota(), style: 'max-width:180px' })]),
+        el('div', {}, [el('label', { className: 'label' }, ['Hasta']), el('input', { id: 'servicesWithoutFsDateTo', className: 'input', type: 'date', value: selectedServicesWithoutFsDateTo, max: todayBogota(), style: 'max-width:180px' })]),
+        el('button', { id: 'btnGenerateServicesWithoutFs', className: 'btn', type: 'button' }, ['Generar reporte']),
+        el('button', { id: 'btnExportServicesWithoutFs', className: 'btn btn--primary', type: 'button', disabled: true }, ['Generar Excel'])
+      ]),
+      el('p', { id: 'servicesWithoutFsTotal', className: 'text-muted mt-2' }, ['Selecciona el rango y genera el reporte.']),
+      el('div', { className: 'table-wrap mt-2' }, [
+        el('table', { className: 'table' }, [
+          el('thead', {}, [el('tr', { id: 'servicesWithoutFsHeadRow' }, [
+            el('th', {}, ['Dependencia']),
+            el('th', {}, ['Zona']),
+            el('th', {}, ['Sede']),
+            el('th', {}, ['Servicio planeado']),
+            el('th', {}, ['Asistencias'])
+          ])]),
+          el('tbody', { id: 'servicesWithoutFsTbody' }, [el('tr', {}, [el('td', { colSpan: 5, className: 'text-muted' }, ['Sin generar.'])])])
+        ])
+      ])
+    ]);
+    qs('#reportContent', ui).replaceChildren(content);
+    qs('#btnGenerateServicesWithoutFs', ui)?.addEventListener('click', generateServicesWithoutFsReport);
+    qs('#btnExportServicesWithoutFs', ui)?.addEventListener('click', exportServicesWithoutFsExcel);
+  }
+
   function renderDailyPanel() {
     const content = el('section', {}, [
       el('div', { className: 'form-row' }, [
@@ -1539,6 +2360,10 @@ export const Reports = (mount, deps = {}, options = {}) => {
   function openReport(reportId) {
     selectedReportId = String(reportId || '');
     generatedEmployeesRows = [];
+    generatedServicesWithoutFsRows = [];
+    generatedServicesWithoutFsDays = [];
+    generatedAttendanceWithoutFsRows = [];
+    generatedAttendanceWithoutFsDays = [];
     generatedDailyRows = [];
     generatedHiringRows = [];
     generatedNoveltyRows = [];
@@ -1548,6 +2373,16 @@ export const Reports = (mount, deps = {}, options = {}) => {
     ui.querySelectorAll('.report-card').forEach((n) => n.classList.toggle('is-active', n.dataset.id === selectedReportId));
     if (selectedReportId === 'employees_current') {
       renderEmployeesPanel();
+      setMessage(' ');
+      return;
+    }
+    if (selectedReportId === 'services_without_fs') {
+      renderServicesWithoutFsPanel();
+      setMessage(' ');
+      return;
+    }
+    if (selectedReportId === 'attendance_without_fs') {
+      renderAttendanceWithoutFsPanel();
       setMessage(' ');
       return;
     }

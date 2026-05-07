@@ -217,6 +217,21 @@ begin
       lower(trim(coalesce(c.alineacion_crud, 'empleado'))) as alineacion_crud
     from public.cargos c
   ),
+  assignment_history_effective as (
+    select *
+    from (
+      select
+        h.*,
+        row_number() over (
+          partition by h.employee_id
+          order by h.fecha_ingreso desc nulls last, h.created_at desc nulls last, h.id desc
+        ) as rn
+      from public.employee_cargo_history h
+      where (h.fecha_ingreso is null or h.fecha_ingreso::date <= p_fecha::date)
+        and (h.fecha_retiro is null or h.fecha_retiro::date >= p_fecha::date)
+    ) x
+    where x.rn = 1
+  ),
   employees_catalog as (
     select
       e.id::text as employee_id,
@@ -224,22 +239,24 @@ begin
       e.codigo,
       e.documento,
       e.nombre,
-      e.cargo_codigo,
-      e.cargo_nombre,
-      e.sede_codigo as home_sede_codigo,
-      e.sede_nombre as home_sede_nombre,
+      coalesce(ahe.cargo_codigo, e.cargo_codigo) as cargo_codigo,
+      coalesce(ahe.cargo_nombre, e.cargo_nombre) as cargo_nombre,
+      coalesce(ahe.sede_codigo, e.sede_codigo) as home_sede_codigo,
+      coalesce(ahe.sede_nombre, e.sede_nombre) as home_sede_nombre,
       e.zona_codigo as home_zona_codigo,
       e.zona_nombre as home_zona_nombre,
-      e.fecha_ingreso,
-      e.fecha_retiro,
+      coalesce(ahe.fecha_ingreso, e.fecha_ingreso) as fecha_ingreso,
+      coalesce(ahe.fecha_retiro, e.fecha_retiro) as fecha_retiro,
       lower(trim(coalesce(e.estado, 'activo'))) as estado_empleado,
       case
-        when coalesce(cl.alineacion_crud, '') = 'supernumerario' then 'supernumerario'
-        when lower(coalesce(e.cargo_nombre, '')) like '%supernumerar%' then 'supernumerario'
+        when coalesce(cl_effective.alineacion_crud, cl_base.alineacion_crud, '') = 'supernumerario' then 'supernumerario'
+        when lower(coalesce(ahe.cargo_nombre, e.cargo_nombre, '')) like '%supernumerar%' then 'supernumerario'
         else 'empleado'
       end as tipo_personal
     from public.employees e
-    left join cargos_lookup cl on cl.codigo = e.cargo_codigo
+    left join assignment_history_effective ahe on ahe.employee_id = e.id
+    left join cargos_lookup cl_base on cl_base.codigo = e.cargo_codigo
+    left join cargos_lookup cl_effective on cl_effective.codigo = coalesce(ahe.cargo_codigo, e.cargo_codigo)
   ),
   expected_base as (
     select

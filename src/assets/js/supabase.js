@@ -1123,6 +1123,21 @@ async function closeActiveEmployeeHistory(employeeId, fechaRetiro, notifyReload 
   }
 }
 
+async function patchActiveEmployeeHistory(employeeId, patch = {}, notifyReload = true) {
+  const empId = String(employeeId || '').trim();
+  const updates = Object.fromEntries(Object.entries(patch || {}).filter(([, value]) => value !== undefined));
+  if (!empId || !Object.keys(updates).length) return;
+  const { error } = await supabase
+    .from('employee_cargo_history')
+    .update(updates)
+    .eq('employee_id', empId)
+    .is('fecha_retiro', null);
+  if (error) throw error;
+  if (notifyReload) {
+    await notifyTableReload('employee_cargo_history');
+  }
+}
+
 async function upsertSupervisorProfileFromEmployee(employee, override = {}) {
   const audit = await getCurrentAuditFields();
   const payload = {
@@ -1497,7 +1512,7 @@ function addDaysToIsoDate(value, days = 1) {
   return `${y}-${m}-${d}`;
 }
 
-function collectEmployeeOperationalRefreshDays(before = {}, after = {}) {
+function collectEmployeeOperationalRefreshDays(before = {}, after = {}, extraHints = []) {
   const today = todayBogotaISO();
   if (!today) return [];
 
@@ -1508,7 +1523,8 @@ function collectEmployeeOperationalRefreshDays(before = {}, after = {}) {
     toISODate(before?.fechaIngreso || before?.fecha_ingreso),
     toISODate(after?.fechaIngreso || after?.fecha_ingreso),
     toISODate(before?.fechaRetiro || before?.fecha_retiro),
-    toISODate(after?.fechaRetiro || after?.fecha_retiro)
+    toISODate(after?.fechaRetiro || after?.fecha_retiro),
+    ...((Array.isArray(extraHints) ? extraHints : []).map((value) => toISODate(value)))
   ]
     .filter((day) => /^\d{4}-\d{2}-\d{2}$/.test(String(day || '')))
     .filter((day) => day <= today)
@@ -1525,8 +1541,8 @@ function collectEmployeeOperationalRefreshDays(before = {}, after = {}) {
   return days;
 }
 
-async function reconcileOperationalSnapshotsForEmployeeChange(before = {}, after = {}) {
-  const days = collectEmployeeOperationalRefreshDays(before, after);
+async function reconcileOperationalSnapshotsForEmployeeChange(before = {}, after = {}, extraHints = []) {
+  const days = collectEmployeeOperationalRefreshDays(before, after, extraHints);
   for (const day of days) {
     await refreshOperationalState(day);
   }
@@ -2622,6 +2638,12 @@ export async function updateEmployee(id, data = {}) {
   const current = await supabase.from('employees').select('*').eq('id', id).single();
   if (current.error) throw current.error;
   const currentRow = current.data;
+  const currentIngreso = toISODate(currentRow.fecha_ingreso);
+  const currentRetiro = toISODate(currentRow.fecha_retiro);
+  const currentSede = String(currentRow.sede_codigo || '').trim();
+  const currentEstado = String(currentRow.estado || 'activo').trim().toLowerCase();
+  const currentDocumento = String(currentRow.documento || '').trim();
+  const currentCargoCodigo = String(currentRow.cargo_codigo || '').trim();
   const patch = {
     last_modified_by_uid: audit.created_by_uid,
     last_modified_by_email: audit.created_by_email,
@@ -2642,20 +2664,31 @@ export async function updateEmployee(id, data = {}) {
   }
   if (data.fechaIngreso !== undefined) patch.fecha_ingreso = data.fechaIngreso || null;
   if (data.fechaRetiro !== undefined) patch.fecha_retiro = data.fechaRetiro || null;
+  const nextSede = typeof patch.sede_codigo === 'string' ? String(patch.sede_codigo || '').trim() : currentSede;
+  const nextCargoCodigo = typeof patch.cargo_codigo === 'string' ? String(patch.cargo_codigo || '').trim() : currentCargoCodigo;
+  const nextIngresoPreview = patch.fecha_ingreso !== undefined ? toISODate(patch.fecha_ingreso) : currentIngreso;
+  const sedeChangedPreview = nextSede !== currentSede;
+  const cargoChangedPreview = nextCargoCodigo !== currentCargoCodigo;
+  const assignmentIngresoPreview = toISODate(
+    data.assignmentFechaIngreso ||
+    data.fechaHistorialIngreso ||
+    data.historialFechaIngreso
+  );
+  if (sedeChangedPreview && !cargoChangedPreview && patch.fecha_ingreso !== undefined && nextIngresoPreview !== currentIngreso) {
+    patch.fecha_ingreso = currentRow.fecha_ingreso || null;
+  }
+  if (cargoChangedPreview && assignmentIngresoPreview) {
+    patch.fecha_ingreso = data.assignmentFechaIngreso || data.fechaHistorialIngreso || data.historialFechaIngreso;
+  }
   const { data: updated, error } = await supabase.from('employees').update(patch).eq('id', id).select('*').single();
   if (error) throw error;
-  const currentIngreso = toISODate(currentRow.fecha_ingreso);
   const updatedIngreso = toISODate(updated.fecha_ingreso);
-  const currentRetiro = toISODate(currentRow.fecha_retiro);
   const updatedRetiro = toISODate(updated.fecha_retiro);
-  const currentSede = String(currentRow.sede_codigo || '').trim();
   const updatedSede = String(updated.sede_codigo || '').trim();
-  const currentEstado = String(currentRow.estado || 'activo').trim().toLowerCase();
   const updatedEstado = String(updated.estado || 'activo').trim().toLowerCase();
-  const currentDocumento = String(currentRow.documento || '').trim();
   const updatedDocumento = String(updated.documento || '').trim();
   const cargoChanged =
-    String(updated.cargo_codigo || '') !== String(currentRow.cargo_codigo || '');
+    String(updated.cargo_codigo || '').trim() !== currentCargoCodigo;
   const sedeChanged = updatedSede !== currentSede;
   const ingresoChanged = updatedIngreso !== currentIngreso;
   const retiroChanged = updatedRetiro !== currentRetiro;
@@ -2663,12 +2696,19 @@ export async function updateEmployee(id, data = {}) {
   const documentChanged = updatedDocumento !== currentDocumento;
   const requiresNewHistoryEntry =
     String(updated.estado || 'activo').trim().toLowerCase() === 'activo' &&
-    (cargoChanged || sedeChanged || ingresoChanged);
+    (cargoChanged || sedeChanged);
   if (requiresNewHistoryEntry) {
+    const historyIngreso =
+      data.assignmentFechaIngreso ||
+      data.fechaHistorialIngreso ||
+      data.historialFechaIngreso ||
+      updated.updated_at ||
+      new Date().toISOString();
     const historyRetiro =
+      data.assignmentFechaRetiro ||
       data.historialFechaRetiro ||
       data.fechaHistorialRetiro ||
-      data.assignmentFechaRetiro ||
+      historyIngreso ||
       updated.updated_at ||
       new Date().toISOString();
     await closeActiveEmployeeHistory(updated.id, historyRetiro, false);
@@ -2680,16 +2720,32 @@ export async function updateEmployee(id, data = {}) {
       cargoNombre: updated.cargo_nombre,
       sedeCodigo: updated.sede_codigo,
       sedeNombre: updated.sede_nombre,
-      fechaIngreso: updated.fecha_ingreso || new Date().toISOString(),
+      fechaIngreso: historyIngreso,
       fechaRetiro: null,
       source: sedeChanged ? 'sede_change' : (cargoChanged ? 'cargo_change' : 'employee_update')
     });
+  } else {
+    await patchActiveEmployeeHistory(updated.id, {
+      employee_codigo: updated.codigo || null,
+      documento: updated.documento || null,
+      cargo_codigo: updated.cargo_codigo || null,
+      cargo_nombre: updated.cargo_nombre || null,
+      sede_codigo: updated.sede_codigo || null,
+      sede_nombre: updated.sede_nombre || null,
+      fecha_ingreso: ingresoChanged ? (updated.fecha_ingreso || null) : undefined
+    }, false);
+    await notifyTableReload('employee_cargo_history');
   }
   if (await getCargoCrudAlignmentByCode(updated.cargo_codigo, updated.cargo_nombre) === 'supervisor') {
     await upsertSupervisorProfileFromEmployee(mapEmployeeRow(updated));
   }
   if (cargoChanged || sedeChanged || ingresoChanged || retiroChanged || estadoChanged || documentChanged) {
-    await reconcileOperationalSnapshotsForEmployeeChange(currentRow, updated);
+    await reconcileOperationalSnapshotsForEmployeeChange(currentRow, updated, [
+      data.assignmentFechaIngreso,
+      data.historialFechaRetiro,
+      data.fechaHistorialRetiro,
+      data.assignmentFechaRetiro
+    ]);
   }
   await notifyTableReload('employees');
 }
