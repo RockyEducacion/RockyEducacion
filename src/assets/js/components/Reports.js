@@ -752,6 +752,26 @@ export const Reports = (mount, deps = {}, options = {}) => {
     return { value: 'NOCON', counts: false };
   }
 
+  function isServiceWithoutFsDocumentValue(value) {
+    const normalized = String(value || '').trim().toUpperCase();
+    return Boolean(normalized && normalized !== 'AUS' && normalized !== 'NOCON');
+  }
+
+  function normalizeServiceWithoutFsDocumentIdentity(value) {
+    const raw = String(value || '').trim();
+    if (!raw) return '';
+    const digits = raw.replace(/\D+/g, '');
+    return digits || raw.toUpperCase();
+  }
+
+  function findLastServiceWithoutFsDocumentValue(values = []) {
+    for (let index = (values || []).length - 1; index >= 0; index -= 1) {
+      const candidate = String(values[index] || '').trim();
+      if (isServiceWithoutFsDocumentValue(candidate)) return candidate;
+    }
+    return '';
+  }
+
   function normalizeServicesWithoutFsRows(dateFrom, dateTo, statusRows = [], sedeRows = []) {
     const days = buildAttendanceWithoutFsDays(dateFrom, dateTo);
     const sedeByCode = new Map(
@@ -908,18 +928,9 @@ export const Reports = (mount, deps = {}, options = {}) => {
           const serviceNumber = slotIndex + 1;
           const isAdditionalService = serviceNumber > basePlannedCount;
           let serviceName = `Servicio ${serviceNumber}${isAdditionalService ? ' AD' : ''}`;
-          let serviceDoc = 'NOCON';
-          let dynamicServiceDoc = 'NOCON';
-
-          for (const day of days) {
-            const scheduled = assignedByDaySede.get(`${day.iso}|${sedeCode}`) || [];
-            const current = scheduled[slotIndex] || null;
-            if (current) {
-              serviceDoc = String(current?.documento || serviceDoc).trim() || serviceDoc;
-              dynamicServiceDoc = serviceDoc;
-              break;
-            }
-          }
+          const historicalValues = [...(historicalBeforeRangeBySedeSlot.get(`${sedeCode}|${slotIndex}`) || [])];
+          let dynamicServiceDoc = findLastServiceWithoutFsDocumentValue(historicalValues);
+          const serviceDoc = dynamicServiceDoc || 'NOCON';
 
           const row = {
             dependencia: String(sede?.dependenciaNombre || sede?.dependenciaCodigo || '-').trim() || '-',
@@ -929,15 +940,11 @@ export const Reports = (mount, deps = {}, options = {}) => {
             servicioDocumento: serviceDoc,
             asistencias: 0
           };
-          const previousValues = [...(historicalBeforeRangeBySedeSlot.get(`${sedeCode}|${slotIndex}`) || [])];
+          const previousValues = [...historicalValues];
 
           days.forEach((day) => {
             const scheduled = assignedByDaySede.get(`${day.iso}|${sedeCode}`) || [];
             const current = scheduled[slotIndex] || null;
-            const baseAssigned = (baseAssignedByDaySede.get(`${day.iso}|${sedeCode}`) || [])[slotIndex] || null;
-            if (baseAssigned?.documento) {
-              dynamicServiceDoc = String(baseAssigned.documento).trim() || dynamicServiceDoc;
-            }
             let value = '';
 
             if (day.isSpecial) {
@@ -969,12 +976,29 @@ export const Reports = (mount, deps = {}, options = {}) => {
             }
 
             row[day.key] = value;
+            if (isServiceWithoutFsDocumentValue(value)) dynamicServiceDoc = value;
             previousValues.push(value);
           });
 
           return row;
         });
       });
+
+    days.forEach((day) => {
+      const usedDocuments = new Set();
+      rows.forEach((row) => {
+        const value = String(row?.[day.key] || '').trim();
+        if (!isServiceWithoutFsDocumentValue(value)) return;
+        const identity = normalizeServiceWithoutFsDocumentIdentity(value);
+        if (!identity) return;
+        if (usedDocuments.has(identity)) {
+          row[day.key] = 'NOCON';
+          row.asistencias = Math.max(0, Number(row.asistencias || 0) - 1);
+          return;
+        }
+        usedDocuments.add(identity);
+      });
+    });
 
     return { rows, days };
   }
