@@ -14,8 +14,8 @@ const supabase = createClient(supabaseUrl, serviceRoleKey, {
   auth: { persistSession: false, autoRefreshToken: false }
 });
 
-const from = '2026-04-01';
-const to = '2026-05-06';
+const from = '2026-03-12';
+const to = '2026-03-31';
 
 function addOneDay(value) {
   const [year, month, day] = value.split('-').map(Number);

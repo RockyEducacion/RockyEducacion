@@ -693,9 +693,15 @@ export const Reports = (mount, deps = {}, options = {}) => {
     return employeeId || document || '';
   }
 
+  function formatServiceWithoutFsReplacementDocument(document) {
+    const cleanDocument = String(document || '').trim();
+    if (!cleanDocument) return '';
+    return `${cleanDocument} SN`;
+  }
+
   function resolveServiceWithoutFsWorkedDocument(row = {}) {
     const replacementDoc = String(row?.reemplazadoPorDocumento || '').trim();
-    if (replacementDoc) return replacementDoc;
+    if (replacementDoc) return formatServiceWithoutFsReplacementDocument(replacementDoc);
     if (row?.asistio === true) return String(row?.documento || '').trim();
     return '';
   }
@@ -718,15 +724,7 @@ export const Reports = (mount, deps = {}, options = {}) => {
 
   function resolveSpecialServiceWithoutFsValue(previousValues = []) {
     const prev = String(previousValues[previousValues.length - 1] || '').trim();
-    if (!prev) return '';
-    if (prev === 'NOCON') return 'NOCON';
-    if (prev === 'AUS') {
-      const prev2 = String(previousValues[previousValues.length - 2] || '').trim();
-      if (!prev2 || prev2 === 'AUS') return 'AUS';
-      if (prev2 === 'NOCON') return 'NOCON';
-      return prev2;
-    }
-    return prev;
+    return prev === 'NOCON' ? 'NOCON' : '';
   }
 
   function resolveSaturdayServiceWithoutFsValue(row = {}) {
@@ -738,7 +736,7 @@ export const Reports = (mount, deps = {}, options = {}) => {
     }
     if (['2', '3', '4', '5', '6', '9'].includes(novedadCode)) {
       const replacementDoc = String(row?.reemplazadoPorDocumento || '').trim();
-      if (replacementDoc) return { value: replacementDoc, counts: true };
+      if (replacementDoc) return { value: formatServiceWithoutFsReplacementDocument(replacementDoc), counts: true };
       return { value: 'AUS', counts: false };
     }
     if (ownDoc) return { value: ownDoc, counts: true };
@@ -748,7 +746,7 @@ export const Reports = (mount, deps = {}, options = {}) => {
   function resolveSundayHolidayServiceWithoutFsValue(row = {}) {
     if (!row) return '';
     const replacementDoc = String(row?.reemplazadoPorDocumento || '').trim();
-    if (replacementDoc) return { value: replacementDoc, counts: true };
+    if (replacementDoc) return { value: formatServiceWithoutFsReplacementDocument(replacementDoc), counts: true };
     const ownDoc = resolveServiceWithoutFsOwnDocument(row);
     if (ownDoc) return { value: ownDoc, counts: true };
     return { value: 'NOCON', counts: false };
@@ -764,15 +762,19 @@ export const Reports = (mount, deps = {}, options = {}) => {
     );
     const plannedBySede = new Map();
     const scheduledByDaySede = new Map();
+    const baseRowsByDaySede = new Map();
     const historicalBeforeRangeBySedeSlot = new Map();
 
     (statusRows || [])
       .filter((row) => String(row?.tipoPersonal || '').trim() === 'empleado')
-      .filter((row) => row?.servicioProgramado === true)
       .forEach((row) => {
         const sedeCode = String(row?.sedeCodigo || '').trim();
         const day = String(row?.fecha || '').trim();
         if (!sedeCode || !day) return;
+        const baseBucketKey = `${day}|${sedeCode}`;
+        if (!baseRowsByDaySede.has(baseBucketKey)) baseRowsByDaySede.set(baseBucketKey, []);
+        baseRowsByDaySede.get(baseBucketKey).push(row);
+        if (row?.servicioProgramado !== true) return;
         const bucketKey = `${day}|${sedeCode}`;
         if (!scheduledByDaySede.has(bucketKey)) scheduledByDaySede.set(bucketKey, []);
         scheduledByDaySede.get(bucketKey).push(row);
@@ -794,6 +796,7 @@ export const Reports = (mount, deps = {}, options = {}) => {
     });
 
     const assignedByDaySede = new Map();
+    const baseAssignedByDaySede = new Map();
     Array.from(plannedBySede.keys()).forEach((sedeCode) => {
       const slotCount = Math.max(0, Number(plannedBySede.get(sedeCode) || 0));
       const sedeDays = Array.from(scheduledByDaySede.keys())
@@ -801,7 +804,13 @@ export const Reports = (mount, deps = {}, options = {}) => {
         .filter((parts) => parts[1] === sedeCode)
         .map((parts) => parts[0])
         .sort();
+      const baseSedeDays = Array.from(baseRowsByDaySede.keys())
+        .map((key) => key.split('|'))
+        .filter((parts) => parts[1] === sedeCode)
+        .map((parts) => parts[0])
+        .sort();
       const slotIdentities = Array.from({ length: slotCount }, () => '');
+      const baseSlotIdentities = Array.from({ length: slotCount }, () => '');
 
       sedeDays.forEach((day) => {
         const bucketKey = `${day}|${sedeCode}`;
@@ -827,6 +836,42 @@ export const Reports = (mount, deps = {}, options = {}) => {
         });
 
         assignedByDaySede.set(bucketKey, assignedRows);
+      });
+
+      baseSedeDays.forEach((day) => {
+        const bucketKey = `${day}|${sedeCode}`;
+        const sourceRows = [...(baseRowsByDaySede.get(bucketKey) || [])];
+        sourceRows.sort((a, b) => {
+          const scheduledA = a?.servicioProgramado === true ? 1 : 0;
+          const scheduledB = b?.servicioProgramado === true ? 1 : 0;
+          if (scheduledA !== scheduledB) return scheduledB - scheduledA;
+          const byAttendance = Number(Boolean(b?.asistio)) - Number(Boolean(a?.asistio));
+          if (byAttendance !== 0) return byAttendance;
+          const byName = String(a?.nombre || '').localeCompare(String(b?.nombre || ''));
+          if (byName !== 0) return byName;
+          return String(a?.documento || '').localeCompare(String(b?.documento || ''));
+        });
+        const assignedRows = Array.from({ length: slotCount }, () => null);
+
+        baseSlotIdentities.forEach((identity, slotIndex) => {
+          if (!identity) return;
+          const matchIndex = sourceRows.findIndex((row) => buildServiceWithoutFsIdentity(row) === identity);
+          if (matchIndex < 0) return;
+          assignedRows[slotIndex] = sourceRows.splice(matchIndex, 1)[0];
+        });
+
+        sourceRows.forEach((row) => {
+          const emptyIndex = assignedRows.findIndex((candidate) => candidate == null);
+          if (emptyIndex < 0) return;
+          assignedRows[emptyIndex] = row;
+        });
+
+        assignedRows.forEach((row, slotIndex) => {
+          const identity = buildServiceWithoutFsIdentity(row);
+          if (identity) baseSlotIdentities[slotIndex] = identity;
+        });
+
+        baseAssignedByDaySede.set(bucketKey, assignedRows);
       });
     });
 
@@ -857,16 +902,21 @@ export const Reports = (mount, deps = {}, options = {}) => {
       })
       .flatMap(([sedeCode, plannedCount]) => {
         const sede = sedeByCode.get(sedeCode) || {};
+        const basePlannedCount = Math.max(0, parseOperatorCount(sede?.numeroOperarios));
         const count = Math.max(0, Number(plannedCount || 0));
         return Array.from({ length: count }, (_, slotIndex) => {
-          let serviceName = `Servicio ${slotIndex + 1}`;
+          const serviceNumber = slotIndex + 1;
+          const isAdditionalService = serviceNumber > basePlannedCount;
+          let serviceName = `Servicio ${serviceNumber}${isAdditionalService ? ' AD' : ''}`;
           let serviceDoc = 'NOCON';
+          let dynamicServiceDoc = 'NOCON';
 
           for (const day of days) {
             const scheduled = assignedByDaySede.get(`${day.iso}|${sedeCode}`) || [];
             const current = scheduled[slotIndex] || null;
             if (current) {
               serviceDoc = String(current?.documento || serviceDoc).trim() || serviceDoc;
+              dynamicServiceDoc = serviceDoc;
               break;
             }
           }
@@ -884,6 +934,10 @@ export const Reports = (mount, deps = {}, options = {}) => {
           days.forEach((day) => {
             const scheduled = assignedByDaySede.get(`${day.iso}|${sedeCode}`) || [];
             const current = scheduled[slotIndex] || null;
+            const baseAssigned = (baseAssignedByDaySede.get(`${day.iso}|${sedeCode}`) || [])[slotIndex] || null;
+            if (baseAssigned?.documento) {
+              dynamicServiceDoc = String(baseAssigned.documento).trim() || dynamicServiceDoc;
+            }
             let value = '';
 
             if (day.isSpecial) {
@@ -895,6 +949,7 @@ export const Reports = (mount, deps = {}, options = {}) => {
                 if (resolved?.counts) row.asistencias += 1;
               } else {
                 value = resolveSpecialServiceWithoutFsValue(previousValues);
+                if (!value) value = dynamicServiceDoc;
                 if (value && value !== 'AUS' && value !== 'NOCON') {
                   row.asistencias += 1;
                 }
