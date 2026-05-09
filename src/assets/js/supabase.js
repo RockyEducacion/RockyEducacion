@@ -837,15 +837,39 @@ function isEmployeeSupernumerario(emp, cargoMap = new Map()) {
   return alignment === 'supernumerario';
 }
 
-function isEmployeeAssignedToActiveSedeOnDate(emp, selectedDate, activeSedeCodes = new Set()) {
+function resolveEmployeeAssignmentHistoryOnDate(emp, selectedDate, historyRows = []) {
+  const day = String(selectedDate || '').trim();
+  if (!day) return null;
+  const matching = (Array.isArray(historyRows) ? historyRows : []).filter((row) => {
+    const ingreso = toISODate(row?.fechaIngreso || row?.fecha_ingreso);
+    if (!ingreso || ingreso > day) return false;
+    const retiro = toISODate(row?.fechaRetiro || row?.fecha_retiro);
+    return !retiro || retiro >= day;
+  });
+  if (!matching.length) return null;
+  matching.sort((left, right) => {
+    const leftIngreso = toISODate(left?.fechaIngreso || left?.fecha_ingreso) || '';
+    const rightIngreso = toISODate(right?.fechaIngreso || right?.fecha_ingreso) || '';
+    if (leftIngreso !== rightIngreso) return rightIngreso.localeCompare(leftIngreso);
+    const leftCreated = String(left?.createdAt || left?.created_at || '').trim();
+    const rightCreated = String(right?.createdAt || right?.created_at || '').trim();
+    if (leftCreated !== rightCreated) return rightCreated.localeCompare(leftCreated);
+    return String(right?.id || '').localeCompare(String(left?.id || ''));
+  });
+  return matching[0] || null;
+}
+
+function isEmployeeAssignedToActiveSedeOnDate(emp, selectedDate, activeSedeCodes = new Set(), historyRows = []) {
   if (!selectedDate) return false;
-  const ingreso = toISODate(emp?.fechaIngreso || emp?.fecha_ingreso);
+  const assignment = resolveEmployeeAssignmentHistoryOnDate(emp, selectedDate, historyRows);
+  const source = assignment || emp;
+  const ingreso = toISODate(source?.fechaIngreso || source?.fecha_ingreso);
   if (!ingreso || ingreso > selectedDate) return false;
-  const retiro = toISODate(emp?.fechaRetiro || emp?.fecha_retiro);
+  const retiro = toISODate(source?.fechaRetiro || source?.fecha_retiro);
   const estado = String(emp?.estado || '').trim().toLowerCase();
   if (estado === 'inactivo') return Boolean(retiro && retiro >= selectedDate);
   if (retiro && retiro < selectedDate) return false;
-  const sedeCodigo = String(emp?.sedeCodigo || emp?.sede_codigo || '').trim();
+  const sedeCodigo = String(source?.sedeCodigo || source?.sede_codigo || '').trim();
   if (!sedeCodigo) return false;
   if (activeSedeCodes.size && !activeSedeCodes.has(sedeCodigo)) return false;
   const sede = Array.isArray(activeSedeCodes?.rows)
@@ -1201,7 +1225,8 @@ async function removeInvalidScheduledEmployeeDailyStatusRows(fecha) {
     { data: statusRows, error: statusError },
     sedesRows,
     employeesRows,
-    cargosRows
+    cargosRows,
+    employeeHistoryRows
   ] = await Promise.all([
     supabase
       .from('employee_daily_status')
@@ -1211,7 +1236,8 @@ async function removeInvalidScheduledEmployeeDailyStatusRows(fecha) {
       .eq('servicio_programado', true),
     selectAllRows('sedes', { select: '*' }),
     selectAllRows('employees', { select: '*' }),
-    selectAllRows('cargos', { select: 'codigo, alineacion_crud, nombre' })
+    selectAllRows('cargos', { select: 'codigo, alineacion_crud, nombre' }),
+    selectAllRows('employee_cargo_history', { select: 'id, employee_id, sede_codigo, fecha_ingreso, fecha_retiro, created_at' })
   ]);
   if (statusError) throw statusError;
 
@@ -1228,13 +1254,25 @@ async function removeInvalidScheduledEmployeeDailyStatusRows(fecha) {
       .map((row) => [String(row?.id || '').trim(), row])
       .filter(([id]) => Boolean(id))
   );
+  const historyByEmployeeId = new Map(
+    (employeeHistoryRows || [])
+      .map(mapCargoHistoryRow)
+      .reduce((acc, row) => {
+        const employeeId = String(row?.employeeId || '').trim();
+        if (!employeeId) return acc;
+        if (!acc.has(employeeId)) acc.set(employeeId, []);
+        acc.get(employeeId).push(row);
+        return acc;
+      }, new Map())
+  );
 
   const invalidIds = (statusRows || [])
     .filter((row) => {
-      const employee = employeeById.get(String(row?.employee_id || '').trim()) || null;
+      const employeeId = String(row?.employee_id || '').trim();
+      const employee = employeeById.get(employeeId) || null;
       if (!employee) return true;
       if (isEmployeeSupernumerario(employee, cargoMap)) return true;
-      return !isEmployeeAssignedToActiveSedeOnDate(employee, day, activeSedeCodes);
+      return !isEmployeeAssignedToActiveSedeOnDate(employee, day, activeSedeCodes, historyByEmployeeId.get(employeeId) || []);
     })
     .map((row) => String(row?.id || '').trim())
     .filter(Boolean);
@@ -2674,6 +2712,20 @@ export async function updateEmployee(id, data = {}) {
     data.fechaHistorialIngreso ||
     data.historialFechaIngreso
   );
+  const assignmentRetiroPreview = toISODate(
+    data.assignmentFechaRetiro ||
+    data.historialFechaRetiro ||
+    data.fechaHistorialRetiro
+  );
+  if ((sedeChangedPreview || cargoChangedPreview) && assignmentIngresoPreview && assignmentRetiroPreview) {
+    const expectedAssignmentStart = addDaysToIsoDate(assignmentRetiroPreview, 1);
+    if (assignmentIngresoPreview !== expectedAssignmentStart) {
+      throw new Error('La nueva asignacion debe iniciar el dia siguiente al fin del tramo anterior.');
+    }
+  }
+  if (sedeChangedPreview && assignmentIngresoPreview && assignmentIngresoPreview < todayBogotaISO()) {
+    throw new Error(`La fecha de inicio en nueva sede no puede ser anterior a hoy (${todayBogotaISO()}).`);
+  }
   if (sedeChangedPreview && !cargoChangedPreview && patch.fecha_ingreso !== undefined && nextIngresoPreview !== currentIngreso) {
     patch.fecha_ingreso = currentRow.fecha_ingreso || null;
   }
@@ -2702,15 +2754,15 @@ export async function updateEmployee(id, data = {}) {
       data.assignmentFechaIngreso ||
       data.fechaHistorialIngreso ||
       data.historialFechaIngreso ||
-      updated.updated_at ||
-      new Date().toISOString();
+      null;
     const historyRetiro =
       data.assignmentFechaRetiro ||
       data.historialFechaRetiro ||
       data.fechaHistorialRetiro ||
-      historyIngreso ||
-      updated.updated_at ||
-      new Date().toISOString();
+      null;
+    if (!toISODate(historyIngreso) || !toISODate(historyRetiro)) {
+      throw new Error('Debes seleccionar la fecha fin de la asignacion anterior y la fecha inicio de la nueva asignacion.');
+    }
     await closeActiveEmployeeHistory(updated.id, historyRetiro, false);
     await appendEmployeeCargoHistory({
       employeeId: updated.id,

@@ -529,14 +529,35 @@ async function handleTransferSelection(phone, session, parsed) {
     return;
   }
 
-  const { error } = await supabaseAdmin.from('employees').update({
+  const previousEmployeeSedeSnapshot = {
+    sede_codigo: employee.sede_codigo || null,
+    sede_nombre: employee.sede_nombre || null,
+    zona_codigo: employee.zona_codigo || null,
+    zona_nombre: employee.zona_nombre || null
+  };
+
+  const transferDate = currentDate();
+  const employeeUpdatePayload = {
     sede_codigo: selected.codigo || null,
     sede_nombre: selected.nombre || null,
     zona_codigo: selected.zona_codigo || null,
     zona_nombre: selected.zona_nombre || null,
     last_modified_at: new Date().toISOString()
-  }).eq('id', employee.id);
+  };
+
+  const { error } = await supabaseAdmin.from('employees').update(employeeUpdatePayload).eq('id', employee.id);
   if (error) throw error;
+
+  try {
+    await syncEmployeeSedeHistoryAfterTransfer(employee, selected, transferDate);
+    await refreshOperationalState(transferDate);
+  } catch (historyError) {
+    await supabaseAdmin.from('employees').update({
+      ...previousEmployeeSedeSnapshot,
+      last_modified_at: new Date().toISOString()
+    }).eq('id', employee.id);
+    throw historyError;
+  }
 
   const refreshed = { ...employee, sede_codigo: selected.codigo, sede_nombre: selected.nombre, zona_codigo: selected.zona_codigo, zona_nombre: selected.zona_nombre };
   await storeSession(phone, {
@@ -546,6 +567,56 @@ async function handleTransferSelection(phone, session, parsed) {
     session_data: { employee: sessionEmployee(refreshed) }
   });
   await sendText(phone, 'Información actualizada correctamente, si no haz realizado el registro por favor escribe nuevamente "Hola".');
+}
+
+async function syncEmployeeSedeHistoryAfterTransfer(employee, selectedSede, transferDate) {
+  const employeeId = String(employee?.id || '').trim();
+  const selectedCode = String(selectedSede?.codigo || '').trim();
+  if (!employeeId || !selectedCode || !transferDate) return;
+
+  const selectedName = selectedSede?.nombre || null;
+  const previousDay = addDaysToIsoDate(transferDate, -1) || transferDate;
+
+  const { data: openRows, error: openRowsError } = await supabaseAdmin
+    .from('employee_cargo_history')
+    .select('id, employee_id, sede_codigo, fecha_ingreso, fecha_retiro, created_at')
+    .eq('employee_id', employeeId)
+    .is('fecha_retiro', null)
+    .order('created_at', { ascending: false });
+  if (openRowsError) throw openRowsError;
+
+  const normalizedOpenRows = openRows || [];
+  const openOnSelectedSede = normalizedOpenRows.find((row) => String(row?.sede_codigo || '').trim() === selectedCode) || null;
+
+  for (const row of normalizedOpenRows) {
+    if (openOnSelectedSede && row.id === openOnSelectedSede.id) continue;
+    const ingresoDate = isoDatePart(row?.fecha_ingreso);
+    let retiroDate = previousDay;
+    if (ingresoDate && retiroDate < ingresoDate) retiroDate = ingresoDate;
+    const patchedRetiro = withIsoDatePreservingTime(row?.fecha_retiro, retiroDate);
+    const { error: closeError } = await supabaseAdmin
+      .from('employee_cargo_history')
+      .update({ fecha_retiro: patchedRetiro })
+      .eq('id', row.id);
+    if (closeError) throw closeError;
+  }
+
+  if (openOnSelectedSede) return;
+
+  const transferIngreso = `${transferDate}T05:00:00+00:00`;
+  const { error: insertError } = await supabaseAdmin.from('employee_cargo_history').insert({
+    employee_id: employeeId,
+    employee_codigo: employee?.codigo || null,
+    documento: employee?.documento || null,
+    cargo_codigo: employee?.cargo_codigo || null,
+    cargo_nombre: employee?.cargo_nombre || null,
+    fecha_ingreso: transferIngreso,
+    fecha_retiro: null,
+    source: 'sede_change',
+    sede_codigo: selectedCode,
+    sede_nombre: selectedName
+  });
+  if (insertError) throw insertError;
 }
 
 async function handleWorkingSedeSelection(phone, session, parsed) {
@@ -777,7 +848,8 @@ async function removeInvalidScheduledEmployeeDailyStatusRows(date) {
     { data: statusRows, error: statusError },
     sedesRows,
     employeesRows,
-    cargosRows
+    cargosRows,
+    employeeHistoryRows
   ] = await Promise.all([
     supabaseAdmin
       .from('employee_daily_status')
@@ -787,7 +859,8 @@ async function removeInvalidScheduledEmployeeDailyStatusRows(date) {
       .eq('servicio_programado', true),
     selectAllRows('sedes'),
     selectAllRows('employees'),
-    selectAllRows('cargos', 'codigo, alineacion_crud, nombre')
+    selectAllRows('cargos', 'codigo, alineacion_crud, nombre'),
+    selectAllRows('employee_cargo_history', 'id, employee_id, sede_codigo, fecha_ingreso, fecha_retiro, created_at')
   ]);
   if (statusError) throw statusError;
 
@@ -801,13 +874,21 @@ async function removeInvalidScheduledEmployeeDailyStatusRows(date) {
       .map((row) => [String(row?.id || '').trim(), row])
       .filter(([id]) => Boolean(id))
   );
+  const historyByEmployeeId = new Map();
+  for (const row of employeeHistoryRows || []) {
+    const employeeId = String(row?.employee_id || '').trim();
+    if (!employeeId) continue;
+    if (!historyByEmployeeId.has(employeeId)) historyByEmployeeId.set(employeeId, []);
+    historyByEmployeeId.get(employeeId).push(row);
+  }
 
   const invalidIds = (statusRows || [])
     .filter((row) => {
-      const employee = employeeById.get(String(row?.employee_id || '').trim()) || null;
+      const employeeId = String(row?.employee_id || '').trim();
+      const employee = employeeById.get(employeeId) || null;
       if (!employee) return true;
       if (isEmployeeSupernumerarioByCargoMap(employee, cargoMap)) return true;
-      return !isEmployeeAssignedToActiveSedeOnDate(employee, day, activeSedeCodes);
+      return !isEmployeeAssignedToActiveSedeOnDate(employee, day, activeSedeCodes, historyByEmployeeId.get(employeeId) || []);
     })
     .map((row) => String(row?.id || '').trim())
     .filter(Boolean);
@@ -1257,15 +1338,39 @@ function isEmployeeSupernumerarioByCargoMap(emp, cargoMap = new Map()) {
   return alignment === 'supernumerario';
 }
 
-function isEmployeeAssignedToActiveSedeOnDate(emp, selectedDate, activeSedeCodes = new Set()) {
+function resolveEmployeeAssignmentHistoryOnDate(emp, selectedDate, historyRows = []) {
+  const day = String(selectedDate || '').trim();
+  if (!day) return null;
+  const matching = (Array.isArray(historyRows) ? historyRows : []).filter((row) => {
+    const ingreso = toISODate(row?.fecha_ingreso || row?.fechaIngreso);
+    if (!ingreso || ingreso > day) return false;
+    const retiro = toISODate(row?.fecha_retiro || row?.fechaRetiro);
+    return !retiro || retiro >= day;
+  });
+  if (!matching.length) return null;
+  matching.sort((left, right) => {
+    const leftIngreso = toISODate(left?.fecha_ingreso || left?.fechaIngreso) || '';
+    const rightIngreso = toISODate(right?.fecha_ingreso || right?.fechaIngreso) || '';
+    if (leftIngreso !== rightIngreso) return rightIngreso.localeCompare(leftIngreso);
+    const leftCreated = String(left?.created_at || left?.createdAt || '').trim();
+    const rightCreated = String(right?.created_at || right?.createdAt || '').trim();
+    if (leftCreated !== rightCreated) return rightCreated.localeCompare(leftCreated);
+    return String(right?.id || '').localeCompare(String(left?.id || ''));
+  });
+  return matching[0] || null;
+}
+
+function isEmployeeAssignedToActiveSedeOnDate(emp, selectedDate, activeSedeCodes = new Set(), historyRows = []) {
   if (!selectedDate) return false;
-  const ingreso = toISODate(emp?.fecha_ingreso || emp?.fechaIngreso);
+  const assignment = resolveEmployeeAssignmentHistoryOnDate(emp, selectedDate, historyRows);
+  const source = assignment || emp;
+  const ingreso = toISODate(source?.fecha_ingreso || source?.fechaIngreso);
   if (!ingreso || ingreso > selectedDate) return false;
-  const retiro = toISODate(emp?.fecha_retiro || emp?.fechaRetiro);
+  const retiro = toISODate(source?.fecha_retiro || source?.fechaRetiro);
   const estado = String(emp?.estado || '').trim().toLowerCase();
   if (estado === 'inactivo') return Boolean(retiro && retiro >= selectedDate);
   if (retiro && retiro < selectedDate) return false;
-  const sedeCodigo = String(emp?.sede_codigo || emp?.sedeCodigo || '').trim();
+  const sedeCodigo = String(source?.sede_codigo || source?.sedeCodigo || '').trim();
   if (!sedeCodigo) return false;
   if (activeSedeCodes.size && !activeSedeCodes.has(sedeCodigo)) return false;
   return true;
@@ -1905,6 +2010,18 @@ function addDaysToIsoDate(value, days = 1) {
   const m = String(utc.getUTCMonth() + 1).padStart(2, '0');
   const d = String(utc.getUTCDate()).padStart(2, '0');
   return `${y}-${m}-${d}`;
+}
+
+function isoDatePart(value) {
+  return String(value || '').slice(0, 10);
+}
+
+function withIsoDatePreservingTime(originalValue, newIsoDate) {
+  const original = String(originalValue || '').trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(newIsoDate || '').trim())) return originalValue;
+  if (!original) return `${newIsoDate}T05:00:00+00:00`;
+  if (original.length < 10) return `${newIsoDate}T05:00:00+00:00`;
+  return `${newIsoDate}${original.slice(10)}`;
 }
 
 async function isOperationDayClosed(day) {

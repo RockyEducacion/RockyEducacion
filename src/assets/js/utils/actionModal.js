@@ -52,6 +52,9 @@ export async function showActionModal({
           placeholder: f.placeholder || '',
           value: f.value || ''
         });
+        if (f.min !== undefined) inputNode.min = String(f.min || '');
+        if (f.max !== undefined) inputNode.max = String(f.max || '');
+        if (f.step !== undefined) inputNode.step = String(f.step || '');
       }
       row.append(inputNode);
       fieldNodes.push({ def: f, node: inputNode });
