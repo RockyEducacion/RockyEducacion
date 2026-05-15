@@ -722,6 +722,22 @@ export const Reports = (mount, deps = {}, options = {}) => {
     return String(row?.decisionCobertura || '').trim().toLowerCase() === 'ausentismo';
   }
 
+  function isServiceWithoutFsAutoCrossNovedad8(row = {}) {
+    return String(row?.tipoPersonal || '').trim() === 'empleado'
+      && row?.servicioProgramado === true
+      && resolveServiceWithoutFsNovedadCode(row) === '8'
+      && isConfirmedServiceWithoutFsAbsence(row);
+  }
+
+  function isServiceWithoutFsUnassignedSupernumerario(row = {}) {
+    if (String(row?.tipoPersonal || '').trim() !== 'supernumerario') return false;
+    if (row?.asistio !== true) return false;
+    if (String(row?.estadoDia || '').trim() === 'trabajado_reemplazo') return false;
+    if (String(row?.sourceReplacementId || '').trim()) return false;
+    if (String(row?.reemplazaAEmployeeId || row?.reemplazaADocumento || '').trim()) return false;
+    return Boolean(String(row?.documento || '').trim());
+  }
+
   function resolveSpecialServiceWithoutFsValue(previousValues = []) {
     const prev = String(previousValues[previousValues.length - 1] || '').trim();
     return prev === 'NOCON' ? 'NOCON' : '';
@@ -847,6 +863,46 @@ export const Reports = (mount, deps = {}, options = {}) => {
     const historicalBeforeRangeBySedeSlot = new Map();
     const visibleSnapshotBySede = new Map();
     const contextSnapshotBySede = new Map();
+    const unassignedSupernumerariosByDaySede = new Map();
+    const daySedeKey = (day, sedeCode) => `${String(day || '').trim()}|${String(sedeCode || '').trim()}`;
+    const consumeUnassignedSupernumerarioDocument = (day, sedeCode) => {
+      const key = daySedeKey(day, sedeCode);
+      const bucket = unassignedSupernumerariosByDaySede.get(key) || [];
+      while (bucket.length > 0) {
+        const next = bucket.shift();
+        const doc = String(next?.documento || '').trim();
+        if (doc) return doc;
+      }
+      return '';
+    };
+
+    (statusRows || []).forEach((row) => {
+      const day = String(row?.fecha || '').trim();
+      const sedeCode = String(row?.sedeCodigo || '').trim();
+      if (!day || !sedeCode || !visibleDaySet.has(day)) return;
+      if (!isServiceWithoutFsUnassignedSupernumerario(row)) return;
+      const documento = String(row?.documento || '').trim();
+      const employeeId = String(row?.employeeId || '').trim();
+      const identity = employeeId || documento;
+      if (!identity || !documento) return;
+      const key = daySedeKey(day, sedeCode);
+      if (!unassignedSupernumerariosByDaySede.has(key)) unassignedSupernumerariosByDaySede.set(key, []);
+      const bucket = unassignedSupernumerariosByDaySede.get(key);
+      if (bucket.some((item) => String(item?.identity || '').trim() === identity)) return;
+      bucket.push({
+        identity,
+        documento,
+        nombre: String(row?.nombre || '').trim()
+      });
+    });
+
+    unassignedSupernumerariosByDaySede.forEach((bucket) => {
+      bucket.sort((a, b) => {
+        const byName = String(a?.nombre || '').localeCompare(String(b?.nombre || ''));
+        if (byName !== 0) return byName;
+        return String(a?.documento || '').localeCompare(String(b?.documento || ''));
+      });
+    });
 
     (statusRows || [])
       .filter((row) => String(row?.tipoPersonal || '').trim() === 'empleado')
@@ -1101,7 +1157,15 @@ export const Reports = (mount, deps = {}, options = {}) => {
                 value = workedDoc;
                 row.asistencias += 1;
               } else if (isConfirmedServiceWithoutFsAbsence(current)) {
-                value = 'AUS';
+                const crossDoc = isServiceWithoutFsAutoCrossNovedad8(current)
+                  ? consumeUnassignedSupernumerarioDocument(day.iso, sedeCode)
+                  : '';
+                if (crossDoc) {
+                  value = formatServiceWithoutFsReplacementDocument(crossDoc);
+                  row.asistencias += 1;
+                } else {
+                  value = 'AUS';
+                }
               } else {
                 value = 'NOCON';
               }
