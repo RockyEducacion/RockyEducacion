@@ -25,7 +25,6 @@ export const NovedadesAdmin=(mount,deps={})=>{
         el('div',{},[ el('label',{className:'label'},['Estado']), el('select',{id:'selStatus',className:'select'},[ el('option',{value:''},['Todos']), el('option',{value:'activo'},['Activos']), el('option',{value:'inactivo'},['Inactivos']) ]) ]),
         el('div',{},[ el('label',{className:'label'},['Reemplazo']), el('select',{id:'selReemp',className:'select'},[ el('option',{value:''},['Todos']), el('option',{value:'si'},['SI']), el('option',{value:'no'},['NO']) ]) ]),
         el('div',{},[ el('label',{className:'label'},['Nomina']), el('select',{id:'selNomina',className:'select'},[ el('option',{value:''},['Todos']), el('option',{value:'si'},['SI']), el('option',{value:'no'},['NO']) ]) ]),
-        el('span',{className:'right text-muted'},['Doble clic en una fila para editar.'])
       ]),
       el('div',{className:'mt-2 table-wrap'},[
         el('table',{className:'table',id:'tbl'},[
@@ -49,6 +48,9 @@ export const NovedadesAdmin=(mount,deps={})=>{
   const tabListBtn=qs('#tabListBtn',ui);
   const tabCreate=qs('#tabCreate',ui);
   const tabList=qs('#tabList',ui);
+  qs('.tabs', ui)?.classList.add('hidden');
+  tabCreate.classList.add('hidden');
+  tabList.classList.remove('hidden');
   function setTab(which){
     const isCreate=which==='create';
     tabCreateBtn.classList.toggle('is-active',isCreate);
@@ -58,6 +60,40 @@ export const NovedadesAdmin=(mount,deps={})=>{
   }
   tabCreateBtn.addEventListener('click',()=> setTab('create'));
   tabListBtn.addEventListener('click',()=> setTab('list'));
+
+  async function openCreateModal(){
+    const modal=await showActionModal({
+      title:'Crear novedad',
+      message:'Completa la informacion para crear una novedad.',
+      confirmText:'Crear novedad',
+      fields:[
+        { id:'codeRef', label:'Codigo novedad', type:'text', required:true, placeholder:'Codigo de la novedad' },
+        { id:'name', label:'Nombre', type:'text', required:true, placeholder:'Nombre de la novedad' },
+        { id:'reemplazo', label:'Reemplazo', type:'select', required:true, options:[{value:'',label:'Seleccione...'},{value:'si',label:'SI'},{value:'no',label:'NO'}] },
+        { id:'nomina', label:'Nomina', type:'select', required:true, options:[{value:'',label:'Seleccione...'},{value:'si',label:'SI'},{value:'no',label:'NO'}] }
+      ]
+    });
+    if(!modal.confirmed) return;
+    const codeRef=String(modal.values.codeRef||'').trim();
+    const name=String(modal.values.name||'').trim();
+    const reemplazo=String(modal.values.reemplazo||'').trim();
+    const nomina=String(modal.values.nomina||'').trim();
+    if(!codeRef){ alert('Escribe el codigo de novedad.'); return; }
+    if(!name){ alert('Escribe el nombre de la novedad.'); return; }
+    if(!reemplazo){ alert('Selecciona reemplazo.'); return; }
+    if(!nomina){ alert('Selecciona nomina.'); return; }
+    try{
+      const dupRef=await deps.findNovedadByCodigoNovedad?.(codeRef);
+      if(dupRef){ alert('Ya existe una novedad con ese codigo de novedad.'); return; }
+      const code=await deps.getNextNovedadCode?.();
+      const id=await deps.createNovedad?.({ codigo:code, codigoNovedad:codeRef, nombre:name, reemplazo, nomina });
+      await deps.addAuditLog?.({ targetType:'novedad', targetId:id, action:'create_novedad', after:{ codigo:code, codigoNovedad:codeRef, nombre:name, reemplazo, nomina, estado:'activo' } });
+      alert('Novedad creada OK');
+    }catch(e){ alert('Error: '+(e?.message||e)); }
+  }
+  const btnOpenCreate=el('button',{id:'btnOpenCreate',className:'btn btn--primary right',type:'button'},['Crear novedad']);
+  qs('#tabList .form-row',ui)?.append(btnOpenCreate);
+  btnOpenCreate.addEventListener('click',openCreateModal);
 
   qs('#btnCreate',ui).addEventListener('click',async()=>{
     const codeRef=qs('#nCodeRef',ui).value.trim();
@@ -111,7 +147,6 @@ export const NovedadesAdmin=(mount,deps={})=>{
     const tdNomina=el('td',{},[ (n.nomina||'').toUpperCase() || '-' ]);
     const tdEstado=el('td',{},[ statusBadge(n.estado) ]);
     const tdAcc=el('td',{},[ actionsCell(n) ]);
-    tr.addEventListener('dblclick',()=> startEdit(tr,n));
     tr.append(tdCodigo,tdCodeRef,tdNombre,tdReemp,tdNomina,tdEstado,tdAcc);
     return tr;
   }

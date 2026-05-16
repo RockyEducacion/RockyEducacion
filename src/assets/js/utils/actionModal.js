@@ -35,6 +35,29 @@ export async function showActionModal({
             el('option', { value: String(opt.value ?? ''), selected: String(opt.value ?? '') === String(f.value ?? '') }, [opt.label || String(opt.value ?? '')])
           )
         );
+      } else if (f.type === 'datalist') {
+        const listId = `${f.id || 'field'}_list_${Math.random().toString(36).slice(2, 8)}`;
+        inputNode = el('input', {
+          className: 'input',
+          id: f.id || '',
+          type: 'text',
+          list: listId,
+          placeholder: f.placeholder || '',
+          value: f.value || ''
+        });
+        const listNode = el(
+          'datalist',
+          { id: listId },
+          (f.options || []).map((opt) => {
+            const value = typeof opt === 'string' ? opt : String(opt.value ?? '');
+            const label = typeof opt === 'string' ? opt : String(opt.label ?? value);
+            return el('option', { value }, [label]);
+          })
+        );
+        row.append(inputNode, listNode);
+        fieldNodes.push({ def: f, node: inputNode });
+        body.append(row);
+        continue;
       } else if (f.type === 'textarea') {
         inputNode = el('textarea', {
           className: 'input',

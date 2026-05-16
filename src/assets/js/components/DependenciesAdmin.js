@@ -20,7 +20,6 @@ export const DependenciesAdmin=(mount,deps={})=>{
       el('div',{className:'form-row'},[
         el('div',{},[ el('label',{className:'label'},['Buscar']), el('input',{id:'txtSearch',className:'input',placeholder:'Codigo o nombre...'}) ]),
         el('div',{},[ el('label',{className:'label'},['Estado']), el('select',{id:'selStatus',className:'select'},[ el('option',{value:''},['Todos']), el('option',{value:'activo'},['Activos']), el('option',{value:'inactivo'},['Inactivos']) ]) ]),
-        el('span',{className:'right text-muted'},['Doble clic en una fila para editar.'])
       ]),
       el('div',{className:'mt-2 table-wrap'},[
         el('table',{className:'table',id:'tbl'},[
@@ -36,6 +35,9 @@ export const DependenciesAdmin=(mount,deps={})=>{
   const tabListBtn=qs('#tabListBtn',ui);
   const tabCreate=qs('#tabCreate',ui);
   const tabList=qs('#tabList',ui);
+  qs('.tabs', ui)?.classList.add('hidden');
+  tabCreate.classList.add('hidden');
+  tabList.classList.remove('hidden');
   function setTab(which){
     const isCreate=which==='create';
     tabCreateBtn.classList.toggle('is-active',isCreate);
@@ -45,6 +47,27 @@ export const DependenciesAdmin=(mount,deps={})=>{
   }
   tabCreateBtn.addEventListener('click',()=> setTab('create'));
   tabListBtn.addEventListener('click',()=> setTab('list'));
+
+  async function openCreateModal(){
+    const modal=await showActionModal({
+      title:'Crear dependencia',
+      message:'Completa la informacion para crear una dependencia.',
+      confirmText:'Crear dependencia',
+      fields:[{ id:'name', label:'Nombre', type:'text', required:true, placeholder:'Nombre de la dependencia' }]
+    });
+    if(!modal.confirmed) return;
+    const name=String(modal.values.name||'').trim();
+    if(!name){ alert('Escribe el nombre de la dependencia.'); return; }
+    try{
+      const code=await deps.getNextDependencyCode?.();
+      const id=await deps.createDependency?.({ codigo:code, nombre:name });
+      await deps.addAuditLog?.({ targetType:'dependency', targetId:id, action:'create_dependency', after:{ codigo:code, nombre:name, estado:'activo' } });
+      alert('Dependencia creada OK');
+    }catch(e){ alert('Error: '+(e?.message||e)); }
+  }
+  const btnOpenCreate=el('button',{id:'btnOpenCreate',className:'btn btn--primary right',type:'button'},['Crear dependencia']);
+  qs('#tabList .form-row',ui)?.append(btnOpenCreate);
+  btnOpenCreate.addEventListener('click',openCreateModal);
 
   qs('#btnCreate',ui).addEventListener('click',async()=>{
     const name=qs('#dName',ui).value.trim(); const msg=qs('#msgCreate',ui); msg.textContent=' ';
@@ -65,7 +88,7 @@ export const DependenciesAdmin=(mount,deps={})=>{
   function updateSortIndicators(){ ui.querySelectorAll('th[data-sort]').forEach((th)=>{ const base=th.dataset.baseLabel||th.textContent.replace(/\s[\^v▲▼]$/,''); th.dataset.baseLabel=base; const key=th.getAttribute('data-sort'); th.textContent=(sortKey===key)?`${base} ${sortDir===1?'▲':'▼'}`:base; }); }
   function initSorting(){ ui.querySelectorAll('th[data-sort]').forEach((th)=> th.addEventListener('click',()=>{ const key=th.getAttribute('data-sort'); if(sortKey===key) sortDir=sortDir*-1; else { sortKey=key; sortDir=1; } render(); })); }
   function render(){ const term=search(); const st=filterStatus(); const data=snapshot.filter(d=> ((!term||(d.codigo||'').toLowerCase().includes(term)||(d.nombre||'').toLowerCase().includes(term)) && (!st || d.estado===st))); tbody.replaceChildren(...sortData(data).map(d=> row(d))); const msg=qs('#msg',ui); if(msg) msg.textContent=`Total registros filtrados: ${data.length}`; updateSortIndicators(); }
-  function row(d){ const tr=el('tr',{'data-id':d.id}); const tdCodigo=el('td',{},[d.codigo||'-']); const tdNombre=el('td',{},[d.nombre||'-']); const tdEstado=el('td',{},[ statusBadge(d.estado) ]); const tdAcc=el('td',{},[ actionsCell(d) ]); tr.addEventListener('dblclick',()=> startEdit(tr,d)); tr.append(tdCodigo,tdNombre,tdEstado,tdAcc); return tr; }
+  function row(d){ const tr=el('tr',{'data-id':d.id}); const tdCodigo=el('td',{},[d.codigo||'-']); const tdNombre=el('td',{},[d.nombre||'-']); const tdEstado=el('td',{},[ statusBadge(d.estado) ]); const tdAcc=el('td',{},[ actionsCell(d) ]); tr.append(tdCodigo,tdNombre,tdEstado,tdAcc); return tr; }
   function statusBadge(st){ return el('span',{className:'badge '+(st==='activo'?'badge--ok':'badge--off')},[st||'-']); }
   function formatDate(ts){ try{ const d=ts?.toDate? ts.toDate(): (ts? new Date(ts): null); return d? new Date(d).toLocaleString(): '-'; }catch{ return '-'; } }
   function auditInfoData(d){

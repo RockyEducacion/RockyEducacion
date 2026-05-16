@@ -32,7 +32,6 @@ export const CargosAdmin=(mount,deps={})=>{
       el('div',{className:'form-row'},[
         el('div',{},[ el('label',{className:'label'},['Buscar']), el('input',{id:'txtSearch',className:'input',placeholder:'Codigo o cargo...'}) ]),
         el('div',{},[ el('label',{className:'label'},['Estado']), el('select',{id:'selStatus',className:'select'},[ el('option',{value:''},['Todos']), el('option',{value:'activo'},['Activos']), el('option',{value:'inactivo'},['Inactivos']) ]) ]),
-        el('span',{className:'right text-muted'},['Doble clic en una fila para editar.'])
       ]),
       el('div',{className:'mt-2 table-wrap'},[
         el('table',{className:'table',id:'tbl'},[
@@ -48,6 +47,9 @@ export const CargosAdmin=(mount,deps={})=>{
   const tabListBtn=qs('#tabListBtn',ui);
   const tabCreate=qs('#tabCreate',ui);
   const tabList=qs('#tabList',ui);
+  qs('.tabs', ui)?.classList.add('hidden');
+  tabCreate.classList.add('hidden');
+  tabList.classList.remove('hidden');
   function setTab(which){
     const isCreate=which==='create';
     tabCreateBtn.classList.toggle('is-active',isCreate);
@@ -57,6 +59,37 @@ export const CargosAdmin=(mount,deps={})=>{
   }
   tabCreateBtn.addEventListener('click',()=> setTab('create'));
   tabListBtn.addEventListener('click',()=> setTab('list'));
+
+  async function openCreateModal(){
+    const modal=await showActionModal({
+      title:'Crear cargo',
+      message:'Completa la informacion para crear un cargo.',
+      confirmText:'Crear cargo',
+      fields:[
+        { id:'name', label:'Cargo', type:'text', required:true, placeholder:'Nombre del cargo' },
+        {
+          id:'crud',
+          label:'Vincular en CRUD',
+          type:'select',
+          value:'empleado',
+          options:crudOptions.map((o)=> ({ value:o.value, label:o.label }))
+        }
+      ]
+    });
+    if(!modal.confirmed) return;
+    const name=String(modal.values.name||'').trim();
+    const alineacionCrud=String(modal.values.crud||'empleado').trim() || 'empleado';
+    if(!name){ alert('Escribe el cargo.'); return; }
+    try{
+      const code=await deps.getNextCargoCode?.();
+      const id=await deps.createCargo?.({ codigo:code, nombre:name, alineacionCrud });
+      await deps.addAuditLog?.({ targetType:'cargo', targetId:id, action:'create_cargo', after:{ codigo:code, nombre:name, alineacionCrud, estado:'activo' } });
+      alert('Cargo creado OK');
+    }catch(e){ alert('Error: '+(e?.message||e)); }
+  }
+  const btnOpenCreate=el('button',{id:'btnOpenCreate',className:'btn btn--primary right',type:'button'},['Crear cargo']);
+  qs('#tabList .form-row',ui)?.append(btnOpenCreate);
+  btnOpenCreate.addEventListener('click',openCreateModal);
 
   qs('#btnCreate',ui).addEventListener('click',async()=>{
     const name=qs('#cName',ui).value.trim();
@@ -80,7 +113,7 @@ export const CargosAdmin=(mount,deps={})=>{
   function updateSortIndicators(){ ui.querySelectorAll('th[data-sort]').forEach((th)=>{ const base=th.dataset.baseLabel||th.textContent.replace(/\s[\^v▲▼]$/,''); th.dataset.baseLabel=base; const key=th.getAttribute('data-sort'); th.textContent=(sortKey===key)?`${base} ${sortDir===1?'▲':'▼'}`:base; }); }
   function initSorting(){ ui.querySelectorAll('th[data-sort]').forEach((th)=> th.addEventListener('click',()=>{ const key=th.getAttribute('data-sort'); if(sortKey===key) sortDir=sortDir*-1; else { sortKey=key; sortDir=1; } render(); })); }
   function render(){ const term=search(); const st=filterStatus(); const data=snapshot.filter(c=> ((!term||(c.codigo||'').toLowerCase().includes(term)||(c.nombre||'').toLowerCase().includes(term)||crudLabel(c.alineacionCrud||'empleado').toLowerCase().includes(term)) && (!st || c.estado===st))); tbody.replaceChildren(...sortData(data).map(c=> row(c))); const msg=qs('#msg',ui); if(msg) msg.textContent=`Total registros filtrados: ${data.length}`; updateSortIndicators(); }
-  function row(c){ const tr=el('tr',{'data-id':c.id}); const tdCodigo=el('td',{},[c.codigo||'-']); const tdNombre=el('td',{},[c.nombre||'-']); const tdCrud=el('td',{},[crudLabel(c.alineacionCrud||'empleado')]); const tdEstado=el('td',{},[ statusBadge(c.estado) ]); const tdAcc=el('td',{},[ actionsCell(c) ]); tr.addEventListener('dblclick',()=> startEdit(tr,c)); tr.append(tdCodigo,tdNombre,tdCrud,tdEstado,tdAcc); return tr; }
+  function row(c){ const tr=el('tr',{'data-id':c.id}); const tdCodigo=el('td',{},[c.codigo||'-']); const tdNombre=el('td',{},[c.nombre||'-']); const tdCrud=el('td',{},[crudLabel(c.alineacionCrud||'empleado')]); const tdEstado=el('td',{},[ statusBadge(c.estado) ]); const tdAcc=el('td',{},[ actionsCell(c) ]); tr.append(tdCodigo,tdNombre,tdCrud,tdEstado,tdAcc); return tr; }
   function statusBadge(st){ return el('span',{className:'badge '+(st==='activo'?'badge--ok':'badge--off')},[st||'-']); }
   function formatDate(ts){ try{ const d=ts?.toDate? ts.toDate(): (ts? new Date(ts): null); return d? new Date(d).toLocaleString(): '-'; }catch{ return '-'; } }
   function auditInfoData(c){

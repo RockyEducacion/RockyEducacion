@@ -30,7 +30,6 @@ export const SedesAdmin=(mount,deps={})=>{
       el('div',{className:'form-row'},[
         el('div',{},[ el('label',{className:'label'},['Buscar']), el('input',{id:'txtSearch',className:'input',placeholder:'Codigo, nombre, dependencia o zona...'}) ]),
         el('div',{},[ el('label',{className:'label'},['Estado']), el('select',{id:'selStatus',className:'select'},[ el('option',{value:''},['Todos']), el('option',{value:'activo'},['Activos']), el('option',{value:'inactivo'},['Inactivos']) ]) ]),
-        el('span',{className:'right text-muted'},['Doble clic en una fila para editar.'])
       ]),
       el('div',{className:'mt-2 table-wrap'},[
         el('table',{className:'table',id:'tbl'},[
@@ -55,6 +54,9 @@ export const SedesAdmin=(mount,deps={})=>{
   const tabListBtn=qs('#tabListBtn',ui);
   const tabCreate=qs('#tabCreate',ui);
   const tabList=qs('#tabList',ui);
+  qs('.tabs', ui)?.classList.add('hidden');
+  tabCreate.classList.add('hidden');
+  tabList.classList.remove('hidden');
   function setTab(which){
     const isCreate=which==='create';
     tabCreateBtn.classList.toggle('is-active',isCreate);
@@ -107,6 +109,71 @@ export const SedesAdmin=(mount,deps={})=>{
       .map((value)=> el('option',{value}));
     zoneDatalist.replaceChildren(...zoneOpts);
   }
+  function catalogLabelByCode(list, code){
+    const item=list.find((x)=>x.codigo===code);
+    if(!item) return '';
+    return `${item.nombre||item.codigo||'-'} (${item.codigo||'-'})`;
+  }
+  function catalogOptions(list){
+    return list
+      .map((item)=> catalogLabelByCode(list, item.codigo))
+      .filter((value, index, arr)=> value && arr.indexOf(value)===index);
+  }
+  async function openCreateModal(){
+    const modal=await showActionModal({
+      title:'Crear sede',
+      message:'Completa la informacion para crear una sede.',
+      confirmText:'Crear sede',
+      fields:[
+        { id:'name', label:'Nombre', type:'text', required:true, placeholder:'Nombre de la sede' },
+        { id:'dep', label:'Dependencia', type:'datalist', required:true, placeholder:'Selecciona o escribe dependencia', options:catalogOptions(depList) },
+        { id:'zone', label:'Zona', type:'datalist', required:true, placeholder:'Selecciona o escribe zona', options:catalogOptions(zoneList) },
+        { id:'ops', label:'Nro de operarios', type:'number', required:true, min:'0', step:'1', value:'0' },
+        {
+          id:'jornada',
+          label:'Jornada',
+          type:'select',
+          value:'lun_vie',
+          options:[
+            { value:'lun_vie', label:'Lunes a viernes' },
+            { value:'lun_sab', label:'Lunes a sabado' },
+            { value:'lun_dom', label:'Lunes a domingo' }
+          ]
+        }
+      ]
+    });
+    if(!modal.confirmed) return;
+    const name=String(modal.values.name||'').trim();
+    const depCode=resolveCode(depList, modal.values.dep);
+    const zoneCode=resolveCode(zoneList, modal.values.zone);
+    const opsRaw=String(modal.values.ops||'').trim();
+    const jornada=String(modal.values.jornada||'lun_vie').trim() || 'lun_vie';
+    if(!name){ alert('Escribe el nombre de la sede.'); return; }
+    if(!depCode){ alert('Selecciona una dependencia valida.'); return; }
+    if(!zoneCode){ alert('Selecciona una zona valida.'); return; }
+    const ops=Number(opsRaw);
+    if(!Number.isFinite(ops) || ops<0 || !Number.isInteger(ops)){ alert('Ingresa un numero entero de operarios valido.'); return; }
+    try{
+      const code=await deps.getNextSedeCode?.();
+      const dep=depList.find(d=>d.codigo===depCode);
+      const zone=zoneList.find(z=>z.codigo===zoneCode);
+      const id=await deps.createSede?.({
+        codigo:code,
+        nombre:name,
+        dependenciaCodigo:depCode,
+        dependenciaNombre:dep?.nombre||null,
+        zonaCodigo:zoneCode,
+        zonaNombre:zone?.nombre||null,
+        numeroOperarios:ops,
+        jornada
+      });
+      await deps.addAuditLog?.({ targetType:'sede', targetId:id, action:'create_sede', after:{ codigo:code, nombre:name, estado:'activo', dependenciaCodigo:depCode, zonaCodigo:zoneCode, numeroOperarios:ops, jornada } });
+      alert('Sede creada OK');
+    }catch(e){ alert('Error: '+(e?.message||e)); }
+  }
+  const btnOpenCreate=el('button',{id:'btnOpenCreate',className:'btn btn--primary right',type:'button'},['Crear sede']);
+  qs('#tabList .form-row',ui)?.append(btnOpenCreate);
+  btnOpenCreate.addEventListener('click',openCreateModal);
   let snapshot=[]; const tbody=ui.querySelector('tbody');
   let sortKey=''; let sortDir=1;
   let unDeps=()=>{};
@@ -204,7 +271,6 @@ export const SedesAdmin=(mount,deps={})=>{
     const tdJornada=el('td',{},[ labelJornada(s.jornada) ]);
     const tdEstado=el('td',{},[ statusBadge(s.estado) ]);
     const tdAcc=el('td',{},[ actionsCell(s) ]);
-    tr.addEventListener('dblclick',()=> startEdit(tr,s));
     tr.append(tdCodigo,tdNombre,tdDep,tdZone,tdOps,tdJornada,tdEstado,tdAcc);
     return tr;
   }

@@ -43,15 +43,14 @@ export const Sidebar = () => {
     if (can(PERMS.VIEW_SEDES)) adminLinks.push(navLink('Sedes', '/sedes'));
     if (can(PERMS.VIEW_CARGOS)) adminLinks.push(navLink('Cargos', '/cargos'));
     if (can(PERMS.VIEW_NOVEDADES)) adminLinks.push(navLink('Novedades', '/novedades'));
-    if (can(PERMS.VIEW_EMPLOYEES)) adminLinks.push(navLink('Empleados', '/employees'));
-    if (can(PERMS.VIEW_SUPERVISORS)) adminLinks.push(navLink('Supervisores', '/supervisors'));
-    if (can(PERMS.VIEW_SUPERNUMERARIOS)) adminLinks.push(navLink('Supernumerarios', '/supernumerarios'));
     if (adminLinks.length) sections.push(section('Administracion', adminLinks, 'administracion'));
 
-    const bulkLinks = [];
-    if (can(PERMS.EDIT_SEDES)) bulkLinks.push(navLink('Cargue sedes', '/bulk-upload-sedes'));
-    if (can(PERMS.EDIT_EMPLOYEES)) bulkLinks.push(navLink('Cargue empleados', '/bulk-upload'));
-    if (bulkLinks.length) sections.push(section('Cargue masivo', bulkLinks, 'cargue_masivo'));
+    const employeeLinks = [];
+    if (can(PERMS.VIEW_EMPLOYEES)) employeeLinks.push(navLink('Empleados', '/employees'));
+    if (can(PERMS.VIEW_SUPERVISORS)) employeeLinks.push(navLink('Supervisores', '/supervisors'));
+    if (can(PERMS.VIEW_SUPERNUMERARIOS)) employeeLinks.push(navLink('Supernumerarios', '/supernumerarios'));
+    if (can(PERMS.UPLOAD_DATA)) employeeLinks.push(navLink('Incapacidades', '/upload'));
+    if (employeeLinks.length) sections.push(section('Empleados', employeeLinks, 'empleados'));
 
     const opLinks = [];
     if (can(PERMS.IMPORT_DATA)) opLinks.push(navLink('Registro Diario', '/registros-vivo'));
@@ -68,9 +67,11 @@ export const Sidebar = () => {
       sections.push(section('Reportes', reportLinks, 'reportes'));
     }
 
-    if (can(PERMS.UPLOAD_DATA)) {
-      sections.push(section('Incapacidades', [navLink('Incapacidades', '/upload')], 'carga_informacion'));
-    }
+    const bulkLinks = [];
+    if (can(PERMS.EDIT_SEDES)) bulkLinks.push(navLink('Cargue sedes', '/bulk-upload-sedes'));
+    if (can(PERMS.EDIT_EMPLOYEES)) bulkLinks.push(navLink('Cargue empleados', '/bulk-upload'));
+    if (bulkLinks.length) sections.push(section('Cargue masivo', bulkLinks, 'cargue_masivo'));
+
   }
 
   container.replaceChildren(top, ...sections);
