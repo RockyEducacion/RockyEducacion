@@ -740,6 +740,7 @@ export const Reports = (mount, deps = {}, options = {}) => {
 
   function resolveSpecialServiceWithoutFsValue(previousValues = []) {
     const prev = String(previousValues[previousValues.length - 1] || '').trim();
+    if (isServiceWithoutFsDocumentValue(prev)) return prev;
     return prev === 'NOCON' ? 'NOCON' : '';
   }
 
@@ -874,6 +875,13 @@ export const Reports = (mount, deps = {}, options = {}) => {
         if (doc) return doc;
       }
       return '';
+    };
+    const replaceServiceWithoutFsGapWithSupernumerario = (value, day, sedeCode) => {
+      const normalized = String(value || '').trim().toUpperCase();
+      if (normalized !== 'AUS' && normalized !== 'NOCON') return { value, counts: false };
+      const crossDoc = consumeUnassignedSupernumerarioDocument(day, sedeCode);
+      if (!crossDoc) return { value, counts: false };
+      return { value: formatServiceWithoutFsReplacementDocument(crossDoc), counts: true };
     };
 
     (statusRows || []).forEach((row) => {
@@ -1171,6 +1179,9 @@ export const Reports = (mount, deps = {}, options = {}) => {
               }
             }
 
+            const crossGap = replaceServiceWithoutFsGapWithSupernumerario(value, day.iso, sedeCode);
+            value = crossGap.value;
+            if (crossGap.counts) row.asistencias += 1;
             row[day.key] = value;
             if (isServiceWithoutFsDocumentValue(value)) dynamicServiceDoc = value;
             previousValues.push(value);

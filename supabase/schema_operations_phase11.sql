@@ -542,13 +542,13 @@ begin
   validated_rows as (
     select
       rr.*,
-      coalesce(ec_current.tipo_personal, rr.tipo_personal) as current_tipo_personal
+      rr.tipo_personal as effective_tipo_personal
     from resolved_rows rr
     left join employees_catalog ec_current on ec_current.employee_id = rr.employee_id
     left join active_sedes s_current on s_current.codigo = ec_current.home_sede_codigo
     where rr.servicio_programado = false
       or (
-        coalesce(ec_current.tipo_personal, rr.tipo_personal) = 'empleado'
+        rr.tipo_personal = 'empleado'
         and s_current.codigo is not null
         and public.is_employee_effective_for_date_sql(
           ec_current.estado_empleado,
@@ -602,7 +602,7 @@ begin
     rr.employee_id,
     rr.documento,
     rr.nombre,
-    rr.current_tipo_personal,
+    rr.effective_tipo_personal,
     rr.effective_sede_codigo,
     coalesce(sl.nombre, rr.effective_sede_nombre),
     coalesce(sl.zona_codigo, rr.default_zona_codigo_snapshot),
