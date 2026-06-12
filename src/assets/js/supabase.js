@@ -837,6 +837,20 @@ function isEmployeeSupernumerario(emp, cargoMap = new Map()) {
   return alignment === 'supernumerario';
 }
 
+function isEmployeeSupernumerarioOnDate(emp, selectedDate, cargoMap = new Map(), historyRows = []) {
+  const assignment = resolveEmployeeAssignmentHistoryOnDate(emp, selectedDate, historyRows);
+  const effective = assignment
+    ? {
+        ...emp,
+        cargoCodigo: assignment.cargoCodigo ?? emp?.cargoCodigo,
+        cargo_codigo: assignment.cargo_codigo ?? emp?.cargo_codigo,
+        cargoNombre: assignment.cargoNombre ?? emp?.cargoNombre,
+        cargo_nombre: assignment.cargo_nombre ?? emp?.cargo_nombre
+      }
+    : emp;
+  return isEmployeeSupernumerario(effective, cargoMap);
+}
+
 function resolveEmployeeAssignmentHistoryOnDate(emp, selectedDate, historyRows = []) {
   const day = String(selectedDate || '').trim();
   if (!day) return null;
@@ -1237,7 +1251,7 @@ async function removeInvalidScheduledEmployeeDailyStatusRows(fecha) {
     selectAllRows('sedes', { select: '*' }),
     selectAllRows('employees', { select: '*' }),
     selectAllRows('cargos', { select: 'codigo, alineacion_crud, nombre' }),
-    selectAllRows('employee_cargo_history', { select: 'id, employee_id, sede_codigo, fecha_ingreso, fecha_retiro, created_at' })
+    selectAllRows('employee_cargo_history', { select: 'id, employee_id, cargo_codigo, cargo_nombre, sede_codigo, fecha_ingreso, fecha_retiro, created_at' })
   ]);
   if (statusError) throw statusError;
 
@@ -1270,9 +1284,10 @@ async function removeInvalidScheduledEmployeeDailyStatusRows(fecha) {
     .filter((row) => {
       const employeeId = String(row?.employee_id || '').trim();
       const employee = employeeById.get(employeeId) || null;
+      const historyRows = historyByEmployeeId.get(employeeId) || [];
       if (!employee) return true;
-      if (isEmployeeSupernumerario(employee, cargoMap)) return true;
-      return !isEmployeeAssignedToActiveSedeOnDate(employee, day, activeSedeCodes, historyByEmployeeId.get(employeeId) || []);
+      if (isEmployeeSupernumerarioOnDate(employee, day, cargoMap, historyRows)) return true;
+      return !isEmployeeAssignedToActiveSedeOnDate(employee, day, activeSedeCodes, historyRows);
     })
     .map((row) => String(row?.id || '').trim())
     .filter(Boolean);

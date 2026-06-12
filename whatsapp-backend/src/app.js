@@ -860,7 +860,7 @@ async function removeInvalidScheduledEmployeeDailyStatusRows(date) {
     selectAllRows('sedes'),
     selectAllRows('employees'),
     selectAllRows('cargos', 'codigo, alineacion_crud, nombre'),
-    selectAllRows('employee_cargo_history', 'id, employee_id, sede_codigo, fecha_ingreso, fecha_retiro, created_at')
+    selectAllRows('employee_cargo_history', 'id, employee_id, cargo_codigo, cargo_nombre, sede_codigo, fecha_ingreso, fecha_retiro, created_at')
   ]);
   if (statusError) throw statusError;
 
@@ -886,9 +886,10 @@ async function removeInvalidScheduledEmployeeDailyStatusRows(date) {
     .filter((row) => {
       const employeeId = String(row?.employee_id || '').trim();
       const employee = employeeById.get(employeeId) || null;
+      const historyRows = historyByEmployeeId.get(employeeId) || [];
       if (!employee) return true;
-      if (isEmployeeSupernumerarioByCargoMap(employee, cargoMap)) return true;
-      return !isEmployeeAssignedToActiveSedeOnDate(employee, day, activeSedeCodes, historyByEmployeeId.get(employeeId) || []);
+      if (isEmployeeSupernumerarioOnDateByCargoMap(employee, day, cargoMap, historyRows)) return true;
+      return !isEmployeeAssignedToActiveSedeOnDate(employee, day, activeSedeCodes, historyRows);
     })
     .map((row) => String(row?.id || '').trim())
     .filter(Boolean);
@@ -1336,6 +1337,18 @@ function isEmployeeSupernumerarioByCargoMap(emp, cargoMap = new Map()) {
   const cargo = cargoMap.get(cargoCode) || null;
   const alignment = normalizeCargoAlignment(cargo?.alineacion_crud || emp?.cargo_nombre || '');
   return alignment === 'supernumerario';
+}
+
+function isEmployeeSupernumerarioOnDateByCargoMap(emp, selectedDate, cargoMap = new Map(), historyRows = []) {
+  const assignment = resolveEmployeeAssignmentHistoryOnDate(emp, selectedDate, historyRows);
+  const effective = assignment
+    ? {
+        ...emp,
+        cargo_codigo: assignment.cargo_codigo ?? assignment.cargoCodigo ?? emp?.cargo_codigo,
+        cargo_nombre: assignment.cargo_nombre ?? assignment.cargoNombre ?? emp?.cargo_nombre
+      }
+    : emp;
+  return isEmployeeSupernumerarioByCargoMap(effective, cargoMap);
 }
 
 function resolveEmployeeAssignmentHistoryOnDate(emp, selectedDate, historyRows = []) {
