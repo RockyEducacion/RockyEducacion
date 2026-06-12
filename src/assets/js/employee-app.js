@@ -65,16 +65,27 @@ function employeeCard(children = []) {
 
 function renderLoading(text = 'Validando acceso...') {
   root.replaceChildren(employeeCard([
-    el('h2', {}, ['Portal de empleados']),
-    el('p', { className: 'text-muted' }, [text])
+    el('div', { className: 'employee-card__heading' }, [
+      el('span', { className: 'employee-card__icon' }, ['↻']),
+      el('div', {}, [
+        el('h2', {}, ['Portal de empleados']),
+        el('p', { className: 'text-muted' }, [text])
+      ])
+    ])
   ]));
 }
 
 function renderLogin() {
   const msg = el('p', { className: 'employee-message text-muted' }, [' ']);
   const ui = employeeCard([
-    el('h2', {}, ['Ingreso rapido']),
-    el('p', { className: 'text-muted' }, ['No necesitas crear cuenta. Usa el documento y los ultimos 4 digitos del celular registrado en empleados.']),
+    el('div', { className: 'employee-card__heading' }, [
+      el('span', { className: 'employee-card__icon' }, ['✓']),
+      el('div', {}, [
+        el('p', { className: 'employee-card__kicker' }, ['Validacion de identidad']),
+        el('h2', {}, ['Ingreso rapido']),
+        el('p', { className: 'text-muted' }, ['No necesitas crear cuenta. Usa el documento y los ultimos 4 digitos del celular registrado en empleados.'])
+      ])
+    ]),
     el('form', { className: 'employee-form' }, [
       el('div', {}, [
         el('label', { className: 'label', htmlFor: 'employeeDoc' }, ['Documento']),
@@ -85,10 +96,13 @@ function renderLogin() {
         el('input', { id: 'employeeLast4', className: 'input', inputMode: 'numeric', autocomplete: 'one-time-code', placeholder: '1234', maxLength: 4 })
       ]),
       el('div', { className: 'employee-form__actions' }, [
-        el('button', { className: 'btn btn--primary', type: 'submit' }, ['Ingresar']),
-        el('a', { className: 'link', href: 'access.html' }, ['Ver todos los accesos'])
+        el('button', { className: 'btn btn--primary', type: 'submit' }, ['Ingresar'])
       ]),
       msg
+    ]),
+    el('div', { className: 'employee-help-strip' }, [
+      el('span', {}, ['¿Tu celular no coincide?']),
+      el('strong', {}, ['Comunicate con tu supervisor para actualizar tus datos.'])
     ])
   ]);
 
@@ -148,8 +162,9 @@ function renderDashboardCard(session) {
   const host = el('div');
   const uploadMount = el('div');
   const info = employeeCard([
-    el('div', { className: 'form-row' }, [
+    el('div', { className: 'employee-dashboard-head form-row' }, [
         el('div', {}, [
+          el('p', { className: 'employee-card__kicker' }, ['Sesion activa']),
           el('h2', { style: 'margin:0;' }, [`Hola, ${session?.nombre || 'Empleado'}`]),
           el('p', { className: 'text-muted mt-1' }, ['Tu acceso esta limitado a la seccion de incapacidades del portal de empleados.'])
         ]),

@@ -1,6 +1,7 @@
 import { el, qs } from '../utils/dom.js';
 import { showInfoModal } from '../utils/infoModal.js';
 import { showActionModal } from '../utils/actionModal.js';
+import { createTablePagination } from '../utils/pagination.js';
 export const NovedadesAdmin=(mount,deps={})=>{
   const ui=el('section',{className:'main-card'},[
     el('h2',{},['Novedades']),
@@ -117,6 +118,7 @@ export const NovedadesAdmin=(mount,deps={})=>{
 
   let snapshot=[]; const tbody=ui.querySelector('tbody');
   let sortKey=''; let sortDir=1;
+  const paginator=createTablePagination(ui,{id:'novedades',after:'#tabList .table-wrap',onChange:render});
   const search=()=> qs('#txtSearch',ui).value.trim().toLowerCase();
   const filterStatus=()=> qs('#selStatus',ui).value;
   const filterReemp=()=> qs('#selReemp',ui).value;
@@ -124,7 +126,7 @@ export const NovedadesAdmin=(mount,deps={})=>{
   function sortVal(n,key){ if(key==='createdAt'){ try{ const x=n.createdAt?.toDate?n.createdAt.toDate(): (n.createdAt?new Date(n.createdAt):null); return x?x.getTime():0; }catch{return 0;} } return String(n[key]??'').toLowerCase(); }
   function sortData(data){ if(!sortKey) return data; const out=[...data]; out.sort((a,b)=>{ const va=sortVal(a,sortKey); const vb=sortVal(b,sortKey); if(va===vb) return 0; return va>vb?sortDir:-sortDir; }); return out; }
   function updateSortIndicators(){ ui.querySelectorAll('th[data-sort]').forEach((th)=>{ const base=th.dataset.baseLabel||th.textContent.replace(/\s[\^v▲▼]$/,''); th.dataset.baseLabel=base; const key=th.getAttribute('data-sort'); th.textContent=(sortKey===key)?`${base} ${sortDir===1?'▲':'▼'}`:base; }); }
-  function initSorting(){ ui.querySelectorAll('th[data-sort]').forEach((th)=> th.addEventListener('click',()=>{ const key=th.getAttribute('data-sort'); if(sortKey===key) sortDir=sortDir*-1; else { sortKey=key; sortDir=1; } render(); })); }
+  function initSorting(){ ui.querySelectorAll('th[data-sort]').forEach((th)=> th.addEventListener('click',()=>{ const key=th.getAttribute('data-sort'); if(sortKey===key) sortDir=sortDir*-1; else { sortKey=key; sortDir=1; } paginator.reset(); render(); })); }
   function render(){
     const term=search(); const st=filterStatus(); const re=filterReemp(); const no=filterNomina();
     const data=snapshot.filter(n=>{
@@ -134,7 +136,9 @@ export const NovedadesAdmin=(mount,deps={})=>{
       const matchesNomina=!no || n.nomina===no;
       return matchesText && matchesStatus && matchesReemp && matchesNomina;
     });
-    tbody.replaceChildren(...sortData(data).map(n=> row(n)));
+    const sorted=sortData(data);
+    const pageRows=paginator.slice(sorted);
+    tbody.replaceChildren(...pageRows.map(n=> row(n)));
     const msg=qs('#msg',ui); if(msg) msg.textContent=`Total registros filtrados: ${data.length}`;
     updateSortIndicators();
   }
@@ -225,10 +229,10 @@ export const NovedadesAdmin=(mount,deps={})=>{
     box.append(btnSave,btnCancel); tds[6].replaceChildren(box);
   }
   const un=deps.streamNovedades?.((arr)=>{ snapshot=arr||[]; render(); });
-  qs('#txtSearch',ui).addEventListener('input',render);
-  qs('#selStatus',ui).addEventListener('change',render);
-  qs('#selReemp',ui).addEventListener('change',render);
-  qs('#selNomina',ui).addEventListener('change',render);
+  qs('#txtSearch',ui).addEventListener('input',()=>{ paginator.reset(); render(); });
+  qs('#selStatus',ui).addEventListener('change',()=>{ paginator.reset(); render(); });
+  qs('#selReemp',ui).addEventListener('change',()=>{ paginator.reset(); render(); });
+  qs('#selNomina',ui).addEventListener('change',()=>{ paginator.reset(); render(); });
   initSorting();
   mount.replaceChildren(ui);
   return ()=> un?.();

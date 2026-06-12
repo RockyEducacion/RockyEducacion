@@ -18,7 +18,7 @@ export const Sidebar = () => {
   });
   brandImg.addEventListener('error', () => {
     brandImg.classList.add('hidden');
-    brandTitle.textContent = 'RockyEDU';
+    brandTitle.textContent = 'RockyDEMO';
     brandSubtitle.textContent = 'Gestion operativa';
   });
   const top = el('div', { className: 'sidebar__top' }, [
@@ -47,6 +47,7 @@ export const Sidebar = () => {
 
     const employeeLinks = [];
     if (can(PERMS.VIEW_EMPLOYEES)) employeeLinks.push(navLink('Empleados', '/employees'));
+    if (can(PERMS.VIEW_EMPLOYEES)) employeeLinks.push(navLink('Novedades empleados', '/employee-novelties'));
     if (can(PERMS.VIEW_SUPERVISORS)) employeeLinks.push(navLink('Supervisores', '/supervisors'));
     if (can(PERMS.VIEW_SUPERNUMERARIOS)) employeeLinks.push(navLink('Supernumerarios', '/supernumerarios'));
     if (can(PERMS.UPLOAD_DATA)) employeeLinks.push(navLink('Incapacidades', '/upload'));
@@ -61,8 +62,8 @@ export const Sidebar = () => {
     if (opLinks.length) sections.push(section('Operacion', opLinks, 'operacion'));
 
     const reportLinks = [];
-    if (can(PERMS.VIEW_REPORTS_CLIENT)) reportLinks.push(navLink('Reportes Cliente', '/reports-client'));
-    if (can(PERMS.VIEW_REPORTS_COMPANY)) reportLinks.push(navLink('Reportes Empresa', '/reports-company'));
+    if (can(PERMS.VIEW_REPORTS_CLIENT)) reportLinks.push(navLink('Reportes diarios', '/reports-daily'));
+    if (can(PERMS.VIEW_REPORTS_COMPANY)) reportLinks.push(navLink('Reportes consolidados', '/reports-consolidated'));
     if (reportLinks.length) {
       sections.push(section('Reportes', reportLinks, 'reportes'));
     }
@@ -168,6 +169,7 @@ function getNavIconLabel(route) {
     '/cargos': 'CG',
     '/novedades': 'NV',
     '/employees': 'EM',
+    '/employee-novelties': 'NE',
     '/supervisors': 'SP',
     '/supernumerarios': 'SN',
     '/bulk-upload-sedes': 'BS',
@@ -182,6 +184,8 @@ function getNavIconLabel(route) {
     '/reports': 'RP',
     '/reports-client': 'RC',
     '/reports-company': 'RE',
+    '/reports-daily': 'RD',
+    '/reports-consolidated': 'RC',
     '/upload': 'IN'
   };
   return map[route] || '>>';

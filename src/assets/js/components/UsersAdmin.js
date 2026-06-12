@@ -3,6 +3,7 @@ import { PERMS, can } from '../permissions.js';
 import { getState } from '../state.js';
 import { showActionModal } from '../utils/actionModal.js';
 import { showInfoModal } from '../utils/infoModal.js';
+import { createTablePagination } from '../utils/pagination.js';
 
 const ROLES = ['superadmin', 'admin', 'editor', 'consultor', 'supervisor', 'empleado'];
 const STATUS = ['activo', 'inactivo', 'eliminado'];
@@ -42,6 +43,7 @@ export const UsersAdmin = (mount, deps = {}) => {
 
   const msg = qs('#msg', ui);
   const tbody = qs('tbody', ui);
+  const paginator = createTablePagination(ui, { id: 'users', after: '.table-wrap', onChange: renderRows });
   let data = [];
 
   function statusOf(u) {
@@ -221,16 +223,16 @@ export const UsersAdmin = (mount, deps = {}) => {
         const text = `${u.email || ''} ${u.displayName || ''} ${u.documento || ''}`.toLowerCase();
         return (!term || text.includes(term)) && (!rf || (u.role || 'empleado') === rf) && (!sf || statusOf(u) === sf);
       })
-      .sort((a, b) => String(a.email || '').localeCompare(String(b.email || '')))
-      .map((u) => renderRow(u));
+      .sort((a, b) => String(a.email || '').localeCompare(String(b.email || '')));
+    const pageRows = paginator.slice(rows);
 
-    tbody.replaceChildren(...rows);
+    tbody.replaceChildren(...pageRows.map((u) => renderRow(u)));
     setMsg(`Total registros filtrados: ${rows.length}`);
   }
 
-  qs('#search', ui).addEventListener('input', renderRows);
-  qs('#roleFilter', ui).addEventListener('change', renderRows);
-  qs('#statusFilter', ui).addEventListener('change', renderRows);
+  qs('#search', ui).addEventListener('input', () => { paginator.reset(); renderRows(); });
+  qs('#roleFilter', ui).addEventListener('change', () => { paginator.reset(); renderRows(); });
+  qs('#statusFilter', ui).addEventListener('change', () => { paginator.reset(); renderRows(); });
 
   const un = deps.streamUsers?.((users) => {
     data = users || [];

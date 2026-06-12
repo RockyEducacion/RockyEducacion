@@ -269,6 +269,7 @@ function mapSedeRow(row = {}) {
 function mapCargoRow(row = {}) {
   return {
     ...mapCatalogRow(row),
+    salario: row.salario == null ? null : Number(row.salario),
     alineacionCrud: row.alineacion_crud || 'empleado'
   };
 }
@@ -1251,7 +1252,7 @@ async function removeInvalidScheduledEmployeeDailyStatusRows(fecha) {
     selectAllRows('sedes', { select: '*' }),
     selectAllRows('employees', { select: '*' }),
     selectAllRows('cargos', { select: 'codigo, alineacion_crud, nombre' }),
-    selectAllRows('employee_cargo_history', { select: 'id, employee_id, cargo_codigo, cargo_nombre, sede_codigo, fecha_ingreso, fecha_retiro, created_at' })
+        selectAllRows('employee_cargo_history', { select: 'id, employee_id, cargo_codigo, cargo_nombre, sede_codigo, fecha_ingreso, fecha_retiro, created_at' })
   ]);
   if (statusError) throw statusError;
 
@@ -2405,13 +2406,14 @@ export async function getNextCargoCode(prefix = 'CAR', width = 4) {
   return getNextPrefixedCode('cargos', prefix, width);
 }
 
-export async function createCargo({ codigo, nombre, alineacionCrud }) {
+export async function createCargo({ codigo, nombre, salario = null, alineacionCrud }) {
   const audit = await getCurrentAuditFields();
   const { data, error } = await supabase
     .from('cargos')
     .insert({
       codigo: codigo || null,
       nombre: nombre || null,
+      salario: salario == null || salario === '' ? null : Number(salario),
       alineacion_crud: alineacionCrud || 'empleado',
       estado: 'activo',
       ...audit
@@ -2423,10 +2425,11 @@ export async function createCargo({ codigo, nombre, alineacionCrud }) {
   return data.id;
 }
 
-export async function updateCargo(id, { codigo, nombre, alineacionCrud }) {
+export async function updateCargo(id, { codigo, nombre, salario, alineacionCrud }) {
   const patch = {};
   if (typeof codigo === 'string') patch.codigo = codigo;
   if (typeof nombre === 'string') patch.nombre = nombre;
+  if (salario !== undefined) patch.salario = salario == null || salario === '' ? null : Number(salario);
   if (typeof alineacionCrud === 'string') patch.alineacion_crud = alineacionCrud;
   const { error } = await supabase.from('cargos').update(patch).eq('id', id);
   if (error) throw error;
@@ -2912,6 +2915,35 @@ export function streamEmployeeCargoHistory(employeeId, onData) {
   const channel = supabase
     .channel(`employee-cargo-history-${empId}`)
     .on('postgres_changes', { event: '*', schema: 'public', table: 'employee_cargo_history', filter: `employee_id=eq.${empId}` }, emit)
+    .subscribe();
+  return () => {
+    active = false;
+    unregister();
+    supabase.removeChannel(channel);
+  };
+}
+
+export function streamEmployeeCargoHistoryAll(onData, max = 5000) {
+  let active = true;
+  const emit = async () => {
+    const { data, error } = await supabase
+      .from('employee_cargo_history')
+      .select('*')
+      .order('fecha_ingreso', { ascending: false })
+      .limit(max);
+    if (!active) return;
+    if (error) {
+      console.error('No se pudo cargar historial de cargos:', error);
+      onData([]);
+      return;
+    }
+    onData((data || []).map(mapCargoHistoryRow));
+  };
+  emit();
+  const unregister = registerTableReloader('employee_cargo_history', emit);
+  const channel = supabase
+    .channel('employee-cargo-history-all')
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'employee_cargo_history' }, emit)
     .subscribe();
   return () => {
     active = false;

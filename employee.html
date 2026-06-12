@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <title>Portal Empleados | RockyEDU</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <meta name="description" content="Portal de empleados para carga de datos en RockyDEMO" />
+  <meta name="description" content="Portal de empleados de Rocky" />
   <link rel="icon" type="image/png" href="src/assets/img/capcol-logo.png" />
   <link rel="stylesheet" href="src/assets/css/base.css" />
   <link rel="stylesheet" href="src/assets/css/components.css" />
@@ -16,12 +16,23 @@
   <main class="employee-shell">
     <div class="employee-shell__inner">
       <header class="employee-hero">
-        <div>
+        <div class="employee-hero__brand">
+          <div class="employee-hero__logos" aria-label="Logos Rocky y cliente">
+            <img class="employee-hero__logo employee-hero__logo--rocky" src="src/assets/img/rocky-logo.png" alt="Rocky" />
+            <img class="employee-hero__logo employee-hero__logo--client" src="src/assets/img/tercero.png" alt="Cliente" />
+          </div>
+          <a class="employee-hero__tag" href="https://www.capcol.com.co/access.html">Centro de accesos</a>
+        </div>
+        <div class="employee-hero__content">
           <p class="employee-hero__eyebrow">RockyEDU</p>
           <h1 class="employee-hero__title">Portal de empleados</h1>
-          <p class="employee-hero__copy">Ingresa con tu documento y los ultimos 4 digitos del celular registrado para acceder unicamente a carga de datos.</p>
+          <p class="employee-hero__copy">Ingresa con tu documento y los ultimos 4 digitos del celular registrado para acceder.</p>
+          <div class="employee-hero__badges" aria-label="Caracteristicas del portal">
+            <span>Acceso verificado</span>
+            <span>Carga rapida</span>
+            <span>Datos protegidos</span>
+          </div>
         </div>
-        <a class="btn" href="index.html">Centro de accesos</a>
       </header>
       <section id="employee-root"></section>
     </div>

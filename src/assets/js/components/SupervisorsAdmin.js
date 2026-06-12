@@ -1,6 +1,7 @@
 import { el, qs } from '../utils/dom.js';
 import { showInfoModal } from '../utils/infoModal.js';
 import { showActionModal } from '../utils/actionModal.js';
+import { createTablePagination } from '../utils/pagination.js';
 export const SupervisorsAdmin=(mount,deps={})=>{
   const ui=el('section',{className:'main-card'},[
     el('h2',{},['Supervisores']),
@@ -14,16 +15,13 @@ export const SupervisorsAdmin=(mount,deps={})=>{
         el('div',{},[ el('label',{className:'label'},['Documento']), el('input',{id:'sDoc',className:'input',placeholder:'Documento del supervisor'}) ]),
         el('div',{},[ el('label',{className:'label'},['Nombre']), el('input',{id:'sName',className:'input',placeholder:'Nombre del supervisor'}) ]),
         el('div',{},[ el('label',{className:'label'},['Zona']), el('select',{id:'sZone',className:'select'},[]) ]),
-        el('div',{},[ el('label',{className:'label'},['Fecha ingreso']), el('input',{id:'sIngreso',className:'input',type:'date'}) ]),
-        el('button',{id:'btnCreate',className:'btn btn--primary'},['Crear supervisor']),
-        el('span',{id:'msgCreate',className:'text-muted'},[' '])
+        el('div',{},[ el('label',{className:'label'},['Fecha ingreso']), el('input',{id:'sIngreso',className:'input',type:'date'}) ])
       ])
     ]),
     el('div',{id:'tabList'},[
       el('div',{className:'form-row'},[
         el('div',{},[ el('label',{className:'label'},['Buscar']), el('input',{id:'txtSearch',className:'input',placeholder:'Codigo, documento, nombre o zona...'}) ]),
-        el('div',{},[ el('label',{className:'label'},['Estado']), el('select',{id:'selStatus',className:'select'},[ el('option',{value:''},['Todos']), el('option',{value:'activo'},['Activos']), el('option',{value:'inactivo'},['Inactivos']) ]) ]),
-        el('span',{className:'right text-muted'},['Edicion habilitada solo para la columna Zona.'])
+        el('div',{},[ el('label',{className:'label'},['Estado']), el('select',{id:'selStatus',className:'select'},[ el('option',{value:''},['Todos']), el('option',{value:'activo'},['Activos']), el('option',{value:'inactivo'},['Inactivos']) ]) ])
       ]),
       el('div',{className:'mt-2 table-wrap'},[
         el('table',{className:'table',id:'tbl'},[
@@ -48,6 +46,9 @@ export const SupervisorsAdmin=(mount,deps={})=>{
   const tabListBtn=qs('#tabListBtn',ui);
   const tabCreate=qs('#tabCreate',ui);
   const tabList=qs('#tabList',ui);
+  qs('.tabs', ui)?.classList.add('hidden');
+  tabCreate.classList.add('hidden');
+  tabList.classList.remove('hidden');
   function setTab(which){
     const isCreate=which==='create';
     tabCreateBtn.classList.toggle('is-active',isCreate);
@@ -55,7 +56,6 @@ export const SupervisorsAdmin=(mount,deps={})=>{
     tabCreate.classList.toggle('hidden',!isCreate);
     tabList.classList.toggle('hidden',isCreate);
   }
-  tabCreateBtn.classList.add('hidden');
   setTab('list');
   tabListBtn.addEventListener('click',()=> setTab('list'));
 
@@ -75,6 +75,7 @@ export const SupervisorsAdmin=(mount,deps={})=>{
   }
   let snapshot=[]; const tbody=ui.querySelector('tbody');
   let sortKey=''; let sortDir=1;
+  const paginator=createTablePagination(ui,{id:'supervisors',after:'#tabList .table-wrap',onChange:render});
   let unZones=()=>{};
   let unEmp=()=>{};
   let employees=[];
@@ -96,42 +97,13 @@ export const SupervisorsAdmin=(mount,deps={})=>{
     return row?.estado==='inactivo' && isLinkedByDoc(row?.documento);
   };
 
-  qs('#btnCreate',ui).addEventListener('click',async()=>{
-    const doc=qs('#sDoc',ui).value.trim();
-    const name=qs('#sName',ui).value.trim();
-    const zoneCode=qs('#sZone',ui).value;
-    const ingreso=qs('#sIngreso',ui).value;
-    const msg=qs('#msgCreate',ui); msg.textContent=' ';
-    if(!doc){ msg.textContent='Escribe el documento.'; return; }
-    if(!name){ msg.textContent='Escribe el nombre.'; return; }
-    if(!zoneCode){ msg.textContent='Selecciona una zona.'; return; }
-    if(!ingreso){ msg.textContent='Selecciona la fecha de ingreso.'; return; }
-    try{
-      const dupDoc=await deps.findSupervisorByDocument?.(doc);
-      if(dupDoc) { msg.textContent='Ya existe un supervisor con ese documento.'; return; }
-      const code=await deps.getNextSupervisorCode?.();
-      const zone=zoneList.find(z=>z.codigo===zoneCode);
-      const id=await deps.createSupervisor?.({
-        codigo:code,
-        documento:doc,
-        nombre:name,
-        zonaCodigo:zoneCode,
-        zonaNombre:zone?.nombre||null,
-        fechaIngreso: new Date(`${ingreso}T00:00:00`)
-      });
-      await deps.addAuditLog?.({ targetType:'supervisor', targetId:id, action:'create_supervisor', after:{ codigo:code, documento:doc, nombre:name, zonaCodigo:zoneCode, estado:'activo' } });
-      qs('#sDoc',ui).value=''; qs('#sName',ui).value=''; qs('#sIngreso',ui).value=''; renderZoneSelect();
-      msg.textContent='Supervisor creado OK'; setTab('list'); setTimeout(()=> msg.textContent=' ',1200);
-    }catch(e){ msg.textContent='Error: '+(e?.message||e); }
-  });
-
   const search=()=> qs('#txtSearch',ui).value.trim().toLowerCase();
   const filterStatus=()=> qs('#selStatus',ui).value;
   function toDate(ts){ try{ const d=ts?.toDate? ts.toDate(): (ts? new Date(ts): null); return d? d.getTime():0; }catch{ return 0; } }
   function sortVal(s,key){ if(key==='zonaNombre') return (s.zonaNombre||zoneNameByCode(s.zonaCodigo)||'').toLowerCase(); if(key==='fechaIngreso'||key==='fechaRetiro') return toDate(s[key]); return String(s[key]??'').toLowerCase(); }
   function sortData(data){ if(!sortKey) return data; const out=[...data]; out.sort((a,b)=>{ const va=sortVal(a,sortKey); const vb=sortVal(b,sortKey); if(va===vb) return 0; return va>vb?sortDir:-sortDir; }); return out; }
   function updateSortIndicators(){ ui.querySelectorAll('th[data-sort]').forEach((th)=>{ const base=th.dataset.baseLabel||th.textContent.replace(/\s[\^v▲▼]$/,''); th.dataset.baseLabel=base; const key=th.getAttribute('data-sort'); th.textContent=(sortKey===key)?`${base} ${sortDir===1?'▲':'▼'}`:base; }); }
-  function initSorting(){ ui.querySelectorAll('th[data-sort]').forEach((th)=> th.addEventListener('click',()=>{ const key=th.getAttribute('data-sort'); if(sortKey===key) sortDir=sortDir*-1; else { sortKey=key; sortDir=1; } render(); })); }
+  function initSorting(){ ui.querySelectorAll('th[data-sort]').forEach((th)=> th.addEventListener('click',()=>{ const key=th.getAttribute('data-sort'); if(sortKey===key) sortDir=sortDir*-1; else { sortKey=key; sortDir=1; } paginator.reset(); render(); })); }
   function render(){
     const term=search(); const st=filterStatus();
     const data=snapshot.filter(s=>{
@@ -139,7 +111,9 @@ export const SupervisorsAdmin=(mount,deps={})=>{
       const text=[s.codigo,s.documento,s.nombre,s.zonaNombre,zoneNameByCode(s.zonaCodigo)].join(' ').toLowerCase();
       return (!term || text.includes(term)) && (!st || s.estado===st);
     });
-    tbody.replaceChildren(...sortData(data).map(s=> row(s)));
+    const sorted=sortData(data);
+    const pageRows=paginator.slice(sorted);
+    tbody.replaceChildren(...pageRows.map(s=> row(s)));
     const msg=qs('#msg',ui); if(msg) msg.textContent=`Total registros filtrados: ${data.length}`;
     updateSortIndicators();
   }
@@ -227,8 +201,8 @@ export const SupervisorsAdmin=(mount,deps={})=>{
   unZones=deps.streamZones?.((arr)=>{ zoneList=(arr||[]).filter(z=>z.estado!=='inactivo'); renderZoneSelect(); render(); }) || (()=>{});
   unEmp=deps.streamEmployees?.((arr)=>{ employees=arr||[]; render(); }) || (()=>{});
   const un=deps.streamSupervisors?.((arr)=>{ snapshot=arr||[]; render(); });
-  qs('#txtSearch',ui).addEventListener('input',render);
-  qs('#selStatus',ui).addEventListener('change',render);
+  qs('#txtSearch',ui).addEventListener('input',()=>{ paginator.reset(); render(); });
+  qs('#selStatus',ui).addEventListener('change',()=>{ paginator.reset(); render(); });
   initSorting();
   mount.replaceChildren(ui);
   return ()=>{ un?.(); unZones?.(); unEmp?.(); };

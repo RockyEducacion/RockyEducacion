@@ -1,4 +1,5 @@
 import { el, qs } from '../utils/dom.js';
+import { createTablePagination } from '../utils/pagination.js';
 
 export const CargueMasivoAdmin=(mount,deps={})=>{
   const ui=el('section',{className:'main-card'},[
@@ -62,6 +63,10 @@ export const CargueMasivoAdmin=(mount,deps={})=>{
   const progressTrack=ui.querySelector('.bulk-progress__track');
   let employees=[]; let cargos=[]; let sedes=[];
   let validRows=[];
+  let previewRows=[];
+  let errorRows=[];
+  const previewPaginator=createTablePagination(ui,{id:'bulkEmployeesPreview',after:'#tblPreview',onChange:()=> renderPreview()});
+  const errorsPaginator=createTablePagination(ui,{id:'bulkEmployeesErrors',after:'#tblErrors',onChange:()=> renderErrors()});
 
   const unEmp=deps.streamEmployees?.((arr)=>{ employees=arr||[]; });
   const unCargo=deps.streamCargos?.((arr)=>{ cargos=arr||[]; });
@@ -162,8 +167,13 @@ export const CargueMasivoAdmin=(mount,deps={})=>{
   }
 
   function renderPreview(rows){
+    if(Array.isArray(rows)){
+      previewRows=rows;
+      previewPaginator.reset();
+    }
     const tb=qs('#tblPreview tbody',ui);
-    tb.replaceChildren(...rows.map(r=>el('tr',{},[
+    const pageRows=previewPaginator.slice(previewRows);
+    tb.replaceChildren(...pageRows.map(r=>el('tr',{},[
       el('td',{},[r.documento||'-']),
       el('td',{},[r.nombre||'-']),
       el('td',{},[r.telefono||'-']),
@@ -177,8 +187,13 @@ export const CargueMasivoAdmin=(mount,deps={})=>{
   }
 
   function renderErrors(errors){
+    if(Array.isArray(errors)){
+      errorRows=errors;
+      errorsPaginator.reset();
+    }
     const tb=qs('#tblErrors tbody',ui);
-    tb.replaceChildren(...errors.map(err=>el('tr',{},[
+    const pageRows=errorsPaginator.slice(errorRows);
+    tb.replaceChildren(...pageRows.map(err=>el('tr',{},[
       el('td',{},[String(err.row)]),
       el('td',{},[err.message||'Error'])
     ])));

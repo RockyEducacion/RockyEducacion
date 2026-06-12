@@ -1,6 +1,7 @@
 import { el, qs } from '../utils/dom.js';
 import { showInfoModal } from '../utils/infoModal.js';
 import { showActionModal } from '../utils/actionModal.js';
+import { createTablePagination } from '../utils/pagination.js';
 export const ZonesAdmin=(mount,deps={})=>{
   const ui=el('section',{className:'main-card'},[
     el('h2',{},['Zonas']),
@@ -81,13 +82,14 @@ export const ZonesAdmin=(mount,deps={})=>{
   });
   let snapshot=[]; const tbody=ui.querySelector('tbody');
   let sortKey=''; let sortDir=1;
+  const paginator=createTablePagination(ui,{id:'zones',after:'#tabList .table-wrap',onChange:render});
   const search=()=> qs('#txtSearch',ui).value.trim().toLowerCase();
   const filterStatus=()=> qs('#selStatus',ui).value;
   function sortVal(z,key){ if(key==='createdAt'){ try{ const x=z.createdAt?.toDate?z.createdAt.toDate(): (z.createdAt?new Date(z.createdAt):null); return x?x.getTime():0; }catch{return 0;} } return String(z[key]??'').toLowerCase(); }
   function sortData(data){ if(!sortKey) return data; const out=[...data]; out.sort((a,b)=>{ const va=sortVal(a,sortKey); const vb=sortVal(b,sortKey); if(va===vb) return 0; return va>vb?sortDir:-sortDir; }); return out; }
   function updateSortIndicators(){ ui.querySelectorAll('th[data-sort]').forEach((th)=>{ const base=th.dataset.baseLabel||th.textContent.replace(/\s[\^v▲▼]$/,''); th.dataset.baseLabel=base; const key=th.getAttribute('data-sort'); th.textContent=(sortKey===key)?`${base} ${sortDir===1?'▲':'▼'}`:base; }); }
-  function initSorting(){ ui.querySelectorAll('th[data-sort]').forEach((th)=> th.addEventListener('click',()=>{ const key=th.getAttribute('data-sort'); if(sortKey===key) sortDir=sortDir*-1; else { sortKey=key; sortDir=1; } render(); })); }
-  function render(){ const term=search(); const st=filterStatus(); const data=snapshot.filter(z=> ((!term||(z.codigo||'').toLowerCase().includes(term)||(z.nombre||'').toLowerCase().includes(term)) && (!st || z.estado===st))); tbody.replaceChildren(...sortData(data).map(z=> row(z))); const msg=qs('#msg',ui); if(msg) msg.textContent=`Total registros filtrados: ${data.length}`; updateSortIndicators(); }
+  function initSorting(){ ui.querySelectorAll('th[data-sort]').forEach((th)=> th.addEventListener('click',()=>{ const key=th.getAttribute('data-sort'); if(sortKey===key) sortDir=sortDir*-1; else { sortKey=key; sortDir=1; } paginator.reset(); render(); })); }
+  function render(){ const term=search(); const st=filterStatus(); const data=snapshot.filter(z=> ((!term||(z.codigo||'').toLowerCase().includes(term)||(z.nombre||'').toLowerCase().includes(term)) && (!st || z.estado===st))); const sorted=sortData(data); const pageRows=paginator.slice(sorted); tbody.replaceChildren(...pageRows.map(z=> row(z))); const msg=qs('#msg',ui); if(msg) msg.textContent=`Total registros filtrados: ${data.length}`; updateSortIndicators(); }
   function row(z){ const tr=el('tr',{'data-id':z.id}); const tdCodigo=el('td',{},[z.codigo||'-']); const tdNombre=el('td',{},[z.nombre||'-']); const tdEstado=el('td',{},[ statusBadge(z.estado) ]); const tdAcc=el('td',{},[ actionsCell(z) ]); tr.append(tdCodigo,tdNombre,tdEstado,tdAcc); return tr; }
   function statusBadge(st){ return el('span',{className:'badge '+(st==='activo'?'badge--ok':'badge--off')},[st||'-']); }
   function formatDate(ts){ try{ const d=ts?.toDate? ts.toDate(): (ts? new Date(ts): null); return d? new Date(d).toLocaleString(): '-'; }catch{ return '-'; } }
@@ -103,7 +105,7 @@ export const ZonesAdmin=(mount,deps={})=>{
   function startEdit(tr,z){ const cur={ codigo:z.codigo||'', nombre:z.nombre||'' }; const tds=tr.querySelectorAll('td'); tds[0].replaceChildren(el('input',{className:'input',value:cur.codigo,style:'max-width:160px'})); tds[1].replaceChildren(el('input',{className:'input',value:cur.nombre,style:'max-width:260px'})); tds[2].replaceChildren(statusBadge(z.estado));
     const box=el('div',{className:'row-actions'},[]); const btnSave=el('button',{className:'btn btn--primary'},['Guardar']); const btnCancel=el('button',{className:'btn'},['Cancelar']); btnSave.addEventListener('click',async()=>{ const newCode=tds[0].querySelector('input').value.trim(); const newName=tds[1].querySelector('input').value.trim(); if(!newCode||!newName) return alert('Completa codigo y nombre.'); const modal=await showActionModal({ title:'Confirmar modificacion', message:`Zona: ${z.nombre||'-'}`, confirmText:'Guardar cambios', fields:[{ id:'detail', label:'Detalle de la modificacion', type:'textarea', required:true, placeholder:'Describe brevemente el cambio realizado' }] }); if(!modal.confirmed) return; try{ if(newCode!==z.codigo){ const dup=await deps.findZoneByCode?.(newCode); if(dup && dup.id!==z.id) return alert('Ya existe una zona con ese codigo.'); } await deps.updateZone?.(z.id,{ codigo:newCode, nombre:newName }); await deps.addAuditLog?.({ targetType:'zone', targetId:z.id, action:'update_zone', before:{ codigo:z.codigo, nombre:z.nombre }, after:{ codigo:newCode, nombre:newName }, note: modal.values.detail||null }); }catch(e){ alert('Error: '+(e?.message||e)); } }); btnCancel.addEventListener('click',()=> render()); box.append(btnSave,btnCancel); tds[3].replaceChildren(box); }
   const un=deps.streamZones?.((arr)=>{ snapshot=arr||[]; render(); });
-  qs('#txtSearch',ui).addEventListener('input',render); qs('#selStatus',ui).addEventListener('change',render);
+  qs('#txtSearch',ui).addEventListener('input',()=>{ paginator.reset(); render(); }); qs('#selStatus',ui).addEventListener('change',()=>{ paginator.reset(); render(); });
   initSorting();
   mount.replaceChildren(ui); return ()=> un?.();
 };

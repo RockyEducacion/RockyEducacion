@@ -1,4 +1,5 @@
 import { el, qs } from '../utils/dom.js';
+import { createTablePagination } from '../utils/pagination.js';
 
 export const CargueMasivoSedesAdmin=(mount,deps={})=>{
   const ui=el('section',{className:'main-card'},[
@@ -46,6 +47,10 @@ export const CargueMasivoSedesAdmin=(mount,deps={})=>{
   const btnTemplate=qs('#btnTemplate',ui);
   let sedes=[]; let depsList=[]; let zones=[];
   let validRows=[];
+  let previewRows=[];
+  let errorRows=[];
+  const previewPaginator=createTablePagination(ui,{id:'bulkSedesPreview',after:'#tblPreview',onChange:()=> renderPreview()});
+  const errorsPaginator=createTablePagination(ui,{id:'bulkSedesErrors',after:'#tblErrors',onChange:()=> renderErrors()});
 
   const unSedes=deps.streamSedes?.((arr)=>{ sedes=arr||[]; });
   const unDeps=deps.streamDependencies?.((arr)=>{ depsList=arr||[]; });
@@ -104,8 +109,13 @@ export const CargueMasivoSedesAdmin=(mount,deps={})=>{
   }
 
   function renderPreview(rows){
+    if(Array.isArray(rows)){
+      previewRows=rows;
+      previewPaginator.reset();
+    }
     const tb=qs('#tblPreview tbody',ui);
-    tb.replaceChildren(...rows.map(r=>el('tr',{},[
+    const pageRows=previewPaginator.slice(previewRows);
+    tb.replaceChildren(...pageRows.map(r=>el('tr',{},[
       el('td',{},[r.nombre||'-']),
       el('td',{},[r.dependenciaCodigo||'-']),
       el('td',{},[r.zonaCodigo||'-']),
@@ -118,8 +128,13 @@ export const CargueMasivoSedesAdmin=(mount,deps={})=>{
   }
 
   function renderErrors(errors){
+    if(Array.isArray(errors)){
+      errorRows=errors;
+      errorsPaginator.reset();
+    }
     const tb=qs('#tblErrors tbody',ui);
-    tb.replaceChildren(...errors.map(err=>el('tr',{},[
+    const pageRows=errorsPaginator.slice(errorRows);
+    tb.replaceChildren(...pageRows.map(err=>el('tr',{},[
       el('td',{},[String(err.row)]),
       el('td',{},[err.message||'Error'])
     ])));

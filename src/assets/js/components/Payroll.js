@@ -1,4 +1,5 @@
 import { el, qs, enableSectionToggles } from '../utils/dom.js';
+import { createTablePagination } from '../utils/pagination.js';
 
 export const Payroll = (mount, deps = {}) => {
   const today = todayBogota();
@@ -63,6 +64,9 @@ export const Payroll = (mount, deps = {}) => {
   ]);
 
   const msg = qs('#payrollMsg', ui);
+  const summaryPaginator = createTablePagination(ui, { id: 'payrollSummary', after: '#payrollSummaryTable', onChange: renderSummary });
+  const workersPaginator = createTablePagination(ui, { id: 'payrollWorkers', after: '#payrollWorkersTable', onChange: renderWorkers });
+  const dailyPaginator = createTablePagination(ui, { id: 'payrollDaily', after: '#payrollDailyTable', onChange: renderDaily });
   let summaryRows = [];
   let workerRows = [];
   let dailyRows = [];
@@ -81,25 +85,28 @@ export const Payroll = (mount, deps = {}) => {
   };
 
   qs('#btnPayrollRun', ui).addEventListener('click', run);
-  qs('#payrollSearch', ui).addEventListener('input', renderAll);
-  qs('#payrollDependencyFilter', ui).addEventListener('change', () => { clearSelection(); renderAll(); });
-  qs('#payrollZoneFilter', ui).addEventListener('change', () => { clearSelection(); renderAll(); });
-  qs('#payrollSedeFilter', ui).addEventListener('change', () => { clearSelection(); renderAll(); });
-  qs('#payrollTypeFilter', ui).addEventListener('change', () => { clearSelection(true); renderAll(); });
+  qs('#payrollSearch', ui).addEventListener('input', () => { resetPaginators(); renderAll(); });
+  qs('#payrollDependencyFilter', ui).addEventListener('change', () => { clearSelection(); resetPaginators(); renderAll(); });
+  qs('#payrollZoneFilter', ui).addEventListener('change', () => { clearSelection(); resetPaginators(); renderAll(); });
+  qs('#payrollSedeFilter', ui).addEventListener('change', () => { clearSelection(); resetPaginators(); renderAll(); });
+  qs('#payrollTypeFilter', ui).addEventListener('change', () => { clearSelection(true); resetPaginators(false); renderAll(); });
 
   bindSorting(ui, '#payrollSummaryTable th[data-sort-summary]', 'data-sort-summary', (key) => {
     if (summarySortKey === key) summarySortDir *= -1;
     else { summarySortKey = key; summarySortDir = 1; }
+    summaryPaginator.reset();
     renderSummary();
   });
   bindSorting(ui, '#payrollWorkersTable th[data-sort-workers]', 'data-sort-workers', (key) => {
     if (workersSortKey === key) workersSortDir *= -1;
     else { workersSortKey = key; workersSortDir = key === 'daysWorked' ? -1 : 1; }
+    workersPaginator.reset();
     renderWorkers();
   });
   bindSorting(ui, '#payrollDailyTable th[data-sort-daily]', 'data-sort-daily', (key) => {
     if (dailySortKey === key) dailySortDir *= -1;
     else { dailySortKey = key; dailySortDir = 1; }
+    dailyPaginator.reset();
     renderDaily();
   });
 
@@ -131,6 +138,7 @@ export const Payroll = (mount, deps = {}) => {
       workerRows = dataset.workerRows;
       dailyRows = dataset.dailyRows;
       clearSelection();
+      resetPaginators();
       syncSelectOptions(qs('#payrollDependencyFilter', ui), dataset.meta.dependencies, 'Todas');
       syncSelectOptions(qs('#payrollZoneFilter', ui), dataset.meta.zones, 'Todas');
       syncSelectOptions(qs('#payrollSedeFilter', ui), dataset.meta.sedes, 'Todas');
@@ -143,6 +151,7 @@ export const Payroll = (mount, deps = {}) => {
       workerRows = [];
       dailyRows = [];
       clearSelection();
+      resetPaginators();
       updateKpis(ui, dateFrom, dateTo, { sedeCount: 0, peopleCount: 0, shiftCount: 0 });
       renderAll();
       setMessage(`Error: ${error?.message || error}`);
@@ -158,6 +167,12 @@ export const Payroll = (mount, deps = {}) => {
     renderDaily();
   }
 
+  function resetPaginators(includeSummary = true) {
+    if (includeSummary) summaryPaginator.reset();
+    workersPaginator.reset();
+    dailyPaginator.reset();
+  }
+
   function renderSummary() {
     const rows = sortRows(filterSummaryRows(ui, summaryRows), summarySortKey, summarySortDir);
     const tbody = qs('#payrollSummaryTable tbody', ui);
@@ -166,18 +181,22 @@ export const Payroll = (mount, deps = {}) => {
     if (selectedSedeCode && !rows.some((row) => row.sedeCodigo === selectedSedeCode)) selectedSedeCode = '';
 
     if (!rows.length) {
+      summaryPaginator.slice([]);
       tbody.replaceChildren(emptyRow(8, 'Sin sedes para el filtro seleccionado.'));
       qs('#payrollSummaryTotals', ui).textContent = 'Sedes filtradas: 0 | Personas: 0 | Registros: 0';
       updateSortIndicators(ui, '#payrollSummaryTable th[data-sort-summary]', 'data-sort-summary', summarySortKey, summarySortDir);
       return;
     }
 
-    tbody.replaceChildren(...rows.map((row) => {
+    const pageRows = summaryPaginator.slice(rows);
+    tbody.replaceChildren(...pageRows.map((row) => {
       const tr = el('tr', { className: row.sedeCodigo === selectedSedeCode ? 'is-selected' : '' }, []);
       const btn = el('button', { className: 'btn', type: 'button' }, ['Ver']);
       const select = () => {
         selectedSedeCode = row.sedeCodigo;
         selectedWorkerKey = '';
+        workersPaginator.reset();
+        dailyPaginator.reset();
         renderSummary();
         renderWorkers();
         renderDaily();
@@ -210,17 +229,20 @@ export const Payroll = (mount, deps = {}) => {
     if (selectedWorkerKey && !rows.some((row) => row.workerKey === selectedWorkerKey)) selectedWorkerKey = '';
 
     if (!rows.length) {
+      workersPaginator.slice([]);
       tbody.replaceChildren(emptyRow(9, 'Sin personas para el filtro seleccionado.'));
       qs('#payrollWorkersTotals', ui).textContent = 'Personas filtradas: 0 | Dias con registro: 0';
       updateSortIndicators(ui, '#payrollWorkersTable th[data-sort-workers]', 'data-sort-workers', workersSortKey, workersSortDir);
       return;
     }
 
-    tbody.replaceChildren(...rows.map((row) => {
+    const pageRows = workersPaginator.slice(rows);
+    tbody.replaceChildren(...pageRows.map((row) => {
       const tr = el('tr', { className: row.workerKey === selectedWorkerKey ? 'is-selected' : '' }, []);
       const btn = el('button', { className: 'btn', type: 'button' }, ['Ver']);
       const select = () => {
         selectedWorkerKey = row.workerKey;
+        dailyPaginator.reset();
         renderWorkers();
         renderDaily();
       };
@@ -256,13 +278,15 @@ export const Payroll = (mount, deps = {}) => {
         : 'Detalle diario';
 
     if (!rows.length) {
+      dailyPaginator.slice([]);
       tbody.replaceChildren(emptyRow(7, 'Sin detalle para la seleccion actual.'));
       qs('#payrollDailyTotals', ui).textContent = selectedWorkerKey || selectedSedeCode ? 'Registros diarios: 0' : 'Selecciona una fila para ver el detalle.';
       updateSortIndicators(ui, '#payrollDailyTable th[data-sort-daily]', 'data-sort-daily', dailySortKey, dailySortDir);
       return;
     }
 
-    tbody.replaceChildren(...rows.map((row) => el('tr', {}, [
+    const pageRows = dailyPaginator.slice(rows);
+    tbody.replaceChildren(...pageRows.map((row) => el('tr', {}, [
       el('td', {}, [row.fecha || '-']),
       el('td', {}, [row.sedeNombre || '-']),
       el('td', {}, [row.documento || '-']),

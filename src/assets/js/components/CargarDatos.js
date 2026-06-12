@@ -2,6 +2,7 @@ import { el, qs } from '../utils/dom.js';
 import { getState } from '../state.js';
 import { showInfoModal } from '../utils/infoModal.js';
 import { showActionModal } from '../utils/actionModal.js';
+import { createTablePagination } from '../utils/pagination.js';
 
 const SOURCE_OPTIONS = [
   'Enfermedad General',
@@ -30,19 +31,22 @@ export const CargarDatos = (mount, deps = {}) => {
   const today = todayBogota();
 
   let employees = [];
+  let sedes = [];
   let incapRows = [];
   let editingId = null;
   let unEmployees = () => {};
+  let unSedes = () => {};
   let hasQueried = false;
+  let queryError = '';
 
   const ui = el('section', { className: 'main-card' }, [
     el('h2', {}, ['Incapacidades']),
     el('p', { className: 'text-muted' }, [
       portalMode
-        ? 'Registra tus incapacidades con fecha de inicio, fecha de terminacion y soporte adjunto.'
+        ? 'Adjunta el soporte de la incapacidad que registraste por WhatsApp.'
         : 'Consulta y administra las incapacidades reportadas por WhatsApp y por la web de empleados.'
     ]),
-    el('div', { className: 'tabs mt-2' }, [
+    el('div', { className: 'tabs mt-2 hidden' }, [
       el('button', { id: 'incTabCreateBtn', className: 'tab', type: 'button' }, ['Registrar']),
       el('button', { id: 'incTabListBtn', className: 'tab is-active', type: 'button' }, ['Consultar'])
     ]),
@@ -99,14 +103,14 @@ export const CargarDatos = (mount, deps = {}) => {
         el('table', { className: 'table', id: 'incTable' }, [
           el('thead', {}, [
             el('tr', {}, [
-              el('th', {}, ['Documento']),
-              el('th', {}, ['Nombre']),
-              el('th', {}, ['Tipo']),
-              el('th', {}, ['Inicio']),
-              el('th', {}, ['Fin']),
-              el('th', {}, ['Canal']),
-              el('th', {}, ['Soporte']),
-              el('th', {}, ['Estado']),
+              el('th', { 'data-sort': 'documento', style: 'cursor:pointer' }, ['Documento']),
+              el('th', { 'data-sort': 'nombre', style: 'cursor:pointer' }, ['Nombre']),
+              el('th', { 'data-sort': 'source', style: 'cursor:pointer' }, ['Tipo']),
+              el('th', { 'data-sort': 'fechaInicio', style: 'cursor:pointer' }, ['Inicio']),
+              el('th', { 'data-sort': 'fechaFin', style: 'cursor:pointer' }, ['Fin']),
+              el('th', { 'data-sort': 'canalRegistro', style: 'cursor:pointer' }, ['Canal']),
+              el('th', { 'data-sort': 'soporte', style: 'cursor:pointer' }, ['Soporte']),
+              el('th', { 'data-sort': 'estado', style: 'cursor:pointer' }, ['Estado']),
               el('th', {}, ['Acciones'])
             ])
           ]),
@@ -115,6 +119,8 @@ export const CargarDatos = (mount, deps = {}) => {
       ])
     ])
   ]);
+
+  const paginator = createTablePagination(ui, { id: 'incapacidades', after: '#incTabList .table-wrap', onChange: renderList });
 
   mount.replaceChildren(ui);
 
@@ -141,6 +147,16 @@ export const CargarDatos = (mount, deps = {}) => {
   const supportFilter = qs('#incSupportFilter', ui);
   const listMeta = qs('#incListMeta', ui);
   const tbody = ui.querySelector('tbody');
+  let sortKey = 'fechaInicio';
+  let sortDir = -1;
+
+  qs('.tabs', ui)?.classList.add('hidden');
+  tabCreate.classList.add('hidden');
+  tabList.classList.remove('hidden');
+  const btnOpenCreate = portalMode
+    ? null
+    : el('button', { id: 'incOpenCreate', className: 'btn btn--primary right', type: 'button' }, ['Crear incapacidad']);
+  if (btnOpenCreate) qs('#incTabList .form-row', ui)?.append(btnOpenCreate);
 
   function setTab(which) {
     const create = which === 'create';
@@ -153,19 +169,27 @@ export const CargarDatos = (mount, deps = {}) => {
   tabCreateBtn.addEventListener('click', () => setTab('create'));
   tabListBtn.addEventListener('click', () => setTab('list'));
 
-  searchInput?.addEventListener('input', renderList);
-  statusFilter?.addEventListener('change', renderList);
-  channelFilter?.addEventListener('change', renderList);
-  supportFilter?.addEventListener('change', renderList);
+  searchInput?.addEventListener('input', () => { paginator.reset(); renderList(); });
+  statusFilter?.addEventListener('change', () => { paginator.reset(); renderList(); });
+  channelFilter?.addEventListener('change', () => { paginator.reset(); renderList(); });
+  supportFilter?.addEventListener('change', () => { paginator.reset(); renderList(); });
   queryBtn?.addEventListener('click', runQuery);
   saveBtn?.addEventListener('click', onSave);
   resetBtn?.addEventListener('click', resetForm);
+  btnOpenCreate?.addEventListener('click', () => openIncapacityModal());
+  initSorting();
 
   if (!portalMode && typeof deps.streamEmployees === 'function') {
     unEmployees = deps.streamEmployees((rows) => {
       employees = rows || [];
       renderEmployeeOptions();
       refreshIdentityHint();
+      renderList();
+    });
+  }
+  if (!portalMode && typeof deps.streamSedes === 'function') {
+    unSedes = deps.streamSedes((rows) => {
+      sedes = rows || [];
       renderList();
     });
   }
@@ -176,6 +200,7 @@ export const CargarDatos = (mount, deps = {}) => {
 
   return () => {
     unEmployees?.();
+    unSedes?.();
   };
 
   async function runQuery() {
@@ -191,6 +216,7 @@ export const CargarDatos = (mount, deps = {}) => {
     }
     listMeta.textContent = 'Consultando incapacidades...';
     try {
+      queryError = '';
       if (portalMode) {
         const data = await deps.apiRequest(`/api/employee-incapacities?dateFrom=${encodeURIComponent(dateFrom)}&dateTo=${encodeURIComponent(dateTo)}`, { method: 'GET' });
         incapRows = Array.isArray(data?.rows) ? data.rows : [];
@@ -198,11 +224,13 @@ export const CargarDatos = (mount, deps = {}) => {
         incapRows = await deps.listIncapacidadesRange?.(dateFrom, dateTo) || [];
       }
       hasQueried = true;
+      paginator.reset();
       renderList();
     } catch (error) {
       incapRows = [];
       hasQueried = true;
-      listMeta.textContent = `Error: ${error?.message || error}`;
+      paginator.reset();
+      queryError = `Error: ${error?.message || error}`;
       renderList();
     }
   }
@@ -388,13 +416,142 @@ export const CargarDatos = (mount, deps = {}) => {
     refreshIdentityHint();
   }
 
+  async function openIncapacityModal(row = null) {
+    editingId = row?.id || null;
+    const isEdit = Boolean(row?.id);
+    const employeeOptions = employees
+      .filter((item) => String(item?.estado || 'activo').trim().toLowerCase() === 'activo')
+      .map((item) => employeeLabel(item))
+      .filter((value, index, all) => value && all.indexOf(value) === index);
+    const fields = [];
+    if (canManageAll) {
+      fields.push({
+        id: 'employee',
+        label: 'Empleado',
+        type: 'datalist',
+        required: true,
+        placeholder: 'Nombre o documento del empleado',
+        options: employeeOptions,
+        value: row ? employeeLabel({ documento: row.documento, nombre: row.nombre }) : ''
+      });
+    }
+    fields.push(
+      {
+        id: 'source',
+        label: 'Tipo',
+        type: 'select',
+        required: true,
+        value: SOURCE_OPTIONS.includes(row?.source) ? row.source : SOURCE_OPTIONS[0],
+        options: SOURCE_OPTIONS.map((value) => ({ value, label: value }))
+      },
+      { id: 'fechaInicio', label: 'Fecha inicio', type: 'date', required: true, value: normalizeInputDate(row?.fechaInicio) },
+      { id: 'fechaFin', label: 'Fecha terminacion', type: 'date', required: true, value: normalizeInputDate(row?.fechaFin) },
+      {
+        id: 'support',
+        label: isEdit && row?.soporteUrl ? 'Soporte nuevo (opcional)' : 'Soporte',
+        type: 'file',
+        required: !isEdit && !row?.soporteUrl
+      }
+    );
+
+    const modal = await showActionModal({
+      title: isEdit ? 'Editar incapacidad' : (portalMode ? 'Nueva incapacidad' : 'Crear incapacidad'),
+      message: isEdit
+        ? `Incapacidad: ${row?.nombre || row?.documento || '-'}`
+        : 'Completa la informacion para registrar una incapacidad.',
+      confirmText: isEdit ? 'Guardar cambios' : (portalMode ? 'Registrar incapacidad' : 'Crear incapacidad'),
+      fields
+    });
+    if (!modal?.confirmed) return;
+    await saveIncapacityFromModal(row, modal.values);
+  }
+
+  async function saveIncapacityFromModal(row = null, values = {}) {
+    const isEdit = Boolean(row?.id);
+    const target = canManageAll
+      ? (resolveEmployeeInput(values.employee || '') || (row ? normalizeEmployeeInfo(row) : null))
+      : currentFixedEmployee();
+    const fechaInicio = String(values.fechaInicio || '').trim();
+    const fechaFin = String(values.fechaFin || '').trim();
+    const source = String(values.source || SOURCE_OPTIONS[0]).trim() || SOURCE_OPTIONS[0];
+    const supportFile = values.support || null;
+
+    if (!target?.documento) return showInfoModal('Dato faltante', ['Selecciona un empleado valido.']);
+    if (!fechaInicio || !fechaFin) return showInfoModal('Dato faltante', ['Selecciona fecha de inicio y fecha de terminacion.']);
+    if (fechaFin < fechaInicio) return showInfoModal('Fechas invalidas', ['La fecha de terminacion no puede ser menor a la fecha de inicio.']);
+    if (!isEdit && !supportFile) return showInfoModal('Dato faltante', ['Adjunta el soporte de la incapacidad.']);
+
+    try {
+      if (portalMode) {
+        if (!isEdit) {
+          if (!supportFile) throw new Error('Adjunta el soporte de la incapacidad.');
+          const supportDataUrl = await fileToDataUrl(supportFile);
+          const result = await deps.apiRequest('/api/employee-incapacities', {
+            method: 'POST',
+            body: JSON.stringify({
+              fechaInicio,
+              fechaFin,
+              source,
+              soporte: {
+                name: supportFile.name,
+                dataUrl: supportDataUrl
+              }
+            })
+          });
+          if (result?.row) incapRows = [result.row, ...incapRows];
+        }
+      } else {
+        let supportInfo = {
+          url: row?.soporteUrl || null,
+          name: row?.soporteNombre || null,
+          mimeType: row?.soporteTipo || null,
+          path: row?.soporteStoragePath || null
+        };
+        if (supportFile && typeof deps.uploadIncapacidadSupport === 'function') {
+          supportInfo = await deps.uploadIncapacidadSupport(supportFile, {
+            documento: target.documento,
+            employeeId: target.employeeId
+          });
+        }
+        const payload = {
+          employeeId: target.employeeId,
+          documento: target.documento,
+          nombre: target.nombre,
+          fechaInicio,
+          fechaFin,
+          source
+        };
+        if (supportFile || !isEdit) {
+          payload.soporteUrl = supportInfo.url;
+          payload.soporteNombre = supportInfo.name;
+          payload.soporteTipo = supportInfo.mimeType;
+          payload.soporteStoragePath = supportInfo.path;
+        }
+        if (isEdit) {
+          await deps.updateIncapacidad?.(row.id, payload);
+        } else {
+          payload.canalRegistro = 'manual';
+          await deps.createIncapacidad?.(payload);
+        }
+      }
+      editingId = null;
+      if (hasQueried) await runQuery();
+      else renderList();
+      showInfoModal(isEdit ? 'Incapacidad actualizada' : 'Incapacidad creada', [
+        isEdit ? 'Los cambios se guardaron correctamente.' : 'La incapacidad se registro correctamente.'
+      ]);
+    } catch (error) {
+      showInfoModal('No fue posible guardar', [String(error?.message || error || 'Error desconocido.')]);
+    }
+  }
+
   function visibleRows() {
     if (!hasQueried) return [];
     const term = String(searchInput?.value || '').trim().toLowerCase();
     const estado = String(statusFilter?.value || '').trim();
     const canal = String(channelFilter?.value || '').trim();
     const support = String(supportFilter?.value || '').trim();
-    return incapRows
+    return sortRows(incapRows
       .filter((row) => canManageAll || portalMode || sanitizeDocument(row?.documento) === ownDocument)
       .filter((row) => !estado || String(row?.estado || '').trim().toLowerCase() === estado)
       .filter((row) => !canal || String(row?.canalRegistro || '').trim().toLowerCase() === canal)
@@ -413,11 +570,12 @@ export const CargarDatos = (mount, deps = {}) => {
           row?.soporteNombre
         ].join(' ').toLowerCase();
         return blob.includes(term);
-      });
+      }));
   }
 
   function renderList() {
     if (!hasQueried) {
+      paginator.slice([]);
       listMeta.textContent = 'Selecciona el rango y pulsa Buscar para consultar incapacidades.';
       tbody.replaceChildren(el('tr', {}, [
         el('td', { colSpan: 9, className: 'text-muted' }, ['Aun no se ha ejecutado ninguna consulta.'])
@@ -425,14 +583,66 @@ export const CargarDatos = (mount, deps = {}) => {
       return;
     }
     const rows = visibleRows();
-    listMeta.textContent = `${rows.length} incapacidad(es) visibles.`;
+    listMeta.textContent = queryError || `${rows.length} incapacidad(es) visibles.`;
     if (!rows.length) {
+      paginator.slice(rows);
       tbody.replaceChildren(el('tr', {}, [
         el('td', { colSpan: 9, className: 'text-muted' }, ['No hay incapacidades para mostrar.'])
       ]));
       return;
     }
-    tbody.replaceChildren(...rows.map((row) => renderRow(row)));
+    const pageRows = paginator.slice(rows);
+    tbody.replaceChildren(...pageRows.map((row) => renderRow(row)));
+    updateSortIndicators();
+  }
+
+  function initSorting() {
+    ui.querySelectorAll('#incTable th[data-sort]').forEach((th) => {
+      th.addEventListener('click', () => {
+        const key = String(th.getAttribute('data-sort') || '').trim();
+        if (!key) return;
+        if (sortKey === key) sortDir *= -1;
+        else {
+          sortKey = key;
+          sortDir = key === 'fechaInicio' || key === 'fechaFin' ? -1 : 1;
+        }
+        paginator.reset();
+        renderList();
+      });
+    });
+    updateSortIndicators();
+  }
+
+  function sortRows(rows = []) {
+    const out = [...rows];
+    out.sort((left, right) => {
+      const a = sortValue(left, sortKey);
+      const b = sortValue(right, sortKey);
+      if (a === b) return 0;
+      return a > b ? sortDir : -sortDir;
+    });
+    return out;
+  }
+
+  function sortValue(row = {}, key = '') {
+    if (key === 'fechaInicio' || key === 'fechaFin') return sortableDate(row?.[key]);
+    if (key === 'canalRegistro') return channelLabel(row).toLowerCase();
+    if (key === 'soporte') return String(row?.soporteNombre || row?.soporteUrl || '').toLowerCase();
+    return String(row?.[key] || '').toLowerCase();
+  }
+
+  function sortableDate(value) {
+    const input = normalizeInputDate(value);
+    return input || '';
+  }
+
+  function updateSortIndicators() {
+    ui.querySelectorAll('#incTable th[data-sort]').forEach((th) => {
+      const base = th.dataset.baseLabel || String(th.textContent || '').replace(/\s[▲▼]$/, '');
+      th.dataset.baseLabel = base;
+      const key = String(th.getAttribute('data-sort') || '').trim();
+      th.textContent = key === sortKey ? `${base} ${sortDir === 1 ? '▲' : '▼'}` : base;
+    });
   }
 
   function renderRow(row) {
@@ -450,58 +660,77 @@ export const CargarDatos = (mount, deps = {}) => {
   }
 
   function actionsCell(row) {
-    const items = [
-      el('button', { className: 'btn', type: 'button' }, ['Ver'])
+    const btnMore = el('button', { className: 'btn btn--icon', type: 'button', title: 'Mas opciones', 'aria-label': 'Mas opciones' }, ['\u22EF']);
+    btnMore.addEventListener('click', () => openMoreOptionsModal(row));
+    const actionButtons = [btnMore];
+    if (row?.soporteUrl && !portalMode) {
+      const btnPdf = el('button', { className: 'btn btn--icon', type: 'button', title: 'Descargar soporte PDF', 'aria-label': 'Descargar soporte PDF' }, ['PDF']);
+      btnPdf.addEventListener('click', () => downloadSupportPdf(row));
+      actionButtons.push(btnPdf);
+    }
+    const btnInfo = el('button', { className: 'btn btn--icon', type: 'button', title: 'Ver informacion del empleado', 'aria-label': 'Ver informacion del empleado' }, ['\u24D8']);
+    btnInfo.addEventListener('click', () => showEmployeeInfo(row));
+    actionButtons.push(btnInfo);
+    return el('div', { className: 'row-actions' }, actionButtons);
+  }
+
+  function showEmployeeInfo(row) {
+    const employee = resolveEmployeeForRow(row);
+    const sedeCode = String(employee?.sedeCodigo || '').trim();
+    const sede = sedes.find((item) => String(item?.codigo || '').trim() === sedeCode) || null;
+    const sedeName = employee?.sedeNombre || sede?.nombre || sedeCode || '-';
+    const zonaName = employee?.zonaNombre || sede?.zonaNombre || employee?.zonaCodigo || sede?.zonaCodigo || '-';
+    const dependenciaName = sede?.dependenciaNombre || sede?.dependenciaCodigo || '-';
+    showInfoModal('Informacion del empleado', [
+      `Documento: ${row?.documento || employee?.documento || '-'}`,
+      `Nombre: ${row?.nombre || employee?.nombre || '-'}`,
+      `Telefono: ${employee?.telefono || '-'}`,
+      `Cargo: ${employee?.cargoNombre || employee?.cargoCodigo || '-'}`,
+      `Sede: ${sedeName}`,
+      `Zona: ${zonaName}`,
+      `Dependencia: ${dependenciaName}`
+    ]);
+  }
+
+  function resolveEmployeeForRow(row = {}) {
+    const employeeId = String(row?.employeeId || '').trim();
+    const document = sanitizeDocument(row?.documento);
+    return employees.find((item) => employeeId && String(item?.id || '').trim() === employeeId)
+      || employees.find((item) => document && sanitizeDocument(item?.documento) === document)
+      || null;
+  }
+
+  async function openMoreOptionsModal(row) {
+    const isActive = String(row?.estado || '').trim().toLowerCase() === 'activo';
+    const options = [
+      { value: '', label: 'Seleccione...' },
+      { value: 'upload', label: row?.soporteUrl ? 'Reemplazar soporte' : 'Cargar soporte' }
     ];
-
-    items[0].addEventListener('click', () => showInfoModal('Detalle de incapacidad', incapacityLines(row)));
-
-    const uploadBtn = el('button', { className: 'btn', type: 'button' }, [row?.soporteUrl ? 'Reemplazar soporte' : 'Cargar soporte']);
-    uploadBtn.addEventListener('click', () => uploadSupport(row));
-    items.push(uploadBtn);
-
-    if (row?.soporteUrl) {
-      const supportBtn = el('button', { className: 'btn', type: 'button' }, ['Soporte']);
-      supportBtn.addEventListener('click', () => openSupport(row));
-      items.push(supportBtn);
-      if (!portalMode) {
-        const pdfBtn = el('button', { className: 'btn', type: 'button' }, ['PDF']);
-        pdfBtn.addEventListener('click', () => downloadSupportPdf(row));
-        items.push(pdfBtn);
-      }
-    }
-
     if (!portalMode) {
-      const editBtn = el('button', { className: 'btn', type: 'button' }, ['Editar']);
-      editBtn.addEventListener('click', () => startEdit(row));
-      items.push(editBtn);
-
-      const toggleBtn = el('button', { className: `btn ${String(row?.estado || '').trim().toLowerCase() === 'activo' ? '' : 'btn--primary'}`, type: 'button' }, [
-        String(row?.estado || '').trim().toLowerCase() === 'activo' ? 'Anular' : 'Reactivar'
-      ]);
-      toggleBtn.addEventListener('click', () => toggleStatus(row));
-      items.push(toggleBtn);
+      options.push({ value: 'edit', label: 'Editar' });
+      options.push({ value: 'toggle', label: isActive ? 'Anular' : 'Reactivar' });
     }
 
-    return el('div', { className: 'row-actions' }, items);
+    const modal = await showActionModal({
+      title: 'Mas opciones',
+      message: `Incapacidad: ${row?.nombre || row?.documento || '-'}`,
+      confirmText: 'Continuar',
+      fields: [{
+        id: 'action',
+        label: 'Accion',
+        type: 'select',
+        required: true,
+        options
+      }]
+    });
+    if (!modal?.confirmed) return;
+    if (modal.values.action === 'upload') return uploadSupport(row);
+    if (modal.values.action === 'edit') return startEdit(row);
+    if (modal.values.action === 'toggle') return toggleStatus(row);
   }
 
   function startEdit(row) {
-    editingId = row.id;
-    setTab('create');
-    if (employeeInput) employeeInput.value = employeeLabel({
-      id: row.employeeId,
-      documento: row.documento,
-      nombre: row.nombre
-    });
-    if (sourceSelect) sourceSelect.value = SOURCE_OPTIONS.includes(row?.source) ? row.source : SOURCE_OPTIONS[0];
-    if (startInput) startInput.value = String(row?.fechaInicio || '').trim();
-    if (endInput) endInput.value = String(row?.fechaFin || '').trim();
-    if (fileInput) fileInput.value = '';
-    if (saveBtn) saveBtn.textContent = 'Guardar cambios';
-    if (resetBtn) resetBtn.textContent = 'Cancelar';
-    refreshIdentityHint();
-    setMessage(createMsg, row?.soporteUrl ? 'Puedes adjuntar un nuevo soporte si deseas reemplazar el actual.' : 'Adjunta un soporte si deseas completar el registro.', 'ok');
+    openIncapacityModal(row);
   }
 
   async function toggleStatus(row) {
@@ -631,6 +860,20 @@ function formatDate(value) {
   return raw;
 }
 
+function normalizeInputDate(value) {
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw;
+  try {
+    const date = value?.toDate ? value.toDate() : new Date(value);
+    if (!date || Number.isNaN(date.getTime())) return '';
+    const pad = (number) => String(number).padStart(2, '0');
+    return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+  } catch (_) {
+    return '';
+  }
+}
+
 function channelLabel(row = {}) {
   const key = String(row?.canalRegistro || '').trim().toLowerCase();
   if (CHANNEL_LABELS[key]) return CHANNEL_LABELS[key];
@@ -644,7 +887,7 @@ function statusBadge(state) {
 }
 
 function supportLink(row = {}) {
-  const label = String(row?.soporteNombre || '').trim() || 'Abrir soporte';
+  const label = String(row?.soporteNombre || '').trim() || 'Soporte';
   const anchor = el('a', {
     href: row?.soporteUrl || '#',
     target: '_blank',
@@ -652,12 +895,6 @@ function supportLink(row = {}) {
     className: 'link'
   }, [label]);
   return anchor;
-}
-
-function openSupport(row = {}) {
-  const url = String(row?.soporteUrl || '').trim();
-  if (!url) return;
-  window.open(url, '_blank', 'noopener');
 }
 
 function pickSupportFile() {
@@ -793,30 +1030,6 @@ function concatUint8Arrays(chunks = []) {
     offset += chunk.length;
   }
   return merged;
-}
-
-function incapacityLines(row = {}) {
-  return [
-    `Documento: ${row?.documento || '-'}`,
-    `Nombre: ${row?.nombre || '-'}`,
-    `Tipo: ${row?.source || '-'}`,
-    `Fecha inicio: ${formatDate(row?.fechaInicio)}`,
-    `Fecha terminacion: ${formatDate(row?.fechaFin)}`,
-    `Dias estimados: ${inclusiveDays(row?.fechaInicio, row?.fechaFin)}`,
-    `Canal: ${channelLabel(row)}`,
-    `Estado: ${String(row?.estado || 'activo').trim().toLowerCase() === 'activo' ? 'Vigente' : 'Anulada'}`,
-    `Soporte: ${row?.soporteNombre || row?.soporteUrl || 'Sin soporte'}`
-  ];
-}
-
-function inclusiveDays(start, end) {
-  const from = String(start || '').trim();
-  const to = String(end || '').trim();
-  if (!from || !to) return '-';
-  const a = new Date(`${from}T00:00:00`);
-  const b = new Date(`${to}T00:00:00`);
-  if (Number.isNaN(a.getTime()) || Number.isNaN(b.getTime()) || b < a) return '-';
-  return String(Math.floor((b - a) / 86400000) + 1);
 }
 
 function fileToDataUrl(file) {

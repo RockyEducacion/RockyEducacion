@@ -1,6 +1,7 @@
 import { el, qs } from '../utils/dom.js';
 import { showInfoModal } from '../utils/infoModal.js';
 import { showActionModal } from '../utils/actionModal.js';
+import { createTablePagination } from '../utils/pagination.js';
 export const SupernumerariosAdmin=(mount,deps={})=>{
   const ui=el('section',{className:'main-card'},[
     el('h2',{},['Supernumerarios']),
@@ -16,17 +17,14 @@ export const SupernumerariosAdmin=(mount,deps={})=>{
         el('div',{},[ el('label',{className:'label'},['Telefono']), el('input',{id:'ePhone',className:'input',placeholder:'Telefono'}) ]),
         el('div',{},[ el('label',{className:'label'},['Cargo']), el('select',{id:'eCargo',className:'select'},[]) ]),
         el('div',{},[ el('label',{className:'label'},['Sede (buscar)']), el('input',{id:'eSedeSearch',className:'input',list:'eSedeList',placeholder:'Nombre o codigo de sede'}) ]),
-        el('div',{},[ el('label',{className:'label'},['Fecha ingreso']), el('input',{id:'eIngreso',className:'input',type:'date'}) ]),
-        el('button',{id:'btnCreate',className:'btn btn--primary'},['Crear supernumerario']),
-        el('span',{id:'msgCreate',className:'text-muted'},[' '])
+        el('div',{},[ el('label',{className:'label'},['Fecha ingreso']), el('input',{id:'eIngreso',className:'input',type:'date'}) ])
       ]),
       el('datalist',{id:'eSedeList'},[])
     ]),
     el('div',{id:'tabList'},[
       el('div',{className:'form-row'},[
         el('div',{},[ el('label',{className:'label'},['Buscar']), el('input',{id:'txtSearch',className:'input',placeholder:'Codigo, documento, nombre o sede...'}) ]),
-        el('div',{},[ el('label',{className:'label'},['Estado']), el('select',{id:'selStatus',className:'select'},[ el('option',{value:''},['Todos']), el('option',{value:'activo'},['Activos']), el('option',{value:'inactivo'},['Inactivos']) ]) ]),
-        el('span',{className:'right text-muted'},['Consulta informativa. Edicion y cambios de estado solo en Empleados.'])
+        el('div',{},[ el('label',{className:'label'},['Estado']), el('select',{id:'selStatus',className:'select'},[ el('option',{value:''},['Todos']), el('option',{value:'activo'},['Activos']), el('option',{value:'inactivo'},['Inactivos']) ]) ])
       ]),
       el('div',{className:'mt-2 table-wrap'},[
         el('table',{className:'table',id:'tbl'},[
@@ -53,6 +51,9 @@ export const SupernumerariosAdmin=(mount,deps={})=>{
   const tabListBtn=qs('#tabListBtn',ui);
   const tabCreate=qs('#tabCreate',ui);
   const tabList=qs('#tabList',ui);
+  qs('.tabs', ui)?.classList.add('hidden');
+  tabCreate.classList.add('hidden');
+  tabList.classList.remove('hidden');
   function setTab(which){
     const isCreate=which==='create';
     tabCreateBtn.classList.toggle('is-active',isCreate);
@@ -60,7 +61,6 @@ export const SupernumerariosAdmin=(mount,deps={})=>{
     tabCreate.classList.toggle('hidden',!isCreate);
     tabList.classList.toggle('hidden',isCreate);
   }
-  tabCreateBtn.classList.add('hidden');
   setTab('list');
   tabListBtn.addEventListener('click',()=> setTab('list'));
 
@@ -105,6 +105,7 @@ export const SupernumerariosAdmin=(mount,deps={})=>{
   }
   let snapshot=[]; const tbody=ui.querySelector('tbody');
   let sortKey=''; let sortDir=1;
+  const paginator=createTablePagination(ui,{id:'supernumerarios',after:'#tabList .table-wrap',onChange:render});
   let unSedes=()=>{};
   let unCargos=()=>{};
   let unEmp=()=>{};
@@ -127,43 +128,6 @@ export const SupernumerariosAdmin=(mount,deps={})=>{
     if(String(linked.estado||'').trim().toLowerCase()==='inactivo') return true;
     return row?.estado==='inactivo' && isLinkedByDoc(row?.documento);
   };
-
-  qs('#btnCreate',ui).addEventListener('click',async()=>{
-    const doc=qs('#eDoc',ui).value.trim();
-    const name=qs('#eName',ui).value.trim();
-    const phone=qs('#ePhone',ui).value.trim();
-    const cargoCode=qs('#eCargo',ui).value;
-    const sedeCode=resolveSedeCode(sedeInput.value);
-    const ingreso=qs('#eIngreso',ui).value;
-    const msg=qs('#msgCreate',ui); msg.textContent=' ';
-    if(!doc){ msg.textContent='Escribe el documento.'; return; }
-    if(!name){ msg.textContent='Escribe el nombre completo.'; return; }
-    if(!phone){ msg.textContent='Escribe el telefono.'; return; }
-    if(!cargoCode){ msg.textContent='Selecciona un cargo.'; return; }
-    if(!sedeCode){ msg.textContent='Selecciona una sede.'; return; }
-    if(!ingreso){ msg.textContent='Selecciona la fecha de ingreso.'; return; }
-    try{
-      const dupDoc=await deps.findSupernumerarioByDocument?.(doc);
-      if(dupDoc) { msg.textContent='Ya existe un supernumerario con ese documento.'; return; }
-      const code=await deps.getNextSupernumerarioCode?.();
-      const cargo=cargoList.find(c=>c.codigo===cargoCode);
-      const sede=sedeList.find(s=>s.codigo===sedeCode);
-      const id=await deps.createSupernumerario?.({
-        codigo:code,
-        documento:doc,
-        nombre:name,
-        telefono:phone,
-        cargoCodigo:cargoCode,
-        cargoNombre:cargo?.nombre||null,
-        sedeCodigo:sedeCode,
-        sedeNombre:sede?.nombre||null,
-        fechaIngreso: new Date(`${ingreso}T00:00:00`)
-      });
-      await deps.addAuditLog?.({ targetType:'supernumerario', targetId:id, action:'create_supernumerario', after:{ codigo:code, documento:doc, nombre:name, sedeCodigo:sedeCode, estado:'activo' } });
-      qs('#eDoc',ui).value=''; qs('#eName',ui).value=''; qs('#ePhone',ui).value=''; qs('#eIngreso',ui).value=''; sedeInput.value=''; renderCargoSelect(); renderSedeSelect();
-      msg.textContent='Supernumerario creado OK'; setTab('list'); setTimeout(()=> msg.textContent=' ',1200);
-    }catch(e){ msg.textContent='Error: '+(e?.message||e); }
-  });
 
   const search=()=> qs('#txtSearch',ui).value.trim().toLowerCase();
   const filterStatus=()=> qs('#selStatus',ui).value;
@@ -202,6 +166,7 @@ export const SupernumerariosAdmin=(mount,deps={})=>{
       th.addEventListener('click',()=>{
         const key=th.getAttribute('data-sort');
         if(sortKey===key) sortDir=sortDir*-1; else { sortKey=key; sortDir=1; }
+        paginator.reset();
         render();
       });
     });
@@ -213,7 +178,9 @@ export const SupernumerariosAdmin=(mount,deps={})=>{
       const text=[e.codigo,e.documento,e.nombre,e.cargoNombre,cargoNameByCode(e.cargoCodigo),e.sedeNombre,sedeNameByCode(e.sedeCodigo)].join(' ').toLowerCase();
       return (!term || text.includes(term)) && (!st || e.estado===st);
     });
-    tbody.replaceChildren(...sortData(data).map(e=> row(e)));
+    const sorted=sortData(data);
+    const pageRows=paginator.slice(sorted);
+    tbody.replaceChildren(...pageRows.map(e=> row(e)));
     const msg=qs('#msg',ui); if(msg) msg.textContent=`Total registros filtrados: ${data.length}`;
     updateSortIndicators();
   }
@@ -336,8 +303,8 @@ export const SupernumerariosAdmin=(mount,deps={})=>{
       return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
     }catch{ return ''; }
   }
-  qs('#txtSearch',ui).addEventListener('input',render);
-  qs('#selStatus',ui).addEventListener('change',render);
+  qs('#txtSearch',ui).addEventListener('input',()=>{ paginator.reset(); render(); });
+  qs('#selStatus',ui).addEventListener('change',()=>{ paginator.reset(); render(); });
   initSorting();
   mount.replaceChildren(ui);
   let un=()=>{};

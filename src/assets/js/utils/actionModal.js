@@ -78,6 +78,8 @@ export async function showActionModal({
         if (f.min !== undefined) inputNode.min = String(f.min || '');
         if (f.max !== undefined) inputNode.max = String(f.max || '');
         if (f.step !== undefined) inputNode.step = String(f.step || '');
+        if (f.readonly) inputNode.readOnly = true;
+        if (f.disabled) inputNode.disabled = true;
       }
       row.append(inputNode);
       fieldNodes.push({ def: f, node: inputNode });
@@ -105,7 +107,9 @@ export async function showActionModal({
       for (const { def, node } of fieldNodes) {
         const id = def.id || '';
         if (!id) continue;
-        const value = String(node.value || '').trim();
+        const value = node.type === 'file'
+          ? (node.files?.[0] || null)
+          : String(node.value || '').trim();
         if (def.required && !value) {
           alert(`Completa el campo: ${def.label || id}`);
           node.focus();

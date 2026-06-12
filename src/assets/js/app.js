@@ -14,6 +14,7 @@ import { ZonesAdmin } from './components/ZonesAdmin.js';
 import { DependenciesAdmin } from './components/DependenciesAdmin.js';
 import { SedesAdmin } from './components/SedesAdmin.js';
 import { EmployeesAdmin } from './components/EmployeesAdmin.js';
+import { EmployeeNovelties } from './components/EmployeeNovelties.js';
 import { SupernumerariosAdmin } from './components/SupernumerariosAdmin.js';
 import { SupervisorsAdmin } from './components/SupervisorsAdmin.js';
 import { CargosAdmin } from './components/CargosAdmin.js';
@@ -23,7 +24,8 @@ import { CargueMasivoSedesAdmin } from './components/CargueMasivoSedesAdmin.js';
 import { ImportHistory } from './components/ImportHistory.js';
 import { Payroll } from './components/Payroll.js';
 import { Absenteeism } from './components/Absenteeism.js';
-import { Reports } from './components/Reports.js';
+import { DailyReports } from './components/DailyReports.js';
+import { ConsolidatedReports } from './components/ConsolidatedReports.js';
 import { ImportReplacements } from './components/ImportReplacements.js';
 import { CargarDatos } from './components/CargarDatos.js';
 import { PermissionsCenter } from './components/PermissionsCenter.js';
@@ -61,14 +63,14 @@ const guardWrite=(perm,fn)=> async (...args)=>{
         addNote:fb.addNote, streamNotes:fb.streamNotes,
         streamRoleMatrix:fb.streamRoleMatrix, setRolePermissions:fb.setRolePermissions, streamUserOverrides:fb.streamUserOverrides,
         getUserOverrides:fb.getUserOverrides, setUserOverrides:fb.setUserOverrides, clearUserOverrides:fb.clearUserOverrides,
-        addAuditLog:fb.addAuditLog, streamAuditLogs:(cb)=>{ if(unsubAudit)unsubAudit(); unsubAudit=fb.streamAuditLogs(cb); return unsubAudit; },
+        addAuditLog:fb.addAuditLog, streamAuditLogs:(cb,max)=>{ if(unsubAudit)unsubAudit(); unsubAudit=fb.streamAuditLogs(cb,max); return unsubAudit; },
         streamUsers:fb.streamUsers, setUserRole:guardWrite(PERMS.EDIT_USERS,fb.setUserRole), setUserStatus:guardWrite(PERMS.EDIT_USERS,fb.setUserStatus), softDeleteUser:guardWrite(PERMS.EDIT_USERS,fb.softDeleteUser), findUserByEmail:fb.findUserByEmail,
         streamZones:fb.streamZones, createZone:guardWrite(PERMS.EDIT_ZONES,fb.createZone), updateZone:guardWrite(PERMS.EDIT_ZONES,fb.updateZone), setZoneStatus:guardWrite(PERMS.EDIT_ZONES,fb.setZoneStatus), findZoneByCode:fb.findZoneByCode, getNextZoneCode:fb.getNextZoneCode,
         streamDependencies:fb.streamDependencies, createDependency:guardWrite(PERMS.EDIT_DEPENDENCIES,fb.createDependency), updateDependency:guardWrite(PERMS.EDIT_DEPENDENCIES,fb.updateDependency), setDependencyStatus:guardWrite(PERMS.EDIT_DEPENDENCIES,fb.setDependencyStatus), findDependencyByCode:fb.findDependencyByCode, getNextDependencyCode:fb.getNextDependencyCode,
         streamSedes:fb.streamSedes, createSede:guardWrite(PERMS.EDIT_SEDES,fb.createSede), updateSede:guardWrite(PERMS.EDIT_SEDES,fb.updateSede), setSedeStatus:guardWrite(PERMS.EDIT_SEDES,fb.setSedeStatus), findSedeByCode:fb.findSedeByCode, getNextSedeCode:fb.getNextSedeCode,
         createSedesBulk:guardWrite(PERMS.EDIT_SEDES,fb.createSedesBulk),
         streamEmployees:fb.streamEmployees, streamActiveBaseEmployees:fb.streamActiveBaseEmployees, createEmployee:guardWrite(PERMS.EDIT_EMPLOYEES,fb.createEmployee), updateEmployee:guardWrite(PERMS.EDIT_EMPLOYEES,fb.updateEmployee), setEmployeeStatus:guardWrite(PERMS.EDIT_EMPLOYEES,fb.setEmployeeStatus), findEmployeeByCode:fb.findEmployeeByCode, findEmployeeByDocument:fb.findEmployeeByDocument, getNextEmployeeCode:fb.getNextEmployeeCode,
-        streamEmployeeCargoHistory:fb.streamEmployeeCargoHistory,
+        streamEmployeeCargoHistory:fb.streamEmployeeCargoHistory, streamEmployeeCargoHistoryAll:fb.streamEmployeeCargoHistoryAll,
         createEmployeesBulk:guardWrite(PERMS.EDIT_EMPLOYEES,fb.createEmployeesBulk),
         streamSupernumerarios:fb.streamSupernumerarios, createSupernumerario:guardWrite(PERMS.EDIT_SUPERNUMERARIOS,fb.createSupernumerario), updateSupernumerario:guardWrite(PERMS.EDIT_SUPERNUMERARIOS,fb.updateSupernumerario), setSupernumerarioStatus:guardWrite(PERMS.EDIT_SUPERNUMERARIOS,fb.setSupernumerarioStatus), findSupernumerarioByCode:fb.findSupernumerarioByCode, findSupernumerarioByDocument:fb.findSupernumerarioByDocument, getNextSupernumerarioCode:fb.getNextSupernumerarioCode,
         streamCargos:fb.streamCargos, createCargo:guardWrite(PERMS.EDIT_CARGOS,fb.createCargo), updateCargo:guardWrite(PERMS.EDIT_CARGOS,fb.updateCargo), setCargoStatus:guardWrite(PERMS.EDIT_CARGOS,fb.setCargoStatus), findCargoByCode:fb.findCargoByCode, getNextCargoCode:fb.getNextCargoCode,
@@ -145,6 +147,7 @@ const guardWrite=(perm,fn)=> async (...args)=>{
   addRoute('/sedes', ()=> requireAuth(()=> guard(PERMS.VIEW_SEDES, ()=> SedesAdmin(root, deps))));
   addRoute('/bulk-upload-sedes', ()=> requireAuth(()=> guard(PERMS.EDIT_SEDES, ()=> CargueMasivoSedesAdmin(root, deps))));
   addRoute('/employees', ()=> requireAuth(()=> guard(PERMS.VIEW_EMPLOYEES, ()=> EmployeesAdmin(root, deps))));
+  addRoute('/employee-novelties', ()=> requireAuth(()=> guard(PERMS.VIEW_EMPLOYEES, ()=> EmployeeNovelties(root, deps))));
   addRoute('/supernumerarios', ()=> requireAuth(()=> guard(PERMS.VIEW_SUPERNUMERARIOS, ()=> SupernumerariosAdmin(root, deps))));
   addRoute('/bulk-upload', ()=> requireAuth(()=> guard(PERMS.EDIT_EMPLOYEES, ()=> CargueMasivoAdmin(root, deps))));
   addRoute('/cargos', ()=> requireAuth(()=> guard(PERMS.VIEW_CARGOS, ()=> CargosAdmin(root, deps))));
@@ -163,16 +166,18 @@ const guardWrite=(perm,fn)=> async (...args)=>{
 
   // Consultor
   addRoute('/reports', ()=> requireAuth(()=> {
-    if (can(PERMS.VIEW_REPORTS_CLIENT)) { navigate('/reports-client'); return null; }
-    if (can(PERMS.VIEW_REPORTS_COMPANY)) { navigate('/reports-company'); return null; }
+    if (can(PERMS.VIEW_REPORTS_CLIENT)) { navigate('/reports-daily'); return null; }
+    if (can(PERMS.VIEW_REPORTS_COMPANY)) { navigate('/reports-consolidated'); return null; }
     return block('No tienes permiso para acceder a esta seccion.');
   }));
-  addRoute('/reports-client', ()=> requireAuth(()=> guard(PERMS.VIEW_REPORTS_CLIENT, ()=> Reports(root, deps, { variant: 'client' }))));
-  addRoute('/reports-company', ()=> requireAuth(()=> guard(PERMS.VIEW_REPORTS_COMPANY, ()=> Reports(root, deps, { variant: 'company' }))));
+  addRoute('/reports-client', ()=> { navigate('/reports-daily'); return null; });
+  addRoute('/reports-company', ()=> { navigate('/reports-consolidated'); return null; });
+  addRoute('/reports-daily', ()=> requireAuth(()=> guard(PERMS.VIEW_REPORTS_CLIENT, ()=> DailyReports(root, deps))));
+  addRoute('/reports-consolidated', ()=> requireAuth(()=> guard(PERMS.VIEW_REPORTS_COMPANY, ()=> ConsolidatedReports(root, deps))));
 
   // Supervisor/Empleado
   addRoute('/upload', ()=> requireAuth(()=> guard(PERMS.UPLOAD_DATA, ()=> CargarDatos(root, deps))));
 })();
 function requireAuth(ok){ const { user }=getState(); if(!user){ navigate('/login'); return; } return ok?.(); }
 function guard(perm, ok){ if(!can(perm)) return block('No tienes permiso para acceder a esta sección.'); return ok?.(); }
-function block(text){ const div=document.createElement('div'); div.className='main-card'; div.innerHTML=`<h2 style="margin:0 0 .5rem 0;">RockyEDU</h2><p>${text}</p>`; root.replaceChildren(div); return null; }
+function block(text){ const div=document.createElement('div'); div.className='main-card'; div.innerHTML=`<h2 style="margin:0 0 .5rem 0;">RockyDEMO</h2><p>${text}</p>`; root.replaceChildren(div); return null; }

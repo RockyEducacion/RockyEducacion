@@ -1,6 +1,7 @@
 import { el, qs } from '../utils/dom.js';
 import { showInfoModal } from '../utils/infoModal.js';
 import { showActionModal } from '../utils/actionModal.js';
+import { createTablePagination } from '../utils/pagination.js';
 export const SedesAdmin=(mount,deps={})=>{
   const ui=el('section',{className:'main-card'},[
     el('h2',{},['Sedes']),
@@ -176,6 +177,7 @@ export const SedesAdmin=(mount,deps={})=>{
   btnOpenCreate.addEventListener('click',openCreateModal);
   let snapshot=[]; const tbody=ui.querySelector('tbody');
   let sortKey=''; let sortDir=1;
+  const paginator=createTablePagination(ui,{id:'sedes',after:'#tabList .table-wrap',onChange:render});
   let unDeps=()=>{};
   let unZones=()=>{};
 
@@ -247,6 +249,7 @@ export const SedesAdmin=(mount,deps={})=>{
       th.addEventListener('click',()=>{
         const key=th.getAttribute('data-sort');
         if(sortKey===key) sortDir=sortDir*-1; else { sortKey=key; sortDir=1; }
+        paginator.reset();
         render();
       });
     });
@@ -257,7 +260,9 @@ export const SedesAdmin=(mount,deps={})=>{
       const text=[s.codigo,s.nombre,s.dependenciaNombre,depNameByCode(s.dependenciaCodigo),s.zonaNombre,zoneNameByCode(s.zonaCodigo)].join(' ').toLowerCase();
       return (!term || text.includes(term)) && (!st || s.estado===st);
     });
-    tbody.replaceChildren(...sortData(data).map(s=> row(s)));
+    const sorted=sortData(data);
+    const pageRows=paginator.slice(sorted);
+    tbody.replaceChildren(...pageRows.map(s=> row(s)));
     const msg=qs('#msg',ui); if(msg) msg.textContent=`Total registros filtrados: ${data.length}`;
     updateSortIndicators();
   }
@@ -371,8 +376,8 @@ export const SedesAdmin=(mount,deps={})=>{
     btnCancel.addEventListener('click',()=> render());
     box.append(btnSave,btnCancel); tds[7].replaceChildren(box);
   }
-  qs('#txtSearch',ui).addEventListener('input',render);
-  qs('#selStatus',ui).addEventListener('change',render);
+  qs('#txtSearch',ui).addEventListener('input',()=>{ paginator.reset(); render(); });
+  qs('#selStatus',ui).addEventListener('change',()=>{ paginator.reset(); render(); });
   initSorting();
   mount.replaceChildren(ui);
   let un=()=>{};

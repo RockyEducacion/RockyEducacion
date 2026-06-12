@@ -1,4 +1,5 @@
 import { el, qs } from '../utils/dom.js';
+import { createTablePagination } from '../utils/pagination.js';
 
 export const ImportHistory = (mount, deps = {}) => {
   const ui = el('section', { className: 'main-card' }, [
@@ -45,6 +46,8 @@ export const ImportHistory = (mount, deps = {}) => {
   ]);
 
   const tbody = qs('tbody', ui);
+  const paginator = createTablePagination(ui, { id: 'importHistory', after: '.table-wrap', onChange: render });
+  const detailPaginator = createTablePagination(ui, { id: 'importHistoryDetail', after: '#tblDetail', onChange: renderDetail });
   let snapshot = [];
   let sortKey = 'fecha';
   let sortDir = -1;
@@ -249,7 +252,8 @@ export const ImportHistory = (mount, deps = {}) => {
 
   function render() {
     const { filtered, count } = applyFilters();
-    tbody.replaceChildren(...filtered.map((r) => {
+    const pageRows = paginator.slice(filtered);
+    tbody.replaceChildren(...pageRows.map((r) => {
       const tr = el('tr', {}, []);
       const btn = el('button', { className: 'btn', type: 'button' }, ['Ver']);
       btn.addEventListener('click', () => showDetail(r));
@@ -289,7 +293,8 @@ export const ImportHistory = (mount, deps = {}) => {
       return va > vb ? detailSortDir : -detailSortDir;
     });
     const tb = qs('#tblDetail tbody', ui);
-    tb.replaceChildren(...rows.map((r) => el('tr', {}, [
+    const pageRows = detailPaginator.slice(rows);
+    tb.replaceChildren(...pageRows.map((r) => el('tr', {}, [
       el('td', {}, [r.fecha]),
       el('td', {}, [r.hora]),
       el('td', {}, [r.sede]),
@@ -301,17 +306,19 @@ export const ImportHistory = (mount, deps = {}) => {
     updateSortIndicators('#tblDetail th[data-sort-detail]', detailSortKey, detailSortDir);
   }
 
-  qs('#txtSearch', ui).addEventListener('input', render);
-  qs('#fltDate', ui).addEventListener('change', render);
+  qs('#txtSearch', ui).addEventListener('input', () => { paginator.reset(); render(); });
+  qs('#fltDate', ui).addEventListener('change', () => { paginator.reset(); render(); });
   qs('#btnClear', ui).addEventListener('click', () => {
     qs('#txtSearch', ui).value = '';
     qs('#fltDate', ui).value = '';
+    paginator.reset();
     render();
   });
   ui.querySelectorAll('th[data-sort]').forEach((th) => {
     th.addEventListener('click', () => {
       const key = th.getAttribute('data-sort');
       if (sortKey === key) sortDir *= -1; else { sortKey = key; sortDir = 1; }
+      paginator.reset();
       render();
     });
   });
@@ -320,6 +327,7 @@ export const ImportHistory = (mount, deps = {}) => {
       const key = th.getAttribute('data-sort-detail');
       if (detailSortKey === key) detailSortDir *= -1;
       else { detailSortKey = key; detailSortDir = 1; }
+      detailPaginator.reset();
       renderDetail();
     });
   });

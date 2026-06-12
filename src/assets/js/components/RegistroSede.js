@@ -1,4 +1,5 @@
 import { el, qs, enableSectionToggles } from '../utils/dom.js';
+import { createTablePagination } from '../utils/pagination.js';
 
 export const RegistroSede = (mount, deps = {}) => {
   const today = todayBogota();
@@ -98,6 +99,9 @@ export const RegistroSede = (mount, deps = {}) => {
   ]);
 
   const msg = qs('#msg', ui);
+  const dependencyPaginator = createTablePagination(ui, { id: 'registroDependency', after: '#tblDependency', onChange: () => renderDependency(currentDate()) });
+  const totalsPaginator = createTablePagination(ui, { id: 'registroSedes', after: '#tblTotals', onChange: () => renderTotals(currentDate()) });
+  const detailPaginator = createTablePagination(ui, { id: 'registroDetail', after: '#tblDetail', onChange: renderDetailRows });
   let sedeDailyRows = [];
   let dependencyRows = [];
   let totalsRows = [];
@@ -116,17 +120,18 @@ export const RegistroSede = (mount, deps = {}) => {
   let detailSortDir = -1;
 
   qs('#btnRun', ui).addEventListener('click', run);
-  qs('#depSearch', ui).addEventListener('input', () => renderDependency(currentDate()));
-  qs('#depFilter', ui).addEventListener('change', () => renderDependency(currentDate()));
-  qs('#sedeSearch', ui).addEventListener('input', () => renderTotals(currentDate()));
-  qs('#sedeFilter', ui).addEventListener('change', () => renderTotals(currentDate()));
-  qs('#sedeZoneFilter', ui).addEventListener('change', () => renderTotals(currentDate()));
+  qs('#depSearch', ui).addEventListener('input', () => { dependencyPaginator.reset(); renderDependency(currentDate()); });
+  qs('#depFilter', ui).addEventListener('change', () => { dependencyPaginator.reset(); renderDependency(currentDate()); });
+  qs('#sedeSearch', ui).addEventListener('input', () => { totalsPaginator.reset(); renderTotals(currentDate()); });
+  qs('#sedeFilter', ui).addEventListener('change', () => { totalsPaginator.reset(); renderTotals(currentDate()); });
+  qs('#sedeZoneFilter', ui).addEventListener('change', () => { totalsPaginator.reset(); renderTotals(currentDate()); });
   ui.querySelectorAll('#tblDependency th[data-sort-dep]').forEach((th) => {
     th.addEventListener('click', () => {
       const key = String(th.getAttribute('data-sort-dep') || '').trim();
       if (!key) return;
       if (depSortKey === key) depSortDir *= -1;
       else { depSortKey = key; depSortDir = 1; }
+      dependencyPaginator.reset();
       renderDependency(currentDate());
     });
   });
@@ -136,6 +141,7 @@ export const RegistroSede = (mount, deps = {}) => {
       if (!key) return;
       if (sedeSortKey === key) sedeSortDir *= -1;
       else { sedeSortKey = key; sedeSortDir = 1; }
+      totalsPaginator.reset();
       renderTotals(currentDate());
     });
   });
@@ -145,6 +151,7 @@ export const RegistroSede = (mount, deps = {}) => {
       if (!key) return;
       if (detailSortKey === key) detailSortDir *= -1;
       else { detailSortKey = key; detailSortDir = 1; }
+      detailPaginator.reset();
       renderDetailRows();
     });
   });
@@ -326,6 +333,9 @@ export const RegistroSede = (mount, deps = {}) => {
       dependencyRows = Array.from(depMap.values()).sort((a, b) => String(a.dependenciaNombre || '').localeCompare(String(b.dependenciaNombre || '')));
       refreshZoneFilterOptions();
 
+      dependencyPaginator.reset();
+      totalsPaginator.reset();
+      detailPaginator.reset();
       renderDependency(date);
       renderTotals(date);
       msg.textContent = 'Consulta OK';
@@ -346,7 +356,8 @@ export const RegistroSede = (mount, deps = {}) => {
     });
     const sortedRows = sortRows(filteredRows, depSortKey, depSortDir);
     const tb = qs('#tblDependency tbody', ui);
-    tb.replaceChildren(...sortedRows.map((r) => {
+    const pageRows = dependencyPaginator.slice(sortedRows);
+    tb.replaceChildren(...pageRows.map((r) => {
       const tr = el('tr', {}, []);
       const btn = el('button', { className: 'btn', type: 'button' }, ['Ver']);
       btn.addEventListener('click', () => renderDependencyDetail(r.dependenciaKey, r.dependenciaNombre, date));
@@ -413,7 +424,8 @@ export const RegistroSede = (mount, deps = {}) => {
     });
     const sortedRows = sortRows(rows, sedeSortKey, sedeSortDir);
     const tb = qs('#tblTotals tbody', ui);
-    tb.replaceChildren(...sortedRows.map((r) => {
+    const pageRows = totalsPaginator.slice(sortedRows);
+    tb.replaceChildren(...pageRows.map((r) => {
       const tr = el('tr', {}, []);
       const btn = el('button', { className: 'btn', type: 'button' }, ['Ver']);
       btn.addEventListener('click', () => renderSedeDetail(r.sedeCodigo, r.sedeNombre, date));
@@ -446,6 +458,7 @@ export const RegistroSede = (mount, deps = {}) => {
       sedeDailyRows.filter((r) => r.dependenciaKey === dependenciaKey)
     );
     detailRowsCache = rows;
+    detailPaginator.reset();
     renderDetailRows();
   }
 
@@ -455,6 +468,7 @@ export const RegistroSede = (mount, deps = {}) => {
       sedeDailyRows.filter((r) => r.sedeCodigo === sedeCodigo)
     );
     detailRowsCache = rows;
+    detailPaginator.reset();
     renderDetailRows();
   }
 
@@ -522,7 +536,8 @@ export const RegistroSede = (mount, deps = {}) => {
   function renderDetailRows() {
     const rows = sortRows(detailRowsCache, detailSortKey, detailSortDir);
     const tb = qs('#tblDetail tbody', ui);
-    tb.replaceChildren(...rows.map((r) => el('tr', {}, [
+    const pageRows = detailPaginator.slice(rows);
+    tb.replaceChildren(...pageRows.map((r) => el('tr', {}, [
       el('td', {}, [r.fecha || '-']),
       el('td', {}, [r.sede || '-']),
       el('td', {}, [r.zona || 'Sin zona']),

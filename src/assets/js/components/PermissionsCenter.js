@@ -2,6 +2,7 @@ import { el, qs } from '../utils/dom.js';
 import { isSuperAdmin } from '../permissions.js';
 import { ALL_ROLES, ROLES, PERMS, permsForRole } from '../roles.js';
 import { getState } from '../state.js';
+import { createTablePagination } from '../utils/pagination.js';
 
 const PERM_KEYS = [
   PERMS.MANAGE_PERMISSIONS,
@@ -56,8 +57,8 @@ const PERM_LABELS = {
   [PERMS.VIEW_IMPORT_HISTORY]: 'Operacion - Historial',
   [PERMS.RUN_PAYROLL]: 'Operacion - Nomina',
   [PERMS.MANAGE_ABSENTEEISM]: 'Operacion - Ausentismo',
-  [PERMS.VIEW_REPORTS_CLIENT]: 'Reportes - Cliente',
-  [PERMS.VIEW_REPORTS_COMPANY]: 'Reportes - Empresa',
+  [PERMS.VIEW_REPORTS_CLIENT]: 'Reportes - Diarios',
+  [PERMS.VIEW_REPORTS_COMPANY]: 'Reportes - Consolidados',
   [PERMS.UPLOAD_DATA]: 'Incapacidades'
 };
 const LEGACY_FALLBACK_BY_NEW = {
@@ -113,6 +114,8 @@ export const PermissionsCenter = (mount, deps = {}) => {
   let userTarget = null;
   let userOverrides = {};
   let originalOverrides = {};
+  let auditItems = [];
+  let auditPaginator = null;
 
   const ui = el('section', { className: 'main-card' }, [
     el('h2', {}, ['Centro de Permisos']),
@@ -319,11 +322,23 @@ export const PermissionsCenter = (mount, deps = {}) => {
     const list = el('div', { id: 'auditList', className: 'mt-1' }, []);
     box.append(list);
     clearAuditStream();
+    auditPaginator = null;
     unAudit =
       deps.streamAuditLogs?.((items) => {
-        list.replaceChildren(...items.map((it) => renderAuditItem(it)));
+        auditItems = items || [];
+        renderAuditPage();
       }) || null;
     return box;
+  }
+
+  function renderAuditPage() {
+    const list = qs('#auditList', ui);
+    if (!list) return;
+    if (!auditPaginator || !ui.contains(auditPaginator.controls)) {
+      auditPaginator = createTablePagination(ui, { id: 'permissionsAudit', after: '#auditList', onChange: renderAuditPage });
+    }
+    const pageItems = auditPaginator.slice(auditItems);
+    list.replaceChildren(...pageItems.map((it) => renderAuditItem(it)));
   }
 
   function renderAuditItem(it) {

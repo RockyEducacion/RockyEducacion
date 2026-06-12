@@ -1,4 +1,5 @@
 import { el, qs, enableSectionToggles } from '../utils/dom.js';
+import { createTablePagination } from '../utils/pagination.js';
 
 export const Absenteeism = (mount, deps = {}) => {
   const ui = el('section', { className: 'main-card' }, [
@@ -67,6 +68,9 @@ export const Absenteeism = (mount, deps = {}) => {
   ]);
 
   const msg = qs('#msg', ui);
+  const dependencyPaginator = createTablePagination(ui, { id: 'absDependency', after: '#tblDependency', onChange: () => renderDependency(qs('#opDate', ui).value) });
+  const totalsPaginator = createTablePagination(ui, { id: 'absSedes', after: '#tblTotals', onChange: renderTotals });
+  const detailPaginator = createTablePagination(ui, { id: 'absDetail', after: '#tblDetail', onChange: renderDetailRows });
   qs('#opDate', ui).value = todayBogota();
 
   let sedeDailyRows = [];
@@ -95,6 +99,7 @@ export const Absenteeism = (mount, deps = {}) => {
         depSortKey = key;
         depSortDir = 1;
       }
+      dependencyPaginator.reset();
       renderDependency(qs('#opDate', ui).value);
     });
   });
@@ -108,6 +113,7 @@ export const Absenteeism = (mount, deps = {}) => {
         sedeSortKey = key;
         sedeSortDir = 1;
       }
+      totalsPaginator.reset();
       renderTotals();
     });
   });
@@ -121,6 +127,7 @@ export const Absenteeism = (mount, deps = {}) => {
         detailSortKey = key;
         detailSortDir = 1;
       }
+      detailPaginator.reset();
       renderDetailRows();
     });
   });
@@ -194,6 +201,7 @@ export const Absenteeism = (mount, deps = {}) => {
 
       renderDependency(date);
       renderTotals();
+      detailPaginator.reset();
       msg.textContent = 'Consulta OK. Dependencias: ' + dependencyRows.length;
     } catch (error) {
       msg.textContent = 'Error: ' + (error?.message || error);
@@ -239,7 +247,8 @@ export const Absenteeism = (mount, deps = {}) => {
   function renderDependency(date) {
     const rows = sortRows(dependencyRows, depSortKey, depSortDir);
     const tbody = qs('#tblDependency tbody', ui);
-    tbody.replaceChildren(...rows.map((row) => {
+    const pageRows = dependencyPaginator.slice(rows);
+    tbody.replaceChildren(...pageRows.map((row) => {
       const tr = el('tr', {}, []);
       const btn = el('button', { className: 'btn', type: 'button' }, ['Ver']);
       btn.addEventListener('click', () => renderDetail(row.dependenciaKey, row.dependenciaNombre, date));
@@ -273,7 +282,8 @@ export const Absenteeism = (mount, deps = {}) => {
     totalsRows = [...sedeDailyRows];
     const rows = sortRows(totalsRows, sedeSortKey, sedeSortDir);
     const tbody = qs('#tblTotals tbody', ui);
-    tbody.replaceChildren(...rows.map((row) => {
+    const pageRows = totalsPaginator.slice(rows);
+    tbody.replaceChildren(...pageRows.map((row) => {
       const tr = el('tr', {}, []);
       const btn = el('button', { className: 'btn', type: 'button' }, ['Ver']);
       btn.addEventListener('click', () => renderSedeDetail(row.sedeCodigo, row.sedeNombre));
@@ -306,6 +316,7 @@ export const Absenteeism = (mount, deps = {}) => {
     });
 
     detailRowsCache = detailRows;
+    detailPaginator.reset();
     renderDetailRows();
   }
 
@@ -314,6 +325,7 @@ export const Absenteeism = (mount, deps = {}) => {
     qs('#detailTitle', ui).textContent = 'Detalle sede: ' + (sedeNombre || '-') + ' (' + date + ')';
     const summary = sedeDailyRows.find((row) => row.sedeCodigo === sedeCodigo);
     detailRowsCache = summary ? buildDetailRowsForSede(summary) : [];
+    detailPaginator.reset();
     renderDetailRows();
   }
 
@@ -354,7 +366,8 @@ export const Absenteeism = (mount, deps = {}) => {
   function renderDetailRows() {
     const rows = sortRows(detailRowsCache, detailSortKey, detailSortDir);
     const tbody = qs('#tblDetail tbody', ui);
-    tbody.replaceChildren(...rows.map((row) => el('tr', {}, [
+    const pageRows = detailPaginator.slice(rows);
+    tbody.replaceChildren(...pageRows.map((row) => el('tr', {}, [
       el('td', {}, [row.fecha || '-']),
       el('td', {}, [row.sede || '-']),
       el('td', {}, [row.documento || '-']),
@@ -513,6 +526,9 @@ export const Absenteeism = (mount, deps = {}) => {
     totalsRows = [];
     detailRowsCache = [];
     employeeRowsBySede = new Map();
+    dependencyPaginator.slice([]);
+    totalsPaginator.slice([]);
+    detailPaginator.slice([]);
     qs('#tblDependency tbody', ui).replaceChildren();
     qs('#tblTotals tbody', ui).replaceChildren();
     qs('#tblDetail tbody', ui).replaceChildren();
