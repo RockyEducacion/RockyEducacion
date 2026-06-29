@@ -2,7 +2,7 @@ import crypto from 'node:crypto';
 import { config } from './config.js';
 import { supabaseAdmin } from './supabase.js';
 
-const PRIVILEGED_ROLES = ['superadmin', 'admin', 'editor', 'consultor', 'supervisor'];
+const PRIVILEGED_ROLES = ['superadmin', 'admin', 'editor', 'consultor', 'supervisor', 'tablet_qr'];
 const INCAPACITY_SUPPORT_BUCKET = 'incapacidades-soportes';
 const MAX_SUPPORT_BYTES = 8 * 1024 * 1024;
 

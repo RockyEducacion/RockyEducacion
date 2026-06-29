@@ -27,14 +27,29 @@ export async function showActionModal({
         el('label', { className: 'label' }, [f.label || f.id || 'Campo'])
       ]);
       let inputNode;
-      if (f.type === 'select') {
+      if (f.type === 'checkboxes') {
+        const selectedValues = Array.isArray(f.value) ? f.value.map((value) => String(value ?? '')) : [String(f.value ?? '')];
+        inputNode = el(
+          'div',
+          { className: 'action-modal__checks', style: 'display:grid;gap:.4rem;max-height:220px;overflow:auto;border:1px solid var(--color-border);border-radius:10px;padding:.55rem;' },
+          (f.options || []).map((opt) => {
+            const value = String(opt.value ?? '');
+            return el('label', { style: 'display:flex;align-items:center;gap:.45rem;font-size:.9rem;' }, [
+              el('input', { type: 'checkbox', value, checked: selectedValues.includes(value) }),
+              opt.label || value
+            ]);
+          })
+        );
+      } else if (f.type === 'select' || f.type === 'multiselect') {
+        const selectedValues = Array.isArray(f.value) ? f.value.map((value) => String(value ?? '')) : [String(f.value ?? '')];
         inputNode = el(
           'select',
-          { className: 'select', id: f.id || '' },
+          { className: 'select', id: f.id || '', multiple: f.type === 'multiselect' },
           (f.options || []).map((opt) =>
-            el('option', { value: String(opt.value ?? ''), selected: String(opt.value ?? '') === String(f.value ?? '') }, [opt.label || String(opt.value ?? '')])
+            el('option', { value: String(opt.value ?? ''), selected: selectedValues.includes(String(opt.value ?? '')) }, [opt.label || String(opt.value ?? '')])
           )
         );
+        if (f.type === 'multiselect') inputNode.size = String(Math.min(Math.max((f.options || []).length, 3), 8));
       } else if (f.type === 'datalist') {
         const listId = `${f.id || 'field'}_list_${Math.random().toString(36).slice(2, 8)}`;
         inputNode = el('input', {
@@ -107,10 +122,14 @@ export async function showActionModal({
       for (const { def, node } of fieldNodes) {
         const id = def.id || '';
         if (!id) continue;
-        const value = node.type === 'file'
+        const value = def.type === 'checkboxes'
+          ? Array.from(node.querySelectorAll('input[type="checkbox"]:checked')).map((input) => String(input.value || '').trim()).filter(Boolean)
+          : node.multiple
+          ? Array.from(node.selectedOptions || []).map((option) => String(option.value || '').trim()).filter(Boolean)
+          : node.type === 'file'
           ? (node.files?.[0] || null)
           : String(node.value || '').trim();
-        if (def.required && !value) {
+        if (def.required && (Array.isArray(value) ? value.length === 0 : !value)) {
           alert(`Completa el campo: ${def.label || id}`);
           node.focus();
           return;

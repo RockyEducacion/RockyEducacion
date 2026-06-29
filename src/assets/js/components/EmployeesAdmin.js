@@ -170,13 +170,14 @@ export const EmployeesAdmin=(mount,deps={})=>{
   const btnOpenCreate=el('button',{id:'btnOpenCreate',className:'btn btn--primary right',type:'button'},['Crear empleado']);
   qs('#tabList .form-row',ui)?.append(btnOpenCreate);
   btnOpenCreate.addEventListener('click',openCreateModal);
-  let snapshot=[]; const tbody=ui.querySelector('tbody');
+  let snapshot=[]; let historyRows=[]; const tbody=ui.querySelector('tbody');
   let sortKey=''; let sortDir=1;
   const paginator=createTablePagination(ui,{id:'employees',after:'#tabList .table-wrap',onChange:render});
   let unSedes=()=>{};
   let unCargos=()=>{};
   let unSup=()=>{};
   let unSupn=()=>{};
+  let unHistory=()=>{};
   let supervisors=[]; let supernumerarios=[];
   const sedeNameByCode=(code)=> sedeList.find(s=>s.codigo===code)?.nombre || '-';
   const cargoNameByCode=(code)=> cargoList.find(c=>c.codigo===code)?.nombre || '-';
@@ -234,9 +235,11 @@ export const EmployeesAdmin=(mount,deps={})=>{
     }catch{ return 0; }
   }
   function getSortValue(e,key){
-    if(key==='cargoNombre') return (e.cargoNombre||cargoNameByCode(e.cargoCodigo)||'').toLowerCase();
-    if(key==='sedeNombre') return (e.sedeNombre||sedeNameByCode(e.sedeCodigo)||'').toLowerCase();
-    if(key==='fechaIngreso' || key==='fechaRetiro') return toSortableDate(e[key]);
+    const view=employeeAssignmentView(e);
+    if(key==='cargoNombre') return (view.current?.cargoNombre||cargoNameByCode(view.current?.cargoCodigo)||'').toLowerCase();
+    if(key==='sedeNombre') return (view.current?.sedeNombre||sedeNameByCode(view.current?.sedeCodigo)||'').toLowerCase();
+    if(key==='fechaIngreso') return toSortableDate(view.current?.fechaIngreso||e.fechaIngreso);
+    if(key==='fechaRetiro') return toSortableDate(e[key]);
     return String(e[key]??'').toLowerCase();
   }
   function sortData(data){
@@ -270,7 +273,20 @@ export const EmployeesAdmin=(mount,deps={})=>{
   function render(){
     const term=search(); const st=filterStatus();
     const data=snapshot.filter(e=>{
-      const text=[e.codigo,e.documento,e.nombre,e.cargoNombre,cargoNameByCode(e.cargoCodigo),e.sedeNombre,sedeNameByCode(e.sedeCodigo)].join(' ').toLowerCase();
+      const view=employeeAssignmentView(e);
+      const text=[
+        e.codigo,
+        e.documento,
+        e.nombre,
+        view.current?.cargoNombre,
+        cargoNameByCode(view.current?.cargoCodigo),
+        view.current?.sedeNombre,
+        sedeNameByCode(view.current?.sedeCodigo),
+        view.programmed?.cargoNombre,
+        cargoNameByCode(view.programmed?.cargoCodigo),
+        view.programmed?.sedeNombre,
+        sedeNameByCode(view.programmed?.sedeCodigo)
+      ].join(' ').toLowerCase();
       return (!term || text.includes(term)) && (!st || e.estado===st);
     });
     const sorted=sortData(data);
@@ -280,22 +296,89 @@ export const EmployeesAdmin=(mount,deps={})=>{
     updateSortIndicators();
   }
   function row(e){
+    const view=employeeAssignmentView(e);
     const tr=el('tr',{'data-id':e.id});
     const tdCodigo=el('td',{},[e.codigo||'-']);
     const linked=isLinkedByDoc(e.documento);
     const tdDoc=el('td',{}, linked ? [e.documento||'-',' ',el('span',{className:'badge'},['Vinculado'])] : [e.documento||'-']);
     const tdNombre=el('td',{},[e.nombre||'-']);
     const tdTel=el('td',{},[e.telefono||'-']);
-    const tdCargo=el('td',{},[ e.cargoNombre||cargoNameByCode(e.cargoCodigo) ]);
-    const tdSede=el('td',{},[ e.sedeNombre||sedeNameByCode(e.sedeCodigo) ]);
+    const tdCargo=el('td',{},[ assignmentCellText(view.current,'cargo'), programmedBadge(view.programmed,'cargo') ].filter(Boolean));
+    const tdSede=el('td',{},[ assignmentCellText(view.current,'sede'), programmedBadge(view.programmed,'sede') ].filter(Boolean));
     const tdEstado=el('td',{},[ statusBadge(e.estado) ]);
-    const tdIngreso=el('td',{},[ formatDate(e.fechaIngreso) ]);
+    const tdIngreso=el('td',{},[ formatDate(view.current?.fechaIngreso||e.fechaIngreso) ]);
     const tdRetiro=el('td',{},[ formatDate(e.fechaRetiro) ]);
     const tdAcc=el('td',{},[ actionsCell(e) ]);
     tr.append(tdCodigo,tdDoc,tdNombre,tdTel,tdCargo,tdSede,tdEstado,tdIngreso,tdRetiro,tdAcc);
     return tr;
   }
   function statusBadge(st){ return el('span',{className:'badge '+(st==='activo'?'badge--ok':'badge--off')},[st||'-']); }
+  function assignmentCellText(assignment={},kind='sede'){
+    if(kind==='cargo') return assignment?.cargoNombre||cargoNameByCode(assignment?.cargoCodigo)||assignment?.cargoCodigo||'-';
+    return assignment?.sedeNombre||sedeNameByCode(assignment?.sedeCodigo)||assignment?.sedeCodigo||'-';
+  }
+  function programmedBadge(assignment=null,kind='sede'){
+    if(!assignment) return null;
+    const target=assignmentCellText(assignment,kind);
+    const label=`Programado desde ${formatInputDate(assignment.fechaIngreso)}: ${target}`;
+    return el('span',{className:'badge',title:label,'aria-label':label,style:'margin-left:.35rem;cursor:help;'},['Programado']);
+  }
+  function employeeAssignmentView(e={}){
+    const today=todayInputDate();
+    const rows=historyRowsByEmployee(e);
+    const current=resolveAssignmentOnDate(e,today,rows) || employeeAssignmentData(e);
+    const programmed=nextProgrammedAssignment(today,rows);
+    return { current, programmed };
+  }
+  function historyRowsByEmployee(e={}){
+    const employeeId=String(e?.id||'').trim();
+    const doc=String(e?.documento||'').trim();
+    return (historyRows||[]).filter((row)=>{
+      const rowEmployeeId=String(row?.employeeId||'').trim();
+      const rowDoc=String(row?.documento||'').trim();
+      return (employeeId && rowEmployeeId===employeeId) || (doc && rowDoc===doc);
+    });
+  }
+  function employeeAssignmentData(e={}){
+    return {
+      cargoCodigo:e.cargoCodigo||null,
+      cargoNombre:e.cargoNombre||null,
+      sedeCodigo:e.sedeCodigo||null,
+      sedeNombre:e.sedeNombre||null,
+      fechaIngreso:e.fechaIngreso||null,
+      fechaRetiro:e.fechaRetiro||null
+    };
+  }
+  function resolveAssignmentOnDate(e={},day,rows=[]){
+    const matching=(rows||[]).filter((row)=>{
+      const ingreso=toISODateValue(row?.fechaIngreso);
+      if(!ingreso || ingreso>day) return false;
+      const retiro=toISODateValue(row?.fechaRetiro);
+      return !retiro || retiro>=day;
+    });
+    if(!matching.length) return null;
+    matching.sort((a,b)=>{
+      const ai=toISODateValue(a.fechaIngreso)||'';
+      const bi=toISODateValue(b.fechaIngreso)||'';
+      if(ai!==bi) return bi.localeCompare(ai);
+      return String(b.createdAt||'').localeCompare(String(a.createdAt||''));
+    });
+    return matching[0];
+  }
+  function nextProgrammedAssignment(day,rows=[]){
+    const future=(rows||[]).filter((row)=>{
+      const ingreso=toISODateValue(row?.fechaIngreso);
+      return ingreso && ingreso>day && !row?.fechaRetiro;
+    });
+    if(!future.length) return null;
+    future.sort((a,b)=>{
+      const ai=toISODateValue(a.fechaIngreso)||'';
+      const bi=toISODateValue(b.fechaIngreso)||'';
+      if(ai!==bi) return ai.localeCompare(bi);
+      return String(a.createdAt||'').localeCompare(String(b.createdAt||''));
+    });
+    return future[0];
+  }
   function formatDate(ts){
     try{
       const d=ts?.toDate? ts.toDate(): (ts? new Date(ts): null);
@@ -382,6 +465,8 @@ export const EmployeesAdmin=(mount,deps={})=>{
     const newPhone=String(modal.values.telefono||'').trim();
     const newIngreso=String(modal.values.fechaIngreso||'').trim();
     if(!/^\d{4}-\d{2}-\d{2}$/.test(newIngreso)) return alert('Selecciona la fecha de ingreso.');
+    const currentRetiro=toInputDate(e.fechaRetiro);
+    if(currentRetiro && newIngreso>currentRetiro) return alert('La fecha de ingreso no puede ser posterior a la fecha de retiro.');
     try{
       if(newCode!==String(e.codigo||'')){ const dup=await deps.findEmployeeByCode?.(newCode); if(dup && dup.id!==e.id) return alert('Ya existe un empleado con ese codigo.'); }
       if(newDoc!==String(e.documento||'')){ const dupDoc=await deps.findEmployeeByDocument?.(newDoc); if(dupDoc && dupDoc.id!==e.id) return alert('Ya existe un empleado con ese documento.'); }
@@ -485,6 +570,8 @@ export const EmployeesAdmin=(mount,deps={})=>{
     if(!modal.confirmed) return;
     const retiro=String(modal.values.retiroDate||'').trim();
     if(!validInputDate(retiro)) return alert('Fecha invalida. Usa formato AAAA-MM-DD.');
+    const ingreso=toInputDate(e.fechaIngreso);
+    if(ingreso && retiro<ingreso) return alert('La fecha de retiro no puede ser anterior a la fecha de ingreso.');
     try{
       const retiroDate=new Date(`${retiro}T00:00:00`);
       await deps.setEmployeeStatus?.(e.id,'inactivo',{ fechaRetiro:retiroDate });
@@ -511,6 +598,24 @@ export const EmployeesAdmin=(mount,deps={})=>{
   function todayInputDate(){
     return new Intl.DateTimeFormat('en-CA',{ timeZone:'America/Bogota' }).format(new Date());
   }
+  function toISODateValue(value){
+    if(!value) return '';
+    if(typeof value==='string'){
+      const raw=value.trim();
+      if(/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw;
+      const parsed=new Date(raw);
+      return Number.isNaN(parsed.getTime())?'':parsed.toISOString().slice(0,10);
+    }
+    const parsed=value?.toDate?value.toDate():(value instanceof Date?value:null);
+    return parsed && !Number.isNaN(parsed.getTime())?parsed.toISOString().slice(0,10):'';
+  }
+  function formatInputDate(value){
+    const iso=toISODateValue(value);
+    if(!iso) return '-';
+    const [year,month,day]=iso.split('-').map((part)=>Number(part));
+    const date=new Date(year,(month||1)-1,day||1);
+    return date.toLocaleDateString();
+  }
   function validInputDate(value){
     const raw=String(value||'').trim();
     if(!/^\d{4}-\d{2}-\d{2}$/.test(raw)) return false;
@@ -533,9 +638,10 @@ export const EmployeesAdmin=(mount,deps={})=>{
     unCargos=deps.streamCargos?.((arr)=>{ cargoList=(arr||[]).filter(c=>c.estado!=='inactivo'); renderCargoSelect(); render(); }) || (()=>{});
     unSup=deps.streamSupervisors?.((arr)=>{ supervisors=arr||[]; render(); }) || (()=>{});
     unSupn=deps.streamSupernumerarios?.((arr)=>{ supernumerarios=arr||[]; render(); }) || (()=>{});
+    unHistory=deps.streamEmployeeCargoHistoryAll?.((arr)=>{ historyRows=arr||[]; render(); }) || (()=>{});
     un=deps.streamEmployees?.((arr)=>{ snapshot=arr||[]; render(); }) || (()=>{});
   }catch(e){
     const msg=qs('#msg',ui); if(msg) msg.textContent='Error cargando empleados: '+(e?.message||e);
   }
-  return ()=>{ un?.(); unSedes?.(); unCargos?.(); unSup?.(); unSupn?.(); };
+  return ()=>{ un?.(); unSedes?.(); unCargos?.(); unSup?.(); unSupn?.(); unHistory?.(); };
 };

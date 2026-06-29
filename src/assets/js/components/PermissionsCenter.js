@@ -1,6 +1,6 @@
 import { el, qs } from '../utils/dom.js';
 import { isSuperAdmin } from '../permissions.js';
-import { ALL_ROLES, ROLES, PERMS, permsForRole } from '../roles.js';
+import { ALL_ROLES, ROLE_LABELS, ROLES, PERMS, permsForRole } from '../roles.js';
 import { getState } from '../state.js';
 import { createTablePagination } from '../utils/pagination.js';
 
@@ -16,6 +16,7 @@ const PERM_KEYS = [
   PERMS.EDIT_SEDES,
   PERMS.VIEW_EMPLOYEES,
   PERMS.EDIT_EMPLOYEES,
+  PERMS.MANAGE_EMPLOYEE_SCHEDULES,
   PERMS.VIEW_SUPERNUMERARIOS,
   PERMS.EDIT_SUPERNUMERARIOS,
   PERMS.VIEW_SUPERVISORS,
@@ -25,6 +26,9 @@ const PERM_KEYS = [
   PERMS.VIEW_NOVEDADES,
   PERMS.EDIT_NOVEDADES,
   PERMS.IMPORT_DATA,
+  PERMS.VIEW_QR_SCANNER,
+  PERMS.VIEW_QR_DAILY_REGISTRY,
+  PERMS.MANAGE_QR_DEVICES,
   PERMS.VIEW_IMPORT_HISTORY,
   PERMS.RUN_PAYROLL,
   PERMS.MANAGE_ABSENTEEISM,
@@ -45,6 +49,7 @@ const PERM_LABELS = {
   [PERMS.EDIT_SEDES]: 'Sedes - Edicion',
   [PERMS.VIEW_EMPLOYEES]: 'Empleados - Consulta',
   [PERMS.EDIT_EMPLOYEES]: 'Empleados - Edicion',
+  [PERMS.MANAGE_EMPLOYEE_SCHEDULES]: 'Empleados - Programaciones',
   [PERMS.VIEW_SUPERNUMERARIOS]: 'Supernumerarios - Consulta',
   [PERMS.EDIT_SUPERNUMERARIOS]: 'Supernumerarios - Edicion',
   [PERMS.VIEW_SUPERVISORS]: 'Supervisores - Consulta',
@@ -54,6 +59,9 @@ const PERM_LABELS = {
   [PERMS.VIEW_NOVEDADES]: 'Novedades - Consulta',
   [PERMS.EDIT_NOVEDADES]: 'Novedades - Edicion',
   [PERMS.IMPORT_DATA]: 'Operacion - Registro',
+  [PERMS.VIEW_QR_SCANNER]: 'QR - Lector',
+  [PERMS.VIEW_QR_DAILY_REGISTRY]: 'QR - Registro diario',
+  [PERMS.MANAGE_QR_DEVICES]: 'QR - Administrar tablets',
   [PERMS.VIEW_IMPORT_HISTORY]: 'Operacion - Historial',
   [PERMS.RUN_PAYROLL]: 'Operacion - Nomina',
   [PERMS.MANAGE_ABSENTEEISM]: 'Operacion - Ausentismo',
@@ -72,6 +80,7 @@ const LEGACY_FALLBACK_BY_NEW = {
   [PERMS.EDIT_SEDES]: 'manageSedes',
   [PERMS.VIEW_EMPLOYEES]: 'manageEmployees',
   [PERMS.EDIT_EMPLOYEES]: 'manageEmployees',
+  [PERMS.MANAGE_EMPLOYEE_SCHEDULES]: 'manageEmployees',
   [PERMS.VIEW_SUPERNUMERARIOS]: 'manageEmployees',
   [PERMS.EDIT_SUPERNUMERARIOS]: 'manageEmployees',
   [PERMS.VIEW_CARGOS]: 'manageEmployees',
@@ -80,6 +89,9 @@ const LEGACY_FALLBACK_BY_NEW = {
   [PERMS.EDIT_NOVEDADES]: 'manageEmployees',
   [PERMS.VIEW_SUPERVISORS]: 'manageSupervisors',
   [PERMS.EDIT_SUPERVISORS]: 'manageSupervisors',
+  [PERMS.VIEW_QR_SCANNER]: PERMS.IMPORT_DATA,
+  [PERMS.VIEW_QR_DAILY_REGISTRY]: PERMS.IMPORT_DATA,
+  [PERMS.MANAGE_QR_DEVICES]: PERMS.EDIT_SEDES,
   [PERMS.VIEW_REPORTS_CLIENT]: PERMS.VIEW_REPORTS,
   [PERMS.VIEW_REPORTS_COMPANY]: PERMS.VIEW_REPORTS
 };
@@ -160,7 +172,7 @@ export const PermissionsCenter = (mount, deps = {}) => {
     const roleSel = el(
       'select',
       { className: 'select', style: 'max-width:260px' },
-      ALL_ROLES.map((r) => el('option', { value: r, selected: r === selectedRole }, [r]))
+      ALL_ROLES.map((r) => el('option', { value: r, selected: r === selectedRole }, [ROLE_LABELS[r] || r]))
     );
     roleSel.addEventListener('change', () => {
       selectedRole = roleSel.value;

@@ -4,10 +4,21 @@ export const ROLES = {
   EDITOR: 'editor',
   CONSULTOR: 'consultor',
   SUPERVISOR: 'supervisor',
+  TABLET_QR: 'tablet_qr',
   EMPLEADO: 'empleado'
 };
 
-export const ALL_ROLES = [ROLES.SUPERADMIN, ROLES.ADMIN, ROLES.EDITOR, ROLES.CONSULTOR, ROLES.SUPERVISOR, ROLES.EMPLEADO];
+export const ROLE_LABELS = {
+  [ROLES.SUPERADMIN]: 'SuperAdmin',
+  [ROLES.ADMIN]: 'Admin',
+  [ROLES.EDITOR]: 'Editor',
+  [ROLES.CONSULTOR]: 'Consultor',
+  [ROLES.SUPERVISOR]: 'Supervisor',
+  [ROLES.TABLET_QR]: 'Tablet QR',
+  [ROLES.EMPLEADO]: 'Empleado'
+};
+
+export const ALL_ROLES = [ROLES.SUPERADMIN, ROLES.ADMIN, ROLES.EDITOR, ROLES.CONSULTOR, ROLES.SUPERVISOR, ROLES.TABLET_QR, ROLES.EMPLEADO];
 
 export const PERMS = {
   MANAGE_PERMISSIONS: 'managePermissions',
@@ -21,6 +32,7 @@ export const PERMS = {
   EDIT_SEDES: 'editSedes',
   VIEW_EMPLOYEES: 'viewEmployees',
   EDIT_EMPLOYEES: 'editEmployees',
+  MANAGE_EMPLOYEE_SCHEDULES: 'manageEmployeeSchedules',
   VIEW_SUPERVISORS: 'viewSupervisors',
   EDIT_SUPERVISORS: 'editSupervisors',
   VIEW_SUPERNUMERARIOS: 'viewSupernumerarios',
@@ -30,6 +42,9 @@ export const PERMS = {
   VIEW_NOVEDADES: 'viewNovedades',
   EDIT_NOVEDADES: 'editNovedades',
   IMPORT_DATA: 'importData',
+  VIEW_QR_SCANNER: 'viewQrScanner',
+  VIEW_QR_DAILY_REGISTRY: 'viewQrDailyRegistry',
+  MANAGE_QR_DEVICES: 'manageQrDevices',
   VIEW_IMPORT_HISTORY: 'viewImportHistory',
   RUN_PAYROLL: 'runPayroll',
   MANAGE_ABSENTEEISM: 'manageAbsenteeism',
@@ -61,6 +76,7 @@ export function permsForRole(role) {
         [PERMS.EDIT_SEDES]: true,
         [PERMS.VIEW_EMPLOYEES]: true,
         [PERMS.EDIT_EMPLOYEES]: true,
+        [PERMS.MANAGE_EMPLOYEE_SCHEDULES]: true,
         [PERMS.VIEW_SUPERVISORS]: true,
         [PERMS.EDIT_SUPERVISORS]: true,
         [PERMS.VIEW_SUPERNUMERARIOS]: true,
@@ -68,12 +84,16 @@ export function permsForRole(role) {
         [PERMS.VIEW_CARGOS]: true,
         [PERMS.EDIT_CARGOS]: true,
         [PERMS.VIEW_NOVEDADES]: true,
-        [PERMS.EDIT_NOVEDADES]: true
+        [PERMS.EDIT_NOVEDADES]: true,
+        [PERMS.VIEW_QR_SCANNER]: true,
+        [PERMS.VIEW_QR_DAILY_REGISTRY]: true,
+        [PERMS.MANAGE_QR_DEVICES]: true
       };
     case ROLES.EDITOR:
       return {
         ...none,
         [PERMS.IMPORT_DATA]: true,
+        [PERMS.VIEW_QR_DAILY_REGISTRY]: true,
         [PERMS.VIEW_IMPORT_HISTORY]: true,
         [PERMS.RUN_PAYROLL]: true,
         [PERMS.MANAGE_ABSENTEEISM]: true
@@ -94,7 +114,15 @@ export function permsForRole(role) {
         [PERMS.EDIT_EMPLOYEES]: true,
         [PERMS.VIEW_SUPERVISORS]: true,
         [PERMS.EDIT_SUPERVISORS]: true,
+        [PERMS.VIEW_QR_SCANNER]: true,
+        [PERMS.VIEW_QR_DAILY_REGISTRY]: true,
+        [PERMS.MANAGE_QR_DEVICES]: true,
         [PERMS.UPLOAD_DATA]: true
+      };
+    case ROLES.TABLET_QR:
+      return {
+        ...none,
+        [PERMS.VIEW_QR_SCANNER]: true
       };
     case ROLES.EMPLEADO:
       return {

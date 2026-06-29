@@ -1,5 +1,5 @@
 import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm';
-import { SUPABASE_ANON_KEY, SUPABASE_PROFILES_TABLE, SUPABASE_URL } from './config.js';
+import { EMPLOYEE_PORTAL_API_BASE, SUPABASE_ANON_KEY, SUPABASE_PROFILES_TABLE, SUPABASE_URL } from './config.js';
 
 function assertSupabaseConfig() {
   if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
@@ -102,6 +102,20 @@ function shouldRefreshForDay(payload, day, column = 'fecha') {
   const prevVal = String(payload?.old?.[column] || '').trim();
   if (nextVal || prevVal) return nextVal === target || prevVal === target;
   return true;
+}
+
+function shouldRefreshForDateRange(payload, day, startColumn = 'fecha_inicio', endColumn = 'fecha_fin') {
+  const target = String(day || '').trim();
+  if (!target) return true;
+  const overlaps = (row = {}) => {
+    const start = String(row?.[startColumn] || '').trim();
+    const end = String(row?.[endColumn] || '').trim();
+    if (!start && !end) return false;
+    return (!start || start <= target) && (!end || end >= target);
+  };
+  if (overlaps(payload?.new) || overlaps(payload?.old)) return true;
+  const hasRange = payload?.new?.[startColumn] || payload?.new?.[endColumn] || payload?.old?.[startColumn] || payload?.old?.[endColumn];
+  return !hasRange;
 }
 
 async function notifyTableReload(table) {
@@ -262,7 +276,36 @@ function mapSedeRow(row = {}) {
     zonaCodigo: row.zona_codigo || null,
     zonaNombre: row.zona_nombre || null,
     numeroOperarios: typeof row.numero_operarios === 'number' ? row.numero_operarios : null,
-    jornada: row.jornada || 'lun_vie'
+    jornada: row.jornada || 'lun_vie',
+    qrEnabled: row.qr_enabled === true,
+    qrLatitude: row.qr_latitude == null ? null : Number(row.qr_latitude),
+    qrLongitude: row.qr_longitude == null ? null : Number(row.qr_longitude),
+    qrRadiusMeters: row.qr_radius_meters == null ? 500 : Number(row.qr_radius_meters)
+  };
+}
+
+function mapQrDeviceRow(row = {}, sites = []) {
+  const assignedSites = (sites || [])
+    .map((site) => ({
+      sedeCodigo: site.sede_codigo || null,
+      sedeNombre: site.sede_nombre || null
+    }))
+    .filter((site) => site.sedeCodigo || site.sedeNombre);
+  const fallbackSite = row.sede_codigo || row.sede_nombre
+    ? [{ sedeCodigo: row.sede_codigo || null, sedeNombre: row.sede_nombre || null }]
+    : [];
+  return {
+    id: row.id,
+    deviceName: row.device_name || null,
+    estado: row.estado || 'activo',
+    lastSeenAt: row.last_seen_at || null,
+    revokedAt: row.revoked_at || null,
+    revokedByEmail: row.revoked_by_email || null,
+    createdAt: row.created_at || null,
+    createdByEmail: row.created_by_email || null,
+    lastModifiedAt: row.last_modified_at || null,
+    lastModifiedByEmail: row.last_modified_by_email || null,
+    sedes: assignedSites.length ? assignedSites : fallbackSite
   };
 }
 
@@ -713,6 +756,14 @@ function todayBogotaISO() {
   return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Bogota' }).format(new Date());
 }
 
+function validateEmployeeDateRange(fechaIngreso, fechaRetiro) {
+  const ingreso = toISODate(fechaIngreso);
+  const retiro = toISODate(fechaRetiro);
+  if (ingreso && retiro && ingreso > retiro) {
+    throw new Error('La fecha de ingreso no puede ser posterior a la fecha de retiro.');
+  }
+}
+
 const EMPLOYEE_OPERATIONAL_REFRESH_LOOKBACK_DAYS = 31;
 
 function isEmployeeActiveForDate(emp, selectedDate) {
@@ -838,20 +889,6 @@ function isEmployeeSupernumerario(emp, cargoMap = new Map()) {
   return alignment === 'supernumerario';
 }
 
-function isEmployeeSupernumerarioOnDate(emp, selectedDate, cargoMap = new Map(), historyRows = []) {
-  const assignment = resolveEmployeeAssignmentHistoryOnDate(emp, selectedDate, historyRows);
-  const effective = assignment
-    ? {
-        ...emp,
-        cargoCodigo: assignment.cargoCodigo ?? emp?.cargoCodigo,
-        cargo_codigo: assignment.cargo_codigo ?? emp?.cargo_codigo,
-        cargoNombre: assignment.cargoNombre ?? emp?.cargoNombre,
-        cargo_nombre: assignment.cargo_nombre ?? emp?.cargo_nombre
-      }
-    : emp;
-  return isEmployeeSupernumerario(effective, cargoMap);
-}
-
 function resolveEmployeeAssignmentHistoryOnDate(emp, selectedDate, historyRows = []) {
   const day = String(selectedDate || '').trim();
   if (!day) return null;
@@ -872,6 +909,16 @@ function resolveEmployeeAssignmentHistoryOnDate(emp, selectedDate, historyRows =
     return String(right?.id || '').localeCompare(String(left?.id || ''));
   });
   return matching[0] || null;
+}
+
+function buildEmployeeHistoryByEmployeeId(rows = []) {
+  return (Array.isArray(rows) ? rows : []).reduce((acc, row) => {
+    const employeeId = String(row?.employeeId || row?.employee_id || '').trim();
+    if (!employeeId) return acc;
+    if (!acc.has(employeeId)) acc.set(employeeId, []);
+    acc.get(employeeId).push(row);
+    return acc;
+  }, new Map());
 }
 
 function isEmployeeAssignedToActiveSedeOnDate(emp, selectedDate, activeSedeCodes = new Set(), historyRows = []) {
@@ -919,8 +966,11 @@ function resolveAttendanceSedeCode(attendanceRow = {}, context = {}) {
     || (documento && context?.employeeByDoc?.get(documento))
     || null;
   if (!employee) return null;
-  if (!isEmployeeAssignedToActiveSedeOnDate(employee, context?.selectedDate, context?.activeSedeCodes || new Set())) return null;
-  return String(employee?.sedeCodigo || employee?.sede_codigo || '').trim() || null;
+  const historyRows = context?.historyByEmployeeId?.get(String(employee?.id || '').trim()) || [];
+  if (!isEmployeeAssignedToActiveSedeOnDate(employee, context?.selectedDate, context?.activeSedeCodes || new Set(), historyRows)) return null;
+  const assignment = resolveEmployeeAssignmentHistoryOnDate(employee, context?.selectedDate, historyRows);
+  const source = assignment || employee;
+  return String(source?.sedeCodigo || source?.sede_codigo || '').trim() || null;
 }
 
 async function computeDailyClosureSnapshot(fecha) {
@@ -1006,11 +1056,12 @@ function computeOperationalAbsenteeism(planeados, contratados, cubiertos) {
 async function computeDailySedeClosureSnapshot(fecha) {
   const day = String(fecha || '').trim();
   if (!day) return [];
-  const [{ data: attendance }, { data: replacements }, sedesRows, employeesRows, cargosRows, novedadesRows] = await Promise.all([
+  const [{ data: attendance }, { data: replacements }, sedesRows, employeesRows, employeeHistoryRows, cargosRows, novedadesRows] = await Promise.all([
     supabase.from('attendance').select('*').eq('fecha', day),
     supabase.from('import_replacements').select('*').eq('fecha', day),
     selectAllRows('sedes', { select: '*' }),
     selectAllRows('employees', { select: '*' }),
+    selectAllRows('employee_cargo_history', { select: 'id, employee_id, cargo_codigo, cargo_nombre, sede_codigo, sede_nombre, fecha_ingreso, fecha_retiro, created_at' }),
     selectAllRows('cargos', { select: 'codigo, alineacion_crud, nombre' }),
     selectAllRows('novedades', { select: 'codigo, codigo_novedad, nombre, reemplazo' })
   ]);
@@ -1036,18 +1087,22 @@ async function computeDailySedeClosureSnapshot(fecha) {
   const employeeByDoc = new Map();
   const contractedBySede = new Map();
   const supernumerarioDocs = new Set();
+  const historyByEmployeeId = buildEmployeeHistoryByEmployeeId(employeeHistoryRows);
   (employeesRows || []).forEach((emp) => {
     const mapped = mapEmployeeRow(emp);
     const empId = String(mapped?.id || '').trim();
     const doc = String(mapped?.documento || '').trim();
     if (empId) employeeById.set(empId, mapped);
     if (doc) employeeByDoc.set(doc, mapped);
-    if (doc && isEmployeeSupernumerario(mapped, cargoMap) && isEmployeeAssignedToActiveSedeOnDate(mapped, day, activeSedeCodes)) {
+    const historyRows = historyByEmployeeId.get(empId) || [];
+    if (doc && isEmployeeSupernumerario(mapped, cargoMap) && isEmployeeAssignedToActiveSedeOnDate(mapped, day, activeSedeCodes, historyRows)) {
       supernumerarioDocs.add(doc);
     }
-    if (!isEmployeeAssignedToActiveSedeOnDate(mapped, day, activeSedeCodes)) return;
+    if (!isEmployeeAssignedToActiveSedeOnDate(mapped, day, activeSedeCodes, historyRows)) return;
     if (isEmployeeSupernumerario(mapped, cargoMap)) return;
-    const sedeCode = String(mapped?.sedeCodigo || '').trim();
+    const assignment = resolveEmployeeAssignmentHistoryOnDate(mapped, day, historyRows);
+    const source = assignment || mapped;
+    const sedeCode = String(source?.sedeCodigo || source?.sede_codigo || '').trim();
     if (!sedeCode) return;
     if (!contractedBySede.has(sedeCode)) contractedBySede.set(sedeCode, new Set());
     contractedBySede.get(sedeCode).add(doc || empId);
@@ -1061,7 +1116,10 @@ async function computeDailySedeClosureSnapshot(fecha) {
     const empId = String(row?.empleadoId || '').trim();
     const employee = (empId && employeeById.get(empId)) || (doc && employeeByDoc.get(doc)) || null;
     if (isEmployeeSupernumerario(employee, cargoMap)) return;
-    const sedeCode = String(row?.sedeCodigo || employee?.sedeCodigo || '').trim();
+    const historyRows = employee ? (historyByEmployeeId.get(String(employee?.id || '').trim()) || []) : [];
+    const assignment = employee ? resolveEmployeeAssignmentHistoryOnDate(employee, day, historyRows) : null;
+    const source = assignment || employee;
+    const sedeCode = String(row?.sedeCodigo || source?.sedeCodigo || source?.sede_codigo || '').trim();
     if (!sedeCode || !activeSedeCodes.has(sedeCode)) return;
     if (!registeredBySede.has(sedeCode)) registeredBySede.set(sedeCode, new Set());
     registeredBySede.get(sedeCode).add(doc || empId || String(row?.id || '').trim());
@@ -1177,6 +1235,215 @@ async function patchActiveEmployeeHistory(employeeId, patch = {}, notifyReload =
   }
 }
 
+async function patchProgrammedEmployeeHistory(employeeId, fechaIngreso, patch = {}, notifyReload = true) {
+  const empId = String(employeeId || '').trim();
+  const ingreso = toISODate(fechaIngreso);
+  const updates = Object.fromEntries(Object.entries(patch || {}).filter(([, value]) => value !== undefined));
+  if (!empId || !ingreso || !Object.keys(updates).length) return false;
+
+  const { data: rows, error: fetchError } = await supabase
+    .from('employee_cargo_history')
+    .select('id, fecha_ingreso, fecha_retiro')
+    .eq('employee_id', empId)
+    .is('fecha_retiro', null)
+    .order('created_at', { ascending: false })
+    .limit(20);
+  if (fetchError) throw fetchError;
+  const target = (rows || []).find((row) => toISODate(row?.fecha_ingreso) === ingreso) || null;
+  if (!target?.id) return false;
+
+  const { error } = await supabase
+    .from('employee_cargo_history')
+    .update(updates)
+    .eq('id', target.id);
+  if (error) throw error;
+  if (notifyReload) {
+    await notifyTableReload('employee_cargo_history');
+  }
+  return true;
+}
+
+async function getProgrammedEmployeeHistoryContext(historyId) {
+  const id = String(historyId || '').trim();
+  if (!id) throw new Error('No se encontro la programacion.');
+  const { data: target, error: targetError } = await supabase
+    .from('employee_cargo_history')
+    .select('*')
+    .eq('id', id)
+    .maybeSingle();
+  if (targetError) throw targetError;
+  if (!target?.id) throw new Error('No se encontro la programacion.');
+
+  const targetIngreso = toISODate(target.fecha_ingreso);
+  if (!targetIngreso || targetIngreso <= todayBogotaISO() || target.fecha_retiro) {
+    throw new Error('Solo se pueden corregir programaciones futuras que aun no han iniciado.');
+  }
+
+  const employeeId = String(target.employee_id || '').trim();
+  const [{ data: employee, error: employeeError }, { data: historyRows, error: historyError }] = await Promise.all([
+    supabase.from('employees').select('*').eq('id', employeeId).maybeSingle(),
+    supabase
+      .from('employee_cargo_history')
+      .select('*')
+      .eq('employee_id', employeeId)
+      .order('fecha_ingreso', { ascending: true })
+  ]);
+  if (employeeError) throw employeeError;
+  if (historyError) throw historyError;
+  if (!employee?.id) throw new Error('No se encontro el empleado de la programacion.');
+
+  const previous = (historyRows || [])
+    .filter((row) => String(row?.id || '') !== id)
+    .filter((row) => {
+      const ingreso = toISODate(row?.fecha_ingreso);
+      return ingreso && ingreso < targetIngreso;
+    })
+    .sort((left, right) => {
+      const a = toISODate(left?.fecha_ingreso) || '';
+      const b = toISODate(right?.fecha_ingreso) || '';
+      if (a !== b) return b.localeCompare(a);
+      return String(right?.created_at || '').localeCompare(String(left?.created_at || ''));
+    })[0] || null;
+
+  return { target, targetIngreso, employee, previous };
+}
+
+export async function updateProgrammedEmployeeAssignment(historyId, data = {}) {
+  const { target, employee, previous } = await getProgrammedEmployeeHistoryContext(historyId);
+  const nextIngreso = toISODate(data.fechaIngreso || data.fecha_ingreso || target.fecha_ingreso);
+  if (!nextIngreso || nextIngreso <= todayBogotaISO()) {
+    throw new Error('La nueva fecha de inicio debe ser posterior a hoy.');
+  }
+  if (previous) {
+    const previousIngreso = toISODate(previous.fecha_ingreso);
+    const previousRetiro = addDaysToIsoDate(nextIngreso, -1);
+    if (previousIngreso && previousRetiro && previousRetiro < previousIngreso) {
+      throw new Error('La fecha de inicio deja invalido el tramo anterior.');
+    }
+  }
+
+  const cargoCodigo = data.cargoCodigo !== undefined ? String(data.cargoCodigo || '').trim() || null : target.cargo_codigo || null;
+  const cargoNombre = data.cargoNombre !== undefined ? String(data.cargoNombre || '').trim() || null : target.cargo_nombre || null;
+  const sedeCodigo = data.sedeCodigo !== undefined ? String(data.sedeCodigo || '').trim() || null : target.sede_codigo || null;
+  const sedeNombre = data.sedeNombre !== undefined ? String(data.sedeNombre || '').trim() || null : target.sede_nombre || null;
+  const zone = await resolveZoneBySedeCode(sedeCodigo);
+  const audit = await getCurrentAuditFields();
+
+  if (previous) {
+    const { error: previousError } = await supabase
+      .from('employee_cargo_history')
+      .update({ fecha_retiro: addDaysToIsoDate(nextIngreso, -1) })
+      .eq('id', previous.id);
+    if (previousError) throw previousError;
+  }
+
+  const { data: updatedHistory, error: historyError } = await supabase
+    .from('employee_cargo_history')
+    .update({
+      employee_codigo: employee.codigo || null,
+      documento: employee.documento || target.documento || null,
+      cargo_codigo: cargoCodigo,
+      cargo_nombre: cargoNombre,
+      sede_codigo: sedeCodigo,
+      sede_nombre: sedeNombre,
+      fecha_ingreso: nextIngreso,
+      source: 'scheduled_assignment_update'
+    })
+    .eq('id', target.id)
+    .select('*')
+    .single();
+  if (historyError) throw historyError;
+
+  const { data: updatedEmployee, error: employeeError } = await supabase
+    .from('employees')
+    .update({
+      cargo_codigo: cargoCodigo,
+      cargo_nombre: cargoNombre,
+      sede_codigo: sedeCodigo,
+      sede_nombre: sedeNombre,
+      zona_codigo: zone.zonaCodigo || null,
+      zona_nombre: zone.zonaNombre || null,
+      fecha_ingreso: nextIngreso,
+      last_modified_by_uid: audit.created_by_uid,
+      last_modified_by_email: audit.created_by_email,
+      last_modified_at: new Date().toISOString()
+    })
+    .eq('id', employee.id)
+    .select('*')
+    .single();
+  if (employeeError) throw employeeError;
+
+  if (await getCargoCrudAlignmentByCode(updatedEmployee.cargo_codigo, updatedEmployee.cargo_nombre) === 'supervisor') {
+    await upsertSupervisorProfileFromEmployee(mapEmployeeRow(updatedEmployee));
+  }
+
+  await Promise.all([
+    notifyTableReload('employees'),
+    notifyTableReload('employee_cargo_history')
+  ]);
+  return {
+    employee: mapEmployeeRow(updatedEmployee),
+    history: mapCargoHistoryRow(updatedHistory),
+    previous: previous ? mapCargoHistoryRow(previous) : null
+  };
+}
+
+export async function cancelProgrammedEmployeeAssignment(historyId) {
+  const { target, employee, previous } = await getProgrammedEmployeeHistoryContext(historyId);
+  if (!previous?.id) {
+    throw new Error('No hay una asignacion anterior para restaurar.');
+  }
+  const zone = await resolveZoneBySedeCode(previous.sede_codigo);
+  const audit = await getCurrentAuditFields();
+
+  const { error: reopenError } = await supabase
+    .from('employee_cargo_history')
+    .update({ fecha_retiro: null })
+    .eq('id', previous.id);
+  if (reopenError) throw reopenError;
+
+  const { error: deleteError } = await supabase
+    .from('employee_cargo_history')
+    .delete()
+    .eq('id', target.id);
+  if (deleteError) throw deleteError;
+
+  const { data: updatedEmployee, error: employeeError } = await supabase
+    .from('employees')
+    .update({
+      cargo_codigo: previous.cargo_codigo || null,
+      cargo_nombre: previous.cargo_nombre || null,
+      sede_codigo: previous.sede_codigo || null,
+      sede_nombre: previous.sede_nombre || null,
+      zona_codigo: zone.zonaCodigo || null,
+      zona_nombre: zone.zonaNombre || null,
+      fecha_ingreso: previous.fecha_ingreso || null,
+      fecha_retiro: null,
+      estado: 'activo',
+      last_modified_by_uid: audit.created_by_uid,
+      last_modified_by_email: audit.created_by_email,
+      last_modified_at: new Date().toISOString()
+    })
+    .eq('id', employee.id)
+    .select('*')
+    .single();
+  if (employeeError) throw employeeError;
+
+  if (await getCargoCrudAlignmentByCode(updatedEmployee.cargo_codigo, updatedEmployee.cargo_nombre) === 'supervisor') {
+    await upsertSupervisorProfileFromEmployee(mapEmployeeRow(updatedEmployee));
+  }
+
+  await Promise.all([
+    notifyTableReload('employees'),
+    notifyTableReload('employee_cargo_history')
+  ]);
+  return {
+    employee: mapEmployeeRow(updatedEmployee),
+    cancelled: mapCargoHistoryRow(target),
+    restored: mapCargoHistoryRow({ ...previous, fecha_retiro: null })
+  };
+}
+
 async function upsertSupervisorProfileFromEmployee(employee, override = {}) {
   const audit = await getCurrentAuditFields();
   const payload = {
@@ -1252,7 +1519,7 @@ async function removeInvalidScheduledEmployeeDailyStatusRows(fecha) {
     selectAllRows('sedes', { select: '*' }),
     selectAllRows('employees', { select: '*' }),
     selectAllRows('cargos', { select: 'codigo, alineacion_crud, nombre' }),
-        selectAllRows('employee_cargo_history', { select: 'id, employee_id, cargo_codigo, cargo_nombre, sede_codigo, fecha_ingreso, fecha_retiro, created_at' })
+    selectAllRows('employee_cargo_history', { select: 'id, employee_id, sede_codigo, fecha_ingreso, fecha_retiro, created_at' })
   ]);
   if (statusError) throw statusError;
 
@@ -1285,10 +1552,9 @@ async function removeInvalidScheduledEmployeeDailyStatusRows(fecha) {
     .filter((row) => {
       const employeeId = String(row?.employee_id || '').trim();
       const employee = employeeById.get(employeeId) || null;
-      const historyRows = historyByEmployeeId.get(employeeId) || [];
       if (!employee) return true;
-      if (isEmployeeSupernumerarioOnDate(employee, day, cargoMap, historyRows)) return true;
-      return !isEmployeeAssignedToActiveSedeOnDate(employee, day, activeSedeCodes, historyRows);
+      if (isEmployeeSupernumerario(employee, cargoMap)) return true;
+      return !isEmployeeAssignedToActiveSedeOnDate(employee, day, activeSedeCodes, historyByEmployeeId.get(employeeId) || []);
     })
     .map((row) => String(row?.id || '').trim())
     .filter(Boolean);
@@ -1361,12 +1627,13 @@ async function recomputeDailyMetrics(fecha) {
     }
   }
 
-  const [{ data: attendance }, { data: replacements }, { data: closures }, sedesRows, employeesRows, cargosRows, novedadesRows] = await Promise.all([
+  const [{ data: attendance }, { data: replacements }, { data: closures }, sedesRows, employeesRows, employeeHistoryRows, cargosRows, novedadesRows] = await Promise.all([
     supabase.from('attendance').select('*').eq('fecha', day),
     supabase.from('import_replacements').select('*').eq('fecha', day),
     supabase.from('daily_closures').select('*').eq('fecha', day).maybeSingle(),
     selectAllRows('sedes', { select: '*' }),
     selectAllRows('employees', { select: '*' }),
+    selectAllRows('employee_cargo_history', { select: 'id, employee_id, cargo_codigo, cargo_nombre, sede_codigo, sede_nombre, fecha_ingreso, fecha_retiro, created_at' }),
     selectAllRows('cargos', { select: 'codigo, alineacion_crud, nombre' }),
     selectAllRows('novedades', { select: 'codigo, codigo_novedad, nombre, reemplazo' })
   ]);
@@ -1392,19 +1659,22 @@ async function recomputeDailyMetrics(fecha) {
   const employeeById = new Map();
   const employeeByDoc = new Map();
   const supernumerarioDocs = new Set();
+  const historyByEmployeeId = buildEmployeeHistoryByEmployeeId(employeeHistoryRows);
   (employeesRows || []).forEach((emp) => {
     const mapped = mapEmployeeRow(emp);
     const empId = String(mapped?.id || '').trim();
     const doc = String(mapped?.documento || '').trim();
     if (empId) employeeById.set(empId, mapped);
     if (doc) employeeByDoc.set(doc, mapped);
-    if (doc && isEmployeeSupernumerario(mapped, cargoMap) && isEmployeeAssignedToActiveSedeOnDate(mapped, day, activeSedeCodes)) {
+    const historyRows = historyByEmployeeId.get(empId) || [];
+    if (doc && isEmployeeSupernumerario(mapped, cargoMap) && isEmployeeAssignedToActiveSedeOnDate(mapped, day, activeSedeCodes, historyRows)) {
       supernumerarioDocs.add(doc);
     }
   });
   const fallbackExpected = (employeesRows || []).filter((emp) => {
     if (String(emp?.estado || '').trim().toLowerCase() !== 'activo') return false;
-    if (!isEmployeeAssignedToActiveSedeOnDate(emp, day, activeSedeCodes)) return false;
+    const employeeId = String(emp?.id || '').trim();
+    if (!isEmployeeAssignedToActiveSedeOnDate(emp, day, activeSedeCodes, historyByEmployeeId.get(employeeId) || [])) return false;
     return !isEmployeeSupernumerario(emp, cargoMap);
   }).length;
   const planned = scheduledSedes.reduce((acc, sede) => {
@@ -1466,11 +1736,12 @@ async function recomputeSedeStatusSnapshot(fecha) {
     }
   }
 
-  const [{ data: attendance }, { data: replacements }, sedesRows, employeesRows, cargosRows, novedadesRows] = await Promise.all([
+  const [{ data: attendance }, { data: replacements }, sedesRows, employeesRows, employeeHistoryRows, cargosRows, novedadesRows] = await Promise.all([
     supabase.from('attendance').select('*').eq('fecha', day),
     supabase.from('import_replacements').select('*').eq('fecha', day),
     selectAllRows('sedes', { select: '*' }),
     selectAllRows('employees', { select: '*' }),
+    selectAllRows('employee_cargo_history', { select: 'id, employee_id, cargo_codigo, cargo_nombre, sede_codigo, sede_nombre, fecha_ingreso, fecha_retiro, created_at' }),
     selectAllRows('cargos', { select: 'codigo, alineacion_crud, nombre' }),
     selectAllRows('novedades', { select: 'codigo, codigo_novedad, nombre, reemplazo' })
   ]);
@@ -1491,18 +1762,22 @@ async function recomputeSedeStatusSnapshot(fecha) {
   const employeeByDoc = new Map();
   const contractedBySede = new Map();
   const supernumerarioDocs = new Set();
+  const historyByEmployeeId = buildEmployeeHistoryByEmployeeId(employeeHistoryRows);
 
   (employeesRows || []).forEach((emp) => {
     const empId = String(emp?.id || '').trim();
     const doc = String(emp?.documento || '').trim();
     if (empId) employeeById.set(empId, emp);
     if (doc) employeeByDoc.set(doc, emp);
-    if (doc && isEmployeeSupernumerario(emp, cargoMap) && isEmployeeAssignedToActiveSedeOnDate(emp, day, activeSedeCodes)) {
+    const historyRows = historyByEmployeeId.get(empId) || [];
+    if (doc && isEmployeeSupernumerario(emp, cargoMap) && isEmployeeAssignedToActiveSedeOnDate(emp, day, activeSedeCodes, historyRows)) {
       supernumerarioDocs.add(doc);
     }
-    if (!isEmployeeAssignedToActiveSedeOnDate(emp, day, activeSedeCodes)) return;
+    if (!isEmployeeAssignedToActiveSedeOnDate(emp, day, activeSedeCodes, historyRows)) return;
     if (isEmployeeSupernumerario(emp, cargoMap)) return;
-    const sedeCode = String(emp?.sedeCodigo || emp?.sede_codigo || '').trim();
+    const assignment = resolveEmployeeAssignmentHistoryOnDate(emp, day, historyRows);
+    const source = assignment || emp;
+    const sedeCode = String(source?.sedeCodigo || source?.sede_codigo || '').trim();
     if (!contractedBySede.has(sedeCode)) contractedBySede.set(sedeCode, new Set());
     contractedBySede.get(sedeCode).add(doc || empId);
   });
@@ -1515,7 +1790,10 @@ async function recomputeSedeStatusSnapshot(fecha) {
     if (doc && supernumerarioDocs.has(doc)) return;
     const empId = String(row?.empleadoId || '').trim();
     const employee = (empId && employeeById.get(empId)) || (doc && employeeByDoc.get(doc)) || null;
-    const sedeCode = String(row?.sedeCodigo || employee?.sedeCodigo || employee?.sede_codigo || '').trim();
+    const historyRows = employee ? (historyByEmployeeId.get(String(employee?.id || '').trim()) || []) : [];
+    const assignment = employee ? resolveEmployeeAssignmentHistoryOnDate(employee, day, historyRows) : null;
+    const source = assignment || employee;
+    const sedeCode = String(row?.sedeCodigo || source?.sedeCodigo || source?.sede_codigo || '').trim();
     if (!sedeCode || !activeSedeCodes.has(sedeCode)) return;
     if (!registeredBySede.has(sedeCode)) registeredBySede.set(sedeCode, new Set());
     registeredBySede.get(sedeCode).add(doc || empId || String(row?.id || '').trim());
@@ -1604,6 +1882,47 @@ async function reconcileOperationalSnapshotsForEmployeeChange(before = {}, after
 
 function normalizeDailyDocument(value) {
   return String(value || '').replace(/\D+/g, '').trim();
+}
+
+async function assertNoEmployeeAttendanceTodayBeforeSedeTransfer(currentRow = {}, transferDate, currentSedeCode = null) {
+  const day = String(transferDate || '').trim();
+  const employeeId = String(currentRow?.id || '').trim();
+  const documento = normalizeDailyDocument(currentRow?.documento);
+  const previousSede = String(currentSedeCode || currentRow?.sede_codigo || currentRow?.sedeCodigo || '').trim();
+  if (!day || !employeeId) return;
+
+  const queries = [
+    supabase
+      .from('attendance')
+      .select('id, sede_codigo, sede_nombre')
+      .eq('fecha', day)
+      .eq('empleado_id', employeeId)
+  ];
+  if (documento) {
+    queries.push(
+      supabase
+        .from('attendance')
+        .select('id, sede_codigo, sede_nombre')
+        .eq('fecha', day)
+        .eq('documento', documento)
+    );
+  }
+
+  const results = await Promise.all(queries);
+  const rows = [];
+  for (const { data, error } of results) {
+    if (error) throw error;
+    rows.push(...(data || []));
+  }
+
+  const matchingRegistration = rows.find((row) => {
+    const sede = String(row?.sede_codigo || '').trim();
+    return !sede || !previousSede || sede === previousSede;
+  });
+  if (matchingRegistration) {
+    const sedeLabel = matchingRegistration.sede_nombre || matchingRegistration.sede_codigo || previousSede || 'la sede anterior';
+    throw new Error(`El empleado ya se registro hoy en ${sedeLabel}. No se puede iniciar el cambio de sede hoy.`);
+  }
 }
 
 function buildDailyRecordId(fecha, documento = null, empleadoId = null) {
@@ -2323,11 +2642,45 @@ export function streamSedes(onData, onError = null, onStatus = null) {
   return streamTable('sedes', mapSedeRow, onData, { onError, onStatus });
 }
 
+export async function listQrDevices() {
+  const [devices, sites] = await Promise.all([
+    selectAllRows('sede_devices', { select: 'id,sede_codigo,sede_nombre,device_name,estado,last_seen_at,revoked_at,revoked_by_email,created_at,created_by_email,last_modified_at,last_modified_by_email', order: 'created_at', ascending: false }),
+    selectAllRows('sede_device_sites', { select: 'device_id,sede_codigo,sede_nombre', order: 'sede_nombre', ascending: true })
+  ]);
+  const sitesByDevice = new Map();
+  (sites || []).forEach((site) => {
+    const deviceId = String(site?.device_id || '').trim();
+    if (!deviceId) return;
+    if (!sitesByDevice.has(deviceId)) sitesByDevice.set(deviceId, []);
+    sitesByDevice.get(deviceId).push(site);
+  });
+  return (devices || []).map((row) => mapQrDeviceRow(row, sitesByDevice.get(String(row?.id || '').trim()) || []));
+}
+
+export function streamQrDevices(onData, onError = null, onStatus = null) {
+  let active = true;
+  listQrDevices()
+    .then((devices) => {
+      if (!active) return;
+      onData(devices);
+      onStatus?.('LOADED', null);
+    })
+    .catch((error) => {
+      if (!active) return;
+      console.error('No se pudo cargar tablets QR:', error);
+      onError?.(error, 'LOAD_ERROR');
+      onData([]);
+    });
+  return () => {
+    active = false;
+  };
+}
+
 export async function getNextSedeCode(prefix = 'SED', width = 4) {
   return getNextPrefixedCode('sedes', prefix, width);
 }
 
-export async function createSede({ codigo, nombre, dependenciaCodigo, dependenciaNombre, zonaCodigo, zonaNombre, numeroOperarios, jornada }) {
+export async function createSede({ codigo, nombre, dependenciaCodigo, dependenciaNombre, zonaCodigo, zonaNombre, numeroOperarios, jornada, qrEnabled = false, qrLatitude = null, qrLongitude = null, qrRadiusMeters = 500 }) {
   const audit = await getCurrentAuditFields();
   const { data, error } = await supabase
     .from('sedes')
@@ -2340,6 +2693,10 @@ export async function createSede({ codigo, nombre, dependenciaCodigo, dependenci
       zona_nombre: zonaNombre || null,
       numero_operarios: typeof numeroOperarios === 'number' ? numeroOperarios : null,
       jornada: jornada || 'lun_vie',
+      qr_enabled: qrEnabled === true,
+      qr_latitude: typeof qrLatitude === 'number' && Number.isFinite(qrLatitude) ? qrLatitude : null,
+      qr_longitude: typeof qrLongitude === 'number' && Number.isFinite(qrLongitude) ? qrLongitude : null,
+      qr_radius_meters: typeof qrRadiusMeters === 'number' && Number.isFinite(qrRadiusMeters) ? qrRadiusMeters : 500,
       estado: 'activo',
       ...audit
     })
@@ -2370,7 +2727,7 @@ export async function createSedesBulk(rows = []) {
   return { created };
 }
 
-export async function updateSede(id, { codigo, nombre, dependenciaCodigo, dependenciaNombre, zonaCodigo, zonaNombre, numeroOperarios, jornada }) {
+export async function updateSede(id, { codigo, nombre, dependenciaCodigo, dependenciaNombre, zonaCodigo, zonaNombre, numeroOperarios, jornada, qrEnabled, qrLatitude, qrLongitude, qrRadiusMeters }) {
   const patch = {};
   if (typeof codigo === 'string') patch.codigo = codigo;
   if (typeof nombre === 'string') patch.nombre = nombre;
@@ -2380,6 +2737,10 @@ export async function updateSede(id, { codigo, nombre, dependenciaCodigo, depend
   if (typeof zonaNombre === 'string') patch.zona_nombre = zonaNombre;
   if (typeof numeroOperarios === 'number') patch.numero_operarios = numeroOperarios;
   if (typeof jornada === 'string') patch.jornada = jornada;
+  if (typeof qrEnabled === 'boolean') patch.qr_enabled = qrEnabled;
+  if (qrLatitude !== undefined) patch.qr_latitude = typeof qrLatitude === 'number' && Number.isFinite(qrLatitude) ? qrLatitude : null;
+  if (qrLongitude !== undefined) patch.qr_longitude = typeof qrLongitude === 'number' && Number.isFinite(qrLongitude) ? qrLongitude : null;
+  if (typeof qrRadiusMeters === 'number' && Number.isFinite(qrRadiusMeters)) patch.qr_radius_meters = qrRadiusMeters;
   const { error } = await supabase.from('sedes').update(patch).eq('id', id);
   if (error) throw error;
   await notifyTableReload('sedes');
@@ -2389,6 +2750,243 @@ export async function setSedeStatus(id, estado) {
   const { error } = await supabase.from('sedes').update({ estado }).eq('id', id);
   if (error) throw error;
   await notifyTableReload('sedes');
+}
+
+function backendApiBase() {
+  return String(EMPLOYEE_PORTAL_API_BASE || '').replace(/\/+$/, '');
+}
+
+async function getAccessToken() {
+  const { data, error } = await supabase.auth.getSession();
+  if (error) throw error;
+  const token = String(data?.session?.access_token || '').trim();
+  if (!token) throw new Error('Debes iniciar sesion nuevamente.');
+  return token;
+}
+
+async function backendJson(path, { method = 'GET', body = null, headers = {} } = {}) {
+  const base = backendApiBase();
+  if (!base) throw new Error('Configura EMPLOYEE_PORTAL_API_BASE para usar el backend.');
+  const response = await fetch(`${base}${path}`, {
+    method,
+    headers: {
+      'Content-Type': 'application/json',
+      ...headers
+    },
+    body: body ? JSON.stringify(body) : null
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok || payload?.ok === false) throw new Error(payload?.error || `Error backend ${response.status}`);
+  return payload;
+}
+
+export async function createQrDevice({ sedeCodigo, sedeCodigos = [], deviceName }) {
+  const token = await getAccessToken();
+  const result = await backendJson('/api/attendance-qr/devices', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}` },
+    body: { sedeCodigo, sedeCodigos, deviceName }
+  });
+  await Promise.all([
+    notifyTableReload('sede_devices'),
+    notifyTableReload('sede_device_sites')
+  ]);
+  return result;
+}
+
+export async function setQrDeviceStatus(deviceId, estado) {
+  const id = String(deviceId || '').trim();
+  const nextStatus = String(estado || '').trim().toLowerCase();
+  if (!id) throw new Error('Selecciona una tablet QR.');
+  if (!['activo', 'inactivo'].includes(nextStatus)) throw new Error('Estado de tablet invalido.');
+  const token = await getAccessToken();
+  const result = await backendJson(`/api/attendance-qr/devices/${encodeURIComponent(id)}/status`, {
+    method: 'PATCH',
+    headers: { Authorization: `Bearer ${token}` },
+    body: { estado: nextStatus }
+  });
+  await notifyTableReload('sede_devices');
+  return result;
+}
+
+export async function scanAttendanceQr({ qrValue, deviceToken }) {
+  return backendJson('/api/attendance-qr/scan', {
+    method: 'POST',
+    headers: { 'X-QR-Device-Token': deviceToken },
+    body: { qrValue }
+  });
+}
+
+export async function listDailyQrRecords(date) {
+  const token = await getAccessToken();
+  const day = String(date || '').trim();
+  const query = day ? `?date=${encodeURIComponent(day)}` : '';
+  const payload = await backendJson(`/api/attendance-qr/daily${query}`, {
+    headers: { Authorization: `Bearer ${token}` }
+  });
+  return {
+    rows: payload?.rows || [],
+    pendingRows: payload?.pendingRows || []
+  };
+}
+
+export function streamDailyQrRecords(date, onData, onError = null, onStatus = null) {
+  const day = String(date || '').trim();
+  if (!day) {
+    onData({ rows: [], pendingRows: [] });
+    return () => {};
+  }
+  let active = true;
+  let loading = false;
+  let queued = false;
+  let scopeReady = false;
+  let scopedEmployeeIds = new Set();
+  let scopedDocuments = new Set();
+  let scopedSedeCodes = new Set();
+  const updateScope = (summary = {}) => {
+    const rows = [
+      ...(Array.isArray(summary?.rows) ? summary.rows : []),
+      ...(Array.isArray(summary?.pendingRows) ? summary.pendingRows : [])
+    ];
+    scopedEmployeeIds = new Set(rows.map((row) => String(row?.employeeId || row?.employee_id || '').trim()).filter(Boolean));
+    scopedDocuments = new Set(rows.map((row) => String(row?.documento || '').trim()).filter(Boolean));
+    scopedSedeCodes = new Set(rows.map((row) => String(row?.sedeCodigo || row?.sede_codigo || '').trim()).filter(Boolean));
+    scopeReady = true;
+  };
+  const payloadRows = (payload = {}) => [payload?.new || null, payload?.old || null].filter(Boolean);
+  const payloadHasAny = (payload = {}, fields = []) => payloadRows(payload).some((row) => fields.some((field) => String(row?.[field] || '').trim()));
+  const payloadMatchesEmployeeScope = (payload = {}, idFields = ['id', 'employee_id', 'empleado_id'], documentFields = ['documento']) => {
+    if (!scopeReady) return true;
+    return payloadRows(payload).some((row) => (
+      idFields.some((field) => scopedEmployeeIds.has(String(row?.[field] || '').trim()))
+      || documentFields.some((field) => scopedDocuments.has(String(row?.[field] || '').trim()))
+    ));
+  };
+  const payloadMatchesSedeScope = (payload = {}) => {
+    if (!scopeReady) return true;
+    return payloadRows(payload).some((row) => (
+      scopedSedeCodes.has(String(row?.codigo || row?.sede_codigo || '').trim())
+      || row?.qr_enabled === true
+    ));
+  };
+  const emit = async () => {
+    if (!active) return;
+    if (loading) {
+      queued = true;
+      return;
+    }
+    loading = true;
+    try {
+      do {
+        queued = false;
+        try {
+          const summary = await listDailyQrRecords(day);
+          if (!active) return;
+          updateScope(summary || {});
+          onData(summary || { rows: [], pendingRows: [] });
+        } catch (error) {
+          if (!active) return;
+          console.error('No se pudo cargar registro diario QR:', error);
+          onError?.(error, 'LOAD_ERROR');
+          onData({ rows: [], pendingRows: [] });
+        }
+      } while (active && queued);
+    } finally {
+      loading = false;
+    }
+  };
+  const onTokenChange = (payload) => {
+    if (!shouldRefreshForDay(payload, day, 'fecha')) return;
+    emit();
+  };
+  const onExitChange = (payload) => {
+    if (!shouldRefreshForDay(payload, day, 'fecha')) return;
+    emit();
+  };
+  const onStatusChange = (payload) => {
+    if (!shouldRefreshForDay(payload, day, 'fecha')) return;
+    emit();
+  };
+  const onAttendanceChange = (payload) => {
+    if (!shouldRefreshForDay(payload, day, 'fecha')) return;
+    emit();
+  };
+  const onEmployeeChange = (payload) => {
+    const hasIdentity = payloadHasAny(payload, ['id', 'employee_id', 'empleado_id', 'documento']);
+    if (hasIdentity && !payloadMatchesEmployeeScope(payload)) return;
+    emit();
+  };
+  const onSedeChange = (payload) => {
+    const hasIdentity = payloadHasAny(payload, ['codigo', 'sede_codigo']);
+    if (hasIdentity && !payloadMatchesSedeScope(payload)) return;
+    emit();
+  };
+  const onIncapacityChange = (payload) => {
+    if (!shouldRefreshForDateRange(payload, day, 'fecha_inicio', 'fecha_fin')) return;
+    const hasIdentity = payloadHasAny(payload, ['employee_id', 'empleado_id', 'documento']);
+    if (hasIdentity && !payloadMatchesEmployeeScope(payload, ['employee_id', 'empleado_id'], ['documento'])) return;
+    emit();
+  };
+  emit();
+  const unTokens = registerTableReloader('attendance_qr_tokens', emit);
+  const unExits = registerTableReloader('employee_daily_exits', emit);
+  const unDailyStatus = registerTableReloader('employee_daily_status', emit);
+  const unAttendance = registerTableReloader('attendance', emit);
+  const unEmployees = registerTableReloader('employees', emit);
+  const unSedes = registerTableReloader('sedes', emit);
+  const unIncapacities = registerTableReloader('incapacitados', emit);
+  const tokenRealtime = subscribeToRealtime(
+    supabase.channel(nextRealtimeChannelName(`attendance-qr-tokens-${day}`)).on('postgres_changes', { event: '*', schema: 'public', table: 'attendance_qr_tokens', filter: `fecha=eq.${day}` }, onTokenChange),
+    { label: `attendance_qr_tokens:${day}`, onError, onStatus }
+  );
+  const exitRealtime = subscribeToRealtime(
+    supabase.channel(nextRealtimeChannelName(`employee-daily-exits-${day}`)).on('postgres_changes', { event: '*', schema: 'public', table: 'employee_daily_exits', filter: `fecha=eq.${day}` }, onExitChange),
+    { label: `employee_daily_exits:${day}`, onError, onStatus }
+  );
+  const employeeRealtime = subscribeToRealtime(
+    supabase.channel(nextRealtimeChannelName(`employees-qr-daily-${day}`)).on('postgres_changes', { event: '*', schema: 'public', table: 'employees' }, onEmployeeChange),
+    { label: `employees:qr_daily:${day}`, onError, onStatus }
+  );
+  const dailyStatusRealtime = subscribeToRealtime(
+    supabase.channel(nextRealtimeChannelName(`employee-daily-status-qr-${day}`)).on('postgres_changes', { event: '*', schema: 'public', table: 'employee_daily_status', filter: `fecha=eq.${day}` }, onStatusChange),
+    { label: `employee_daily_status:qr_daily:${day}`, onError, onStatus }
+  );
+  const attendanceRealtime = subscribeToRealtime(
+    supabase.channel(nextRealtimeChannelName(`attendance-qr-daily-${day}`)).on('postgres_changes', { event: '*', schema: 'public', table: 'attendance', filter: `fecha=eq.${day}` }, onAttendanceChange),
+    { label: `attendance:qr_daily:${day}`, onError, onStatus }
+  );
+  const sedesRealtime = subscribeToRealtime(
+    supabase.channel(nextRealtimeChannelName(`sedes-qr-daily-${day}`)).on('postgres_changes', { event: '*', schema: 'public', table: 'sedes' }, onSedeChange),
+    { label: `sedes:qr_daily:${day}`, onError, onStatus }
+  );
+  const incapacitiesRealtime = subscribeToRealtime(
+    supabase.channel(nextRealtimeChannelName(`incapacitados-qr-daily-${day}`)).on('postgres_changes', { event: '*', schema: 'public', table: 'incapacitados' }, onIncapacityChange),
+    { label: `incapacitados:qr_daily:${day}`, onError, onStatus }
+  );
+  return () => {
+    active = false;
+    unTokens();
+    unExits();
+    unDailyStatus();
+    unAttendance();
+    unEmployees();
+    unSedes();
+    unIncapacities();
+    tokenRealtime.cancel();
+    exitRealtime.cancel();
+    employeeRealtime.cancel();
+    dailyStatusRealtime.cancel();
+    attendanceRealtime.cancel();
+    sedesRealtime.cancel();
+    incapacitiesRealtime.cancel();
+    supabase.removeChannel(tokenRealtime.subscription);
+    supabase.removeChannel(exitRealtime.subscription);
+    supabase.removeChannel(employeeRealtime.subscription);
+    supabase.removeChannel(dailyStatusRealtime.subscription);
+    supabase.removeChannel(attendanceRealtime.subscription);
+    supabase.removeChannel(sedesRealtime.subscription);
+    supabase.removeChannel(incapacitiesRealtime.subscription);
+  };
 }
 
 export async function findSedeByCode(codigo) {
@@ -2723,6 +3321,8 @@ export async function updateEmployee(id, data = {}) {
   const nextSede = typeof patch.sede_codigo === 'string' ? String(patch.sede_codigo || '').trim() : currentSede;
   const nextCargoCodigo = typeof patch.cargo_codigo === 'string' ? String(patch.cargo_codigo || '').trim() : currentCargoCodigo;
   const nextIngresoPreview = patch.fecha_ingreso !== undefined ? toISODate(patch.fecha_ingreso) : currentIngreso;
+  const nextRetiroPreview = patch.fecha_retiro !== undefined ? toISODate(patch.fecha_retiro) : currentRetiro;
+  validateEmployeeDateRange(nextIngresoPreview, nextRetiroPreview);
   const sedeChangedPreview = nextSede !== currentSede;
   const cargoChangedPreview = nextCargoCodigo !== currentCargoCodigo;
   const assignmentIngresoPreview = toISODate(
@@ -2743,6 +3343,9 @@ export async function updateEmployee(id, data = {}) {
   }
   if (sedeChangedPreview && assignmentIngresoPreview && assignmentIngresoPreview < todayBogotaISO()) {
     throw new Error(`La fecha de inicio en nueva sede no puede ser anterior a hoy (${todayBogotaISO()}).`);
+  }
+  if (sedeChangedPreview && assignmentIngresoPreview === todayBogotaISO()) {
+    await assertNoEmployeeAttendanceTodayBeforeSedeTransfer(currentRow, assignmentIngresoPreview, currentSede);
   }
   if (sedeChangedPreview && !cargoChangedPreview && patch.fecha_ingreso !== undefined && nextIngresoPreview !== currentIngreso) {
     patch.fecha_ingreso = currentRow.fecha_ingreso || null;
@@ -2781,19 +3384,35 @@ export async function updateEmployee(id, data = {}) {
     if (!toISODate(historyIngreso) || !toISODate(historyRetiro)) {
       throw new Error('Debes seleccionar la fecha fin de la asignacion anterior y la fecha inicio de la nueva asignacion.');
     }
-    await closeActiveEmployeeHistory(updated.id, historyRetiro, false);
-    await appendEmployeeCargoHistory({
-      employeeId: updated.id,
-      employeeCodigo: updated.codigo,
-      documento: updated.documento,
-      cargoCodigo: updated.cargo_codigo,
-      cargoNombre: updated.cargo_nombre,
-      sedeCodigo: updated.sede_codigo,
-      sedeNombre: updated.sede_nombre,
-      fechaIngreso: historyIngreso,
-      fechaRetiro: null,
-      source: sedeChanged ? 'sede_change' : (cargoChanged ? 'cargo_change' : 'employee_update')
-    });
+    const historyIngresoIso = toISODate(historyIngreso);
+    const mergedIntoProgrammedHistory = historyIngresoIso > todayBogotaISO()
+      ? await patchProgrammedEmployeeHistory(updated.id, historyIngreso, {
+        employee_codigo: updated.codigo || null,
+        documento: updated.documento || null,
+        cargo_codigo: updated.cargo_codigo || null,
+        cargo_nombre: updated.cargo_nombre || null,
+        sede_codigo: updated.sede_codigo || null,
+        sede_nombre: updated.sede_nombre || null,
+        source: 'scheduled_assignment_update'
+      }, false)
+      : false;
+    if (!mergedIntoProgrammedHistory) {
+      await closeActiveEmployeeHistory(updated.id, historyRetiro, false);
+      await appendEmployeeCargoHistory({
+        employeeId: updated.id,
+        employeeCodigo: updated.codigo,
+        documento: updated.documento,
+        cargoCodigo: updated.cargo_codigo,
+        cargoNombre: updated.cargo_nombre,
+        sedeCodigo: updated.sede_codigo,
+        sedeNombre: updated.sede_nombre,
+        fechaIngreso: historyIngreso,
+        fechaRetiro: null,
+        source: sedeChanged ? 'sede_change' : (cargoChanged ? 'cargo_change' : 'employee_update')
+      });
+    } else {
+      await notifyTableReload('employee_cargo_history');
+    }
   } else {
     await patchActiveEmployeeHistory(updated.id, {
       employee_codigo: updated.codigo || null,
@@ -2841,6 +3460,7 @@ export async function setEmployeeStatus(id, estado, options = null) {
     patch.fecha_ingreso = fechaIngreso || new Date().toISOString();
     patch.fecha_retiro = null;
   }
+  validateEmployeeDateRange(patch.fecha_ingreso !== undefined ? patch.fecha_ingreso : currentRow.fecha_ingreso, patch.fecha_retiro);
   const { data, error } = await supabase.from('employees').update(patch).eq('id', id).select('*').single();
   if (error) throw error;
   const previousEstado = String(currentRow.estado || '').trim().toLowerCase();

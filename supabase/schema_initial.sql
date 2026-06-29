@@ -1,11 +1,18 @@
-create type public.app_role as enum (
-  'superadmin',
-  'admin',
-  'editor',
-  'consultor',
-  'supervisor',
-  'empleado'
-);
+do $$
+begin
+  create type public.app_role as enum (
+    'superadmin',
+    'admin',
+    'editor',
+    'consultor',
+    'supervisor',
+    'tablet_qr',
+    'empleado'
+  );
+exception
+  when duplicate_object then null;
+end
+$$;
 
 create table if not exists public.profiles (
   id uuid primary key references auth.users(id) on delete cascade,
@@ -145,5 +152,6 @@ values
   ('editor', '{}'::jsonb),
   ('consultor', '{}'::jsonb),
   ('supervisor', '{}'::jsonb),
+  ('tablet_qr', '{"viewQrScanner": true}'::jsonb),
   ('empleado', '{}'::jsonb)
 on conflict (role) do nothing;

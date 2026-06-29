@@ -1,16 +1,21 @@
 import { el, qs } from '../utils/dom.js';
 import { showInfoModal } from '../utils/infoModal.js';
 import { createTablePagination } from '../utils/pagination.js';
+import { showActionModal } from '../utils/actionModal.js';
+import { can, PERMS } from '../permissions.js';
 
 const ACTIONS = {
   create_employee: { type: 'create', label: 'Creacion' },
   transfer_employee: { type: 'transfer', label: 'Traslado' },
   change_employee_cargo: { type: 'cargo', label: 'Cambio de cargo' },
-  retire_employee: { type: 'retire', label: 'Retiro' }
+  retire_employee: { type: 'retire', label: 'Retiro' },
+  update_programmed_employee_assignment: { type: 'schedule', label: 'Programacion actualizada' },
+  cancel_programmed_employee_assignment: { type: 'schedule', label: 'Programacion cancelada' }
 };
 
 export const EmployeeNovelties = (mount, deps = {}) => {
   const today = todayBogota();
+  const canManageSchedules = can(PERMS.MANAGE_EMPLOYEE_SCHEDULES);
   const ui = el('section', { className: 'main-card' }, [
     el('h2', {}, ['Novedades de empleados']),
     el('p', { className: 'text-muted' }, ['Consulta altas, traslados, cambios de cargo y retiros registrados desde el modulo de empleados.']),
@@ -30,6 +35,7 @@ export const EmployeeNovelties = (mount, deps = {}) => {
           el('option', { value: 'create' }, ['Creacion']),
           el('option', { value: 'transfer' }, ['Traslado']),
           el('option', { value: 'cargo' }, ['Cambio de cargo']),
+          el('option', { value: 'schedule' }, ['Programacion']),
           el('option', { value: 'retire' }, ['Retiro'])
         ])
       ]),
@@ -68,6 +74,7 @@ export const EmployeeNovelties = (mount, deps = {}) => {
   let historyRows = [];
   let employees = [];
   let sedes = [];
+  let cargos = [];
   let sortKey = 'date';
   let sortDir = -1;
 
@@ -107,6 +114,10 @@ export const EmployeeNovelties = (mount, deps = {}) => {
     sedes = rows || [];
     render();
   }) || (() => {});
+  const unCargos = deps.streamCargos?.((rows) => {
+    cargos = rows || [];
+    render();
+  }) || (() => {});
 
   render();
 
@@ -115,6 +126,7 @@ export const EmployeeNovelties = (mount, deps = {}) => {
     unHistory?.();
     unEmployees?.();
     unSedes?.();
+    unCargos?.();
   };
 
   function render() {
@@ -139,9 +151,8 @@ export const EmployeeNovelties = (mount, deps = {}) => {
       ...history,
       ...audit.filter((row) => !hasMatchingHistoryNovelty(row, history))
     ]
-      .filter((row) => !from || row.date >= from)
-      .filter((row) => !to || row.date <= to)
-      .filter((row) => !type || row.type === type)
+      .filter((row) => isDateVisible(row, from, to))
+      .filter((row) => isTypeVisible(row, type))
       .filter((row) => {
         if (!term) return true;
         return [
@@ -156,6 +167,21 @@ export const EmployeeNovelties = (mount, deps = {}) => {
       });
 
     return sortRows(rows);
+  }
+
+  function isDateVisible(row, from, to) {
+    if (isPendingFutureProgram(row)) return true;
+    return (!from || row.date >= from) && (!to || row.date <= to);
+  }
+
+  function isTypeVisible(row, type) {
+    if (!type) return true;
+    if (type === 'schedule') return row.type === 'schedule' || isPendingFutureProgram(row);
+    return row.type === type;
+  }
+
+  function isPendingFutureProgram(row = {}) {
+    return row.source === 'history' && row.isProgrammed === true;
   }
 
   function normalizeAuditRow(row) {
@@ -216,7 +242,10 @@ export const EmployeeNovelties = (mount, deps = {}) => {
           note: sourceLabel(item.source),
           before: index > 0 ? historyAssignmentData(ordered[index - 1]) : {},
           after: historyAssignmentData(item),
-          employee
+          employee,
+          historyItem: item,
+          previousHistoryItem: index > 0 ? ordered[index - 1] : null,
+          isProgrammed: isProgrammedHistoryRow(item)
         };
         if (index === 0) {
           rows.push({
@@ -291,6 +320,12 @@ export const EmployeeNovelties = (mount, deps = {}) => {
         toLabel: `Retiro ${formatDate(row.after?.fechaRetiro) || ''}`.trim()
       };
     }
+    if (row.type === 'schedule') {
+      return {
+        fromLabel: assignmentLabel(row.before),
+        toLabel: assignmentLabel(row.after)
+      };
+    }
     return { fromLabel: '-', toLabel: '-' };
   }
 
@@ -310,7 +345,96 @@ export const EmployeeNovelties = (mount, deps = {}) => {
   function actionsCell(row) {
     const btnInfo = el('button', { className: 'btn btn--icon', type: 'button', title: 'Ver informacion', 'aria-label': 'Ver informacion' }, ['\u24D8']);
     btnInfo.addEventListener('click', () => showInfo(row));
-    return el('div', { className: 'row-actions' }, [btnInfo]);
+    const actions = [];
+    if (canManageSchedules && row.source === 'history' && row.isProgrammed && row.previousHistoryItem) {
+      const btnEdit = el('button', { className: 'btn btn--icon', type: 'button', title: 'Editar programacion', 'aria-label': 'Editar programacion' }, ['\u270E']);
+      btnEdit.addEventListener('click', () => editProgrammedAssignment(row));
+      const btnCancel = el('button', { className: 'btn btn--icon btn--danger', type: 'button', title: 'Cancelar programacion', 'aria-label': 'Cancelar programacion' }, ['\u2716']);
+      btnCancel.addEventListener('click', () => cancelProgrammedAssignment(row));
+      actions.push(btnEdit, btnCancel);
+    }
+    actions.push(btnInfo);
+    return el('div', { className: 'row-actions' }, actions);
+  }
+
+  async function editProgrammedAssignment(row) {
+    const item = row.historyItem || {};
+    const modal = await showActionModal({
+      title: 'Editar programacion',
+      message: `Empleado: ${row.nombre || '-'} - inicio actual ${formatDate(item.fechaIngreso)}`,
+      confirmText: 'Guardar programacion',
+      fields: [
+        { id: 'cargo', label: 'Cargo programado', type: 'select', required: true, value: item.cargoCodigo || '', options: cargoOptions(item.cargoCodigo) },
+        { id: 'sede', label: 'Sede programada', type: 'select', required: true, value: item.sedeCodigo || '', options: sedeOptions(item.sedeCodigo) },
+        { id: 'fechaIngreso', label: 'Fecha inicio', type: 'date', required: true, min: addDaysToInputDate(today, 1), value: toInputDate(item.fechaIngreso) },
+        { id: 'detail', label: 'Detalle', type: 'textarea', required: true, placeholder: 'Describe la correccion de la programacion' }
+      ]
+    });
+    if (!modal.confirmed) return;
+    const fechaIngreso = String(modal.values.fechaIngreso || '').trim();
+    const cargoCodigo = String(modal.values.cargo || '').trim();
+    const sedeCodigo = String(modal.values.sede || '').trim();
+    if (!validInputDate(fechaIngreso)) return alert('Fecha invalida. Usa formato AAAA-MM-DD.');
+    if (fechaIngreso <= today) return alert('Solo puedes editar programaciones con inicio posterior a hoy.');
+    const cargo = cargos.find((entry) => String(entry?.codigo || '').trim() === cargoCodigo) || null;
+    const sede = sedes.find((entry) => String(entry?.codigo || '').trim() === sedeCodigo) || null;
+    try {
+      await deps.updateProgrammedEmployeeAssignment?.(item.id, {
+        cargoCodigo,
+        cargoNombre: cargo?.nombre || null,
+        sedeCodigo,
+        sedeNombre: sede?.nombre || null,
+        fechaIngreso
+      });
+      await deps.addAuditLog?.({
+        targetType: 'employee',
+        targetId: row.employee?.id || item.employeeId || null,
+        action: 'update_programmed_employee_assignment',
+        before: historyAssignmentData(item),
+        after: {
+          cargoCodigo,
+          cargoNombre: cargo?.nombre || null,
+          sedeCodigo,
+          sedeNombre: sede?.nombre || null,
+          fechaIngreso,
+          fechaRetiro: null
+        },
+        note: modal.values.detail || null
+      });
+      alert('Programacion actualizada.');
+    } catch (error) {
+      alert('Error: ' + (error?.message || error));
+    }
+  }
+
+  async function cancelProgrammedAssignment(row) {
+    const item = row.historyItem || {};
+    const previous = row.previousHistoryItem || {};
+    const modal = await showActionModal({
+      title: 'Cancelar programacion',
+      message: `Se cancelara el cambio futuro de ${row.nombre || '-'} y se restaurara: ${assignmentLabel(previous)}.`,
+      confirmText: 'Cancelar programacion',
+      fields: [
+        { id: 'currentProgram', label: 'Programacion actual', type: 'text', readonly: true, value: `${assignmentLabel(item)} desde ${formatDate(item.fechaIngreso)}` },
+        { id: 'restoreTo', label: 'Se restaura', type: 'text', readonly: true, value: assignmentLabel(previous) },
+        { id: 'detail', label: 'Detalle', type: 'textarea', required: true, placeholder: 'Describe el motivo de la cancelacion' }
+      ]
+    });
+    if (!modal.confirmed) return;
+    try {
+      await deps.cancelProgrammedEmployeeAssignment?.(item.id);
+      await deps.addAuditLog?.({
+        targetType: 'employee',
+        targetId: row.employee?.id || item.employeeId || null,
+        action: 'cancel_programmed_employee_assignment',
+        before: historyAssignmentData(item),
+        after: historyAssignmentData(previous),
+        note: modal.values.detail || null
+      });
+      alert('Programacion cancelada.');
+    } catch (error) {
+      alert('Error: ' + (error?.message || error));
+    }
   }
 
   function showInfo(row) {
@@ -374,7 +498,9 @@ export const EmployeeNovelties = (mount, deps = {}) => {
 
   function effectiveAuditDate(row, type) {
     const after = row?.after || {};
+    const before = row?.before || {};
     if (type === 'transfer' || type === 'cargo') return toInputDate(after.assignmentFechaIngreso || row?.ts);
+    if (type === 'schedule') return toInputDate(after.fechaIngreso || before.fechaIngreso || row?.ts);
     if (type === 'retire') return toInputDate(after.fechaRetiro || row?.ts);
     return toInputDate(row?.ts);
   }
@@ -399,6 +525,7 @@ export const EmployeeNovelties = (mount, deps = {}) => {
       bulk_create_employee: 'Cargue masivo',
       sede_change: 'Cambio de sede',
       cargo_change: 'Cambio de cargo',
+      scheduled_assignment_update: 'Actualizacion programada',
       employee_update: 'Actualizacion de empleado',
       reactivate_employee: 'Reactivacion de empleado'
     };
@@ -414,6 +541,33 @@ export const EmployeeNovelties = (mount, deps = {}) => {
     const rawCode = String(code || '').trim();
     const sede = sedes.find((item) => rawCode && String(item?.codigo || '').trim() === rawCode) || null;
     return String(name || sede?.nombre || rawCode || '-').trim() || '-';
+  }
+
+  function isProgrammedHistoryRow(row = {}) {
+    const ingreso = toInputDate(row?.fechaIngreso);
+    return Boolean(ingreso && ingreso > today && !row?.fechaRetiro);
+  }
+
+  function sedeOptions(selectedCode = '') {
+    const current = String(selectedCode || '').trim();
+    const active = (sedes || []).filter((item) => String(item?.estado || 'activo').trim().toLowerCase() !== 'inactivo');
+    const hasCurrent = active.some((item) => String(item?.codigo || '').trim() === current);
+    const rows = hasCurrent || !current ? active : [...active, { codigo: current, nombre: sedeLabel(current) }];
+    return rows.map((item) => ({
+      value: item.codigo || '',
+      label: `${item.codigo || ''} - ${item.nombre || ''}`.trim()
+    }));
+  }
+
+  function cargoOptions(selectedCode = '') {
+    const current = String(selectedCode || '').trim();
+    const active = (cargos || []).filter((item) => String(item?.estado || 'activo').trim().toLowerCase() !== 'inactivo');
+    const hasCurrent = active.some((item) => String(item?.codigo || '').trim() === current);
+    const rows = hasCurrent || !current ? active : [...active, { codigo: current, nombre: current }];
+    return rows.map((item) => ({
+      value: item.codigo || '',
+      label: `${item.codigo || ''} - ${item.nombre || ''}`.trim()
+    }));
   }
 
   function sortRows(rows) {
@@ -445,6 +599,7 @@ function typeBadge(type, label) {
     create: 'badge--ok',
     transfer: '',
     cargo: '',
+    schedule: '',
     retire: 'badge--off'
   };
   return el('span', { className: `badge ${map[type] || ''}` }, [label || '-']);
@@ -452,6 +607,10 @@ function typeBadge(type, label) {
 
 function toInputDate(value) {
   try {
+    if (typeof value === 'string') {
+      const raw = value.trim();
+      if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw;
+    }
     const date = value ? new Date(value) : null;
     if (!date || Number.isNaN(date.getTime())) return '';
     const pad = (n) => String(n).padStart(2, '0');
@@ -468,6 +627,7 @@ function formatDate(value) {
 
 function formatDateTime(value) {
   try {
+    if (typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value.trim())) return value.trim();
     const date = value ? new Date(value) : null;
     return date && !Number.isNaN(date.getTime()) ? date.toLocaleString() : '-';
   } catch (_) {
@@ -477,4 +637,22 @@ function formatDateTime(value) {
 
 function todayBogota() {
   return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Bogota' }).format(new Date());
+}
+
+function validInputDate(value) {
+  const raw = String(value || '').trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(raw)) return false;
+  return !Number.isNaN(new Date(`${raw}T00:00:00`).getTime());
+}
+
+function addDaysToInputDate(value, days = 1) {
+  const raw = String(value || '').trim();
+  if (!validInputDate(raw)) return '';
+  const [year, month, day] = raw.split('-').map((part) => Number(part));
+  const date = new Date(Date.UTC(year, (month || 1) - 1, day || 1));
+  date.setUTCDate(date.getUTCDate() + Number(days || 0));
+  const y = date.getUTCFullYear();
+  const m = String(date.getUTCMonth() + 1).padStart(2, '0');
+  const d = String(date.getUTCDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
 }

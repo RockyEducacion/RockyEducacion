@@ -1,6 +1,7 @@
 ﻿
 import crypto from 'node:crypto';
 import express from 'express';
+import QRCode from 'qrcode';
 import { config } from './config.js';
 import { registerEmployeePortalRoutes } from './employee-portal.js';
 import { supabaseAdmin } from './supabase.js';
@@ -20,6 +21,8 @@ const SESSION = {
   AWAITING_ACTION: 'awaiting_action',
   AWAITING_WORKING_SEDE_KEYWORD: 'awaiting_working_sede_keyword',
   AWAITING_WORKING_SEDE_SELECTION: 'awaiting_working_sede_selection',
+  AWAITING_QR_ATTENDANCE_ACTION: 'awaiting_qr_attendance_action',
+  AWAITING_QR_LOCATION: 'awaiting_qr_location',
   AWAITING_UPDATE_ACTION: 'awaiting_update_action',
   AWAITING_TRANSFER_KEYWORD: 'awaiting_transfer_keyword',
   AWAITING_TRANSFER_SELECTION: 'awaiting_transfer_selection',
@@ -48,6 +51,8 @@ const MENU_IDS = {
   ACTION_WORKING: 'action_working',
   ACTION_COMPENSATORY: 'action_compensatory',
   ACTION_NOVELTY: 'action_novelty',
+  QR_ENTRY: 'qr_entry',
+  QR_EXIT: 'qr_exit',
   UPDATE_TRANSFER: 'update_transfer',
   UPDATE_PHONE: 'update_phone',
   NOVELTY_SICKNESS: 'novelty_3',
@@ -66,6 +71,7 @@ app.get('/health', (_req, res) => {
 });
 
 registerEmployeePortalRoutes(app);
+registerAttendanceQrRoutes(app);
 
 app.get(['/cron/close-daily-operation', '/api/cron/close-daily-operation'], async (req, res) => {
   try {
@@ -112,6 +118,7 @@ app.post('/webhooks/whatsapp', async (req, res) => {
         await markIncomingProcessed(incomingId, 'processed', null);
       } catch (error) {
         console.error('Error procesando mensaje WhatsApp:', error);
+        await notifyProcessingError(message, error);
         await markIncomingProcessed(incomingId, 'failed', error.message || 'processing_failed');
       }
     }
@@ -122,6 +129,215 @@ app.post('/webhooks/whatsapp', async (req, res) => {
     res.status(500).json({ ok: false, error: 'internal_error' });
   }
 });
+
+function registerAttendanceQrRoutes(appInstance) {
+  appInstance.use([
+    '/attendance-qr/devices',
+    '/api/attendance-qr/devices',
+    '/attendance-qr/daily',
+    '/api/attendance-qr/daily',
+    '/attendance-qr/scan',
+    '/api/attendance-qr/scan'
+  ], (req, res, next) => {
+    attendanceQrCors(req, res);
+    if (req.method === 'OPTIONS') return res.status(204).end();
+    return next();
+  });
+
+  appInstance.post(['/attendance-qr/devices', '/api/attendance-qr/devices'], async (req, res) => {
+    try {
+      const profile = await requireAdminQrUser(req);
+      const requestedSedeCodigo = String(req.body?.sedeCodigo || '').trim();
+      const selectedSedeCodigos = normalizeSedeCodeList(req.body?.sedeCodigos);
+      const sedeCodigos = selectedSedeCodigos.length ? selectedSedeCodigos : normalizeSedeCodeList(null, requestedSedeCodigo);
+      const deviceName = String(req.body?.deviceName || '').trim();
+      if (!sedeCodigos.length) return sendQrJson(res, 400, { ok: false, error: 'Selecciona al menos una sede.' });
+      if (!deviceName) return sendQrJson(res, 400, { ok: false, error: 'Escribe el nombre de la tablet.' });
+
+      const sedes = await getActiveQrSedesByCodes(sedeCodigos);
+      if (sedes.length !== sedeCodigos.length) {
+        return sendQrJson(res, 404, { ok: false, error: 'Todas las sedes seleccionadas deben estar activas y con QR activo.' });
+      }
+      const primarySede = sedes.find((row) => String(row.codigo || '').trim() === requestedSedeCodigo) || sedes[0];
+
+      const deviceToken = createQrToken();
+      const { data, error } = await supabaseAdmin
+        .from('sede_devices')
+        .insert({
+          sede_id: primarySede.id || null,
+          sede_codigo: primarySede.codigo,
+          sede_nombre: primarySede.nombre || null,
+          device_name: deviceName,
+          token_hash: hashToken(deviceToken),
+          estado: 'activo',
+          created_by_uid: profile.id || null,
+          created_by_email: profile.email || null
+        })
+        .select('id,sede_codigo,sede_nombre,device_name,estado,created_at')
+        .single();
+      if (error) throw error;
+      try {
+        await insertQrDeviceSites(data.id, sedes);
+      } catch (linkError) {
+        try { await supabaseAdmin.from('sede_devices').delete().eq('id', data.id); } catch (_) {}
+        throw linkError;
+      }
+
+      sendQrJson(res, 200, {
+        ok: true,
+        device: mapQrDeviceRow(data),
+        deviceToken
+      });
+    } catch (error) {
+      console.error('Error creando dispositivo QR:', error);
+      sendQrJson(res, qrStatusFromError(error), { ok: false, error: qrMessageFromError(error) });
+    }
+  });
+
+  appInstance.patch(['/attendance-qr/devices/:deviceId/status', '/api/attendance-qr/devices/:deviceId/status'], async (req, res) => {
+    try {
+      const profile = await requireAdminQrUser(req);
+      const deviceId = String(req.params?.deviceId || '').trim();
+      const estado = String(req.body?.estado || '').trim().toLowerCase();
+      if (!deviceId) return sendQrJson(res, 400, { ok: false, error: 'Selecciona una tablet.' });
+      if (!['activo', 'inactivo'].includes(estado)) return sendQrJson(res, 400, { ok: false, error: 'Estado de tablet invalido.' });
+
+      const now = new Date().toISOString();
+      const patch = {
+        estado,
+        updated_at: now,
+        last_modified_at: now,
+        last_modified_by_uid: profile.id || null,
+        last_modified_by_email: profile.email || null,
+        revoked_at: estado === 'inactivo' ? now : null,
+        revoked_by_uid: estado === 'inactivo' ? (profile.id || null) : null,
+        revoked_by_email: estado === 'inactivo' ? (profile.email || null) : null
+      };
+      const { data, error } = await supabaseAdmin
+        .from('sede_devices')
+        .update(patch)
+        .eq('id', deviceId)
+        .select('id,sede_codigo,sede_nombre,device_name,estado,last_seen_at,revoked_at,created_at,created_by_email,last_modified_by_email,last_modified_at,revoked_by_email')
+        .maybeSingle();
+      if (error) throw error;
+      if (!data?.id) return sendQrJson(res, 404, { ok: false, error: 'Tablet QR no encontrada.' });
+
+      sendQrJson(res, 200, { ok: true, device: mapQrDeviceRow(data) });
+    } catch (error) {
+      console.error('Error actualizando tablet QR:', error);
+      sendQrJson(res, qrStatusFromError(error), { ok: false, error: qrMessageFromError(error) });
+    }
+  });
+
+  appInstance.get(['/attendance-qr/daily', '/api/attendance-qr/daily'], async (req, res) => {
+    try {
+      await requireQrRegistryUser(req);
+      const date = String(req.query?.date || currentDate()).trim();
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+        return sendQrJson(res, 400, { ok: false, error: 'Fecha invalida.' });
+      }
+      const summary = await listDailyQrRecords(date);
+      sendQrJson(res, 200, { ok: true, date, ...summary });
+    } catch (error) {
+      console.error('Error consultando registro diario QR:', error);
+      sendQrJson(res, qrStatusFromError(error), { ok: false, error: qrMessageFromError(error) });
+    }
+  });
+
+  appInstance.get(['/attendance-qr/image/:token', '/api/attendance-qr/image/:token'], async (req, res) => {
+    try {
+      const token = String(req.params?.token || '').trim();
+      if (!token) return res.status(404).send('QR no encontrado');
+      const tokenRow = await getQrTokenByHash(hashToken(token));
+      if (!tokenRow) return res.status(404).send('QR no encontrado');
+
+      const qrValue = buildQrScanValue(token);
+      const png = await QRCode.toBuffer(qrValue, {
+        type: 'png',
+        errorCorrectionLevel: 'M',
+        margin: 2,
+        width: 512
+      });
+      res.setHeader('Content-Type', 'image/png');
+      res.setHeader('Cache-Control', 'no-store');
+      res.status(200).send(png);
+    } catch (error) {
+      console.error('Error generando imagen QR:', error);
+      res.status(500).send('No se pudo generar el QR');
+    }
+  });
+
+  appInstance.post(['/attendance-qr/scan', '/api/attendance-qr/scan'], async (req, res) => {
+    const ip = getClientIp(req);
+    const userAgent = getUserAgent(req);
+    let auditPayload = { ip, user_agent: userAgent };
+
+    try {
+      const deviceToken = getQrDeviceTokenFromRequest(req);
+      const qrToken = extractQrToken(req.body?.token || req.body?.qrValue || req.body?.value);
+      if (!deviceToken) throw qrError('missing_device_token', 401);
+      if (!qrToken) throw qrError('missing_qr_token', 400);
+
+      const device = await getQrDeviceByToken(deviceToken);
+      if (!device) throw qrError('device_not_found', 401);
+      if (String(device.estado || '').trim().toLowerCase() !== 'activo' || device.revoked_at) throw qrError('device_inactive', 403);
+
+      const tokenRow = await getQrTokenByHash(hashToken(qrToken));
+      if (!tokenRow) throw qrError('qr_not_found', 404);
+
+      auditPayload = {
+        ...auditPayload,
+        qr_token_id: tokenRow.id,
+        device_id: device.id,
+        action: tokenRow.action || null,
+        fecha: tokenRow.fecha || null,
+        employee_id: tokenRow.employee_id || null,
+        documento: tokenRow.documento || null,
+        sede_codigo: tokenRow.sede_codigo || null
+      };
+
+      if (!(await qrDeviceAllowsSede(device, tokenRow.sede_codigo))) throw qrError('sede_mismatch', 403);
+      if (String(tokenRow.fecha || '').trim() !== currentDate()) throw qrError('wrong_day', 409);
+      if (new Date(tokenRow.expires_at).getTime() <= Date.now()) throw qrError('qr_expired', 409);
+      if (tokenRow.used_at) throw qrError('qr_used', 409);
+
+      const employee = await findEmployeeByDocument(tokenRow.documento);
+      if (!employee || String(employee.estado || '').trim().toLowerCase() !== 'activo') throw qrError('employee_inactive', 403);
+
+      await validateQrActionReady(tokenRow);
+      const claimedToken = await claimQrToken(tokenRow.id, device.id);
+      if (!claimedToken) throw qrError('qr_used', 409);
+
+      const result = tokenRow.action === 'exit'
+        ? await registerQrExit({ tokenRow, device })
+        : await registerQrEntry({ tokenRow, device, employee });
+
+      await touchQrDevice(device.id);
+      await insertQrScanAudit({ ...auditPayload, ok: true, reason: result.status || 'ok' });
+
+      sendQrJson(res, 200, {
+        ok: true,
+        action: tokenRow.action,
+        status: result.status,
+        employee: {
+          documento: tokenRow.documento,
+          nombre: tokenRow.nombre || employee.nombre || null,
+          phoneNumber: tokenRow.phone_number || null
+        },
+        sede: {
+          codigo: tokenRow.sede_codigo,
+          nombre: tokenRow.sede_nombre || null
+        }
+      });
+    } catch (error) {
+      console.error('Error escaneando QR:', error);
+      await insertQrScanAudit({ ...auditPayload, ok: false, reason: String(error?.message || 'scan_failed') }).catch((auditError) => {
+        console.error('Error guardando auditoria QR:', auditError);
+      });
+      sendQrJson(res, qrStatusFromError(error), { ok: false, error: qrMessageFromError(error), code: String(error?.message || 'scan_failed') });
+    }
+  });
+}
 
 function isValidWhatsAppSignature(req) {
   if (!config.whatsappAppSecret) return true;
@@ -162,6 +378,641 @@ function buildDailyRecordId(date, documento = null, employeeId = null) {
   return `${day}_${crypto.randomUUID()}`;
 }
 
+function hashToken(token) {
+  return crypto.createHash('sha256').update(String(token || ''), 'utf8').digest('hex');
+}
+
+function createQrToken() {
+  return crypto.randomBytes(32).toString('base64url');
+}
+
+function qrExpiresAtIso() {
+  const minutes = Number(config.qrTokenMinutes || 10);
+  return new Date(Date.now() + minutes * 60 * 1000).toISOString();
+}
+
+function buildQrScanValue(token) {
+  return `${config.publicBackendUrl}/api/attendance-qr/token/${encodeURIComponent(token)}`;
+}
+
+function buildQrImageUrl(token) {
+  return `${config.publicBackendUrl}/api/attendance-qr/image/${encodeURIComponent(token)}`;
+}
+
+function extractQrToken(value) {
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+  const marker = '/attendance-qr/token/';
+  const markerIndex = raw.indexOf(marker);
+  if (markerIndex >= 0) return decodeURIComponent(raw.slice(markerIndex + marker.length).split(/[?#]/)[0] || '').trim();
+  return raw.replace(/^qr:/i, '').trim();
+}
+
+function getClientIp(req) {
+  const forwarded = String(req.headers['x-forwarded-for'] || '').split(',').map((part) => part.trim()).filter(Boolean)[0];
+  return forwarded || String(req.socket?.remoteAddress || '').trim() || null;
+}
+
+function getUserAgent(req) {
+  return String(req.headers['user-agent'] || '').trim() || null;
+}
+
+function getQrDeviceTokenFromRequest(req) {
+  const header = String(req.headers['x-qr-device-token'] || '').trim();
+  if (header) return header;
+  return String(req.body?.deviceToken || '').trim();
+}
+
+function attendanceQrCors(req, res) {
+  const origin = String(req.headers.origin || '').trim();
+  if (!origin) return;
+  if (config.employeePortalAllowedOrigins.length && !config.employeePortalAllowedOrigins.includes(origin)) return;
+
+  res.setHeader('Access-Control-Allow-Origin', origin);
+  res.setHeader('Vary', 'Origin');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-QR-Device-Token');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PATCH, OPTIONS');
+}
+
+function sendQrJson(res, statusCode, payload) {
+  res.status(statusCode).json(payload);
+}
+
+function qrError(message, statusCode = 400) {
+  const error = new Error(message);
+  error.statusCode = statusCode;
+  return error;
+}
+
+function qrStatusFromError(error) {
+  return Number(error?.statusCode || 500);
+}
+
+function qrMessageFromError(error) {
+  switch (String(error?.message || '').trim()) {
+    case 'missing_auth':
+      return 'Debes iniciar sesion para realizar esta accion.';
+    case 'forbidden':
+      return 'No tienes permiso para administrar tablets QR.';
+    case 'missing_device_token':
+      return 'La tablet no esta activada.';
+    case 'device_not_found':
+      return 'La tablet no esta autorizada.';
+    case 'device_inactive':
+      return 'La tablet esta inactiva o revocada.';
+    case 'missing_qr_token':
+      return 'No se detecto un QR valido.';
+    case 'qr_not_found':
+      return 'QR no encontrado.';
+    case 'sede_mismatch':
+      return 'El QR pertenece a otra sede.';
+    case 'wrong_day':
+      return 'El QR no corresponde al dia actual.';
+    case 'qr_expired':
+      return 'El QR expiro. Solicita uno nuevo por WhatsApp.';
+    case 'qr_used':
+      return 'El QR ya fue usado.';
+    case 'employee_inactive':
+      return 'El empleado no esta activo.';
+    case 'entry_exists':
+      return 'El ingreso de hoy ya esta registrado.';
+    case 'exit_requires_entry':
+      return 'Primero debe existir un ingreso del dia.';
+    case 'exit_exists':
+      return 'La salida de hoy ya esta registrada.';
+    default:
+      return 'No se pudo procesar el QR.';
+  }
+}
+
+function mapQrDeviceRow(row = {}) {
+  return {
+    id: row.id,
+    sedeCodigo: row.sede_codigo || null,
+    sedeNombre: row.sede_nombre || null,
+    deviceName: row.device_name || null,
+    estado: row.estado || 'activo',
+    lastSeenAt: row.last_seen_at || null,
+    createdAt: row.created_at || null
+  };
+}
+
+async function requireAdminQrUser(req) {
+  return requireQrUser(req, ({ role, profile }) => (
+    ['superadmin', 'admin'].includes(role) || (role === 'supervisor' && profile?.supervisor_eligible === true)
+  ));
+}
+
+async function requireQrRegistryUser(req) {
+  return requireQrUser(req, ({ role, profile }) => (
+    ['superadmin', 'admin', 'editor'].includes(role) || (role === 'supervisor' && profile?.supervisor_eligible === true)
+  ));
+}
+
+async function requireQrUser(req, canAccess) {
+  const auth = String(req.headers.authorization || '').trim();
+  const token = auth.toLowerCase().startsWith('bearer ') ? auth.slice(7).trim() : '';
+  if (!token) throw qrError('missing_auth', 401);
+
+  const { data: userData, error: userError } = await supabaseAdmin.auth.getUser(token);
+  if (userError || !userData?.user?.id) throw qrError('missing_auth', 401);
+
+  const { data: profile, error: profileError } = await supabaseAdmin
+    .from('profiles')
+    .select('id,email,role,estado,supervisor_eligible')
+    .eq('id', userData.user.id)
+    .maybeSingle();
+  if (profileError) throw profileError;
+  const role = String(profile?.role || '').trim().toLowerCase();
+  const status = String(profile?.estado || 'activo').trim().toLowerCase();
+  const isPrivileged = typeof canAccess === 'function' ? canAccess({ role, profile }) : false;
+  if (status !== 'activo' || !isPrivileged) throw qrError('forbidden', 403);
+  return profile;
+}
+
+async function getSedeByCode(codigo) {
+  const code = String(codigo || '').trim();
+  if (!code) return null;
+  const { data, error } = await supabaseAdmin.from('sedes').select('*').eq('codigo', code).maybeSingle();
+  if (error) throw error;
+  return data || null;
+}
+
+function normalizeSedeCodeList(value, fallback = '') {
+  const list = Array.isArray(value) ? value : [value];
+  if (fallback) list.unshift(fallback);
+  return [...new Set(list.map((item) => String(item || '').trim()).filter(Boolean))];
+}
+
+async function getActiveQrSedesByCodes(codes = []) {
+  const normalized = normalizeSedeCodeList(codes);
+  if (!normalized.length) return [];
+  const { data, error } = await supabaseAdmin
+    .from('sedes')
+    .select('id,codigo,nombre,qr_enabled,estado')
+    .in('codigo', normalized);
+  if (error) throw error;
+  const byCode = new Map((data || [])
+    .filter((row) => row?.qr_enabled === true && String(row?.estado || '').trim().toLowerCase() === 'activo')
+    .map((row) => [String(row.codigo || '').trim(), row]));
+  return normalized.map((code) => byCode.get(code)).filter(Boolean);
+}
+
+async function insertQrDeviceSites(deviceId, sedes = []) {
+  if (!deviceId || !sedes.length) return;
+  const rows = sedes.map((sede) => ({
+    device_id: deviceId,
+    sede_id: sede.id || null,
+    sede_codigo: sede.codigo,
+    sede_nombre: sede.nombre || null
+  }));
+  const { error } = await supabaseAdmin
+    .from('sede_device_sites')
+    .upsert(rows, { onConflict: 'device_id,sede_codigo' });
+  if (error) throw error;
+}
+
+async function qrDeviceAllowsSede(device = {}, sedeCodigo = '') {
+  const code = String(sedeCodigo || '').trim();
+  if (!device?.id || !code) return false;
+  const fallbackAllowed = String(device.sede_codigo || '').trim() === code;
+  const { data, error } = await supabaseAdmin
+    .from('sede_device_sites')
+    .select('sede_codigo')
+    .eq('device_id', device.id);
+  if (error) {
+    console.error('Error consultando sedes autorizadas de tablet QR:', error);
+    return fallbackAllowed;
+  }
+  if (!Array.isArray(data) || !data.length) return fallbackAllowed;
+  return data.some((row) => String(row?.sede_codigo || '').trim() === code);
+}
+
+async function getQrTokenByHash(tokenHash) {
+  const { data, error } = await supabaseAdmin
+    .from('attendance_qr_tokens')
+    .select('*')
+    .eq('token_hash', tokenHash)
+    .maybeSingle();
+  if (error) throw error;
+  return data || null;
+}
+
+async function getQrDeviceByToken(deviceToken) {
+  const { data, error } = await supabaseAdmin
+    .from('sede_devices')
+    .select('*')
+    .eq('token_hash', hashToken(deviceToken))
+    .maybeSingle();
+  if (error) throw error;
+  return data || null;
+}
+
+async function touchQrDevice(deviceId) {
+  if (!deviceId) return;
+  const { error } = await supabaseAdmin
+    .from('sede_devices')
+    .update({ last_seen_at: new Date().toISOString() })
+    .eq('id', deviceId);
+  if (error) throw error;
+}
+
+async function claimQrToken(tokenId, deviceId) {
+  const { data, error } = await supabaseAdmin
+    .from('attendance_qr_tokens')
+    .update({
+      used_at: new Date().toISOString(),
+      used_by_device_id: deviceId
+    })
+    .eq('id', tokenId)
+    .is('used_at', null)
+    .select('id')
+    .maybeSingle();
+  if (error) throw error;
+  return data || null;
+}
+
+async function validateQrActionReady(tokenRow) {
+  return validateQrActionAvailability({
+    action: tokenRow.action,
+    fecha: tokenRow.fecha,
+    documento: tokenRow.documento
+  });
+}
+
+async function validateQrActionAvailability({ action, fecha, documento }) {
+  if (action === 'exit') {
+    const { data: attendanceRow, error: attendanceError } = await supabaseAdmin
+      .from('attendance')
+      .select('id,created_at')
+      .eq('fecha', fecha)
+      .eq('documento', documento)
+      .limit(1)
+      .maybeSingle();
+    if (attendanceError) throw attendanceError;
+    if (!attendanceRow?.id) throw qrError('exit_requires_entry', 409);
+
+    const { data: exitRow, error: exitError } = await supabaseAdmin
+      .from('employee_daily_exits')
+      .select('id')
+      .eq('fecha', fecha)
+      .eq('documento', documento)
+      .limit(1)
+      .maybeSingle();
+    if (exitError) throw exitError;
+    if (exitRow?.id) throw qrError('exit_exists', 409);
+    return attendanceRow;
+  }
+
+  const { data: attendanceRow, error } = await supabaseAdmin
+    .from('attendance')
+    .select('id')
+    .eq('fecha', fecha)
+    .eq('documento', documento)
+    .limit(1)
+    .maybeSingle();
+  if (error) throw error;
+  if (attendanceRow?.id) throw qrError('entry_exists', 409);
+  return null;
+}
+
+async function registerQrEntry({ tokenRow, employee }) {
+  const attendanceId = buildDailyRecordId(tokenRow.fecha, tokenRow.documento, tokenRow.employee_id);
+  const { error } = await supabaseAdmin.from('attendance').upsert({
+    id: attendanceId,
+    fecha: tokenRow.fecha,
+    empleado_id: tokenRow.employee_id,
+    documento: tokenRow.documento,
+    nombre: tokenRow.nombre || employee?.nombre || null,
+    sede_codigo: tokenRow.sede_codigo,
+    sede_nombre: tokenRow.sede_nombre || null,
+    asistio: true,
+    novedad: NOVELTIES.WORKING.code
+  }, { onConflict: 'id' });
+  if (error) throw error;
+  await clearDailyOperationalAbsenceArtifacts(attendanceId);
+  await refreshOperationalState(tokenRow.fecha);
+  return { status: 'entry_registered', attendanceId };
+}
+
+async function registerQrExit({ tokenRow, device }) {
+  const attendanceRow = await validateQrActionReady(tokenRow);
+  const exitId = buildDailyRecordId(tokenRow.fecha, tokenRow.documento, tokenRow.employee_id);
+  const { error } = await supabaseAdmin.from('employee_daily_exits').insert({
+    id: exitId,
+    fecha: tokenRow.fecha,
+    employee_id: tokenRow.employee_id,
+    documento: tokenRow.documento,
+    nombre: tokenRow.nombre || null,
+    sede_codigo: tokenRow.sede_codigo,
+    sede_nombre: tokenRow.sede_nombre || null,
+    qr_token_id: tokenRow.id,
+    device_id: device.id,
+    entry_attendance_id: attendanceRow?.id || null
+  });
+  if (error) {
+    if (error.code === '23505') throw qrError('exit_exists', 409);
+    throw error;
+  }
+  return { status: 'exit_registered', exitId };
+}
+
+async function insertQrScanAudit(payload = {}) {
+  const { error } = await supabaseAdmin.from('attendance_qr_scans').insert({
+    qr_token_id: payload.qr_token_id || null,
+    device_id: payload.device_id || null,
+    action: payload.action || null,
+    fecha: payload.fecha || null,
+    employee_id: payload.employee_id || null,
+    documento: payload.documento || null,
+    sede_codigo: payload.sede_codigo || null,
+    ok: payload.ok === true,
+    reason: payload.reason || null,
+    ip: payload.ip || null,
+    user_agent: payload.user_agent || null
+  });
+  if (error) throw error;
+}
+
+async function listDailyQrRecords(date) {
+  const day = String(date || '').trim();
+  const [
+    { data: tokenRows, error: tokenError },
+    { data: exitRows, error: exitError },
+    { data: sedeRows, error: sedeError },
+    { data: incapacityRows, error: incapacityError },
+    { data: attendanceRows, error: attendanceError }
+  ] = await Promise.all([
+    supabaseAdmin
+      .from('attendance_qr_tokens')
+      .select('*')
+      .eq('fecha', day)
+      .not('used_at', 'is', null)
+      .order('used_at', { ascending: true }),
+    supabaseAdmin
+      .from('employee_daily_exits')
+      .select('*')
+      .eq('fecha', day)
+      .order('exit_at', { ascending: true }),
+    supabaseAdmin
+      .from('sedes')
+      .select('codigo,nombre,dependencia_codigo,dependencia_nombre,zona_codigo,zona_nombre,qr_enabled,estado')
+      .eq('qr_enabled', true),
+    supabaseAdmin
+      .from('incapacitados')
+      .select('employee_id,documento,nombre,source,fecha_inicio,fecha_fin')
+      .eq('estado', 'activo')
+      .lte('fecha_inicio', day)
+      .gte('fecha_fin', day),
+    supabaseAdmin
+      .from('attendance')
+      .select('id,empleado_id,documento,nombre,sede_codigo,sede_nombre,asistio,novedad,created_at')
+      .eq('fecha', day)
+  ]);
+  if (tokenError) throw tokenError;
+  if (exitError) throw exitError;
+  if (sedeError) throw sedeError;
+  if (incapacityError) throw incapacityError;
+  if (attendanceError) throw attendanceError;
+
+  const tokens = Array.isArray(tokenRows) ? tokenRows : [];
+  const exits = Array.isArray(exitRows) ? exitRows : [];
+  const incapacities = Array.isArray(incapacityRows) ? incapacityRows : [];
+  let attendance = Array.isArray(attendanceRows) ? attendanceRows : [];
+  const qrSedes = (Array.isArray(sedeRows) ? sedeRows : [])
+    .filter((row) => String(row?.estado || 'activo').trim().toLowerCase() === 'activo');
+  const qrSedesByCode = new Map(qrSedes.map((row) => [String(row.codigo || '').trim(), row]));
+  const qrSedeCodes = [...qrSedesByCode.keys()].filter(Boolean);
+  attendance = attendance.filter((row) => (
+    qrSedesByCode.has(String(row?.sede_codigo || '').trim())
+    && (row?.asistio === true || String(row?.novedad || '').trim())
+  ));
+  let statusRows = [];
+  let pendingStatusRows = [];
+  let registeredStatusRows = [];
+  if (qrSedeCodes.length) {
+    const { data: dailyStatusRows, error: statusError } = await supabaseAdmin
+      .from('employee_daily_status')
+      .select('employee_id,documento,nombre,sede_codigo,sede_nombre_snapshot,zona_codigo_snapshot,zona_nombre_snapshot,dependencia_codigo_snapshot,dependencia_nombre_snapshot,tipo_personal,servicio_programado,estado_dia,novedad_nombre,source_incapacity_id')
+      .eq('fecha', day)
+      .eq('tipo_personal', 'empleado')
+      .in('sede_codigo', qrSedeCodes)
+      .order('sede_nombre_snapshot', { ascending: true })
+      .order('nombre', { ascending: true });
+    if (statusError) throw statusError;
+    statusRows = Array.isArray(dailyStatusRows) ? dailyStatusRows : [];
+    pendingStatusRows = statusRows.filter((row) => row?.servicio_programado === true);
+    registeredStatusRows = statusRows.filter((row) => (
+      row?.source_incapacity_id
+      || ['incapacidad', 'vacaciones', 'compensatorio'].includes(String(row?.estado_dia || '').trim().toLowerCase())
+    ));
+  }
+  const employeeIds = [...new Set([
+    ...tokens.map((row) => row?.employee_id).filter(Boolean),
+    ...exits.map((row) => row?.employee_id).filter(Boolean),
+    ...attendance.map((row) => row?.empleado_id).filter(Boolean),
+    ...statusRows.map((row) => row?.employee_id).filter(Boolean)
+  ])];
+
+  const employeesById = new Map();
+  if (employeeIds.length) {
+    const { data: employees, error: employeesError } = await supabaseAdmin
+      .from('employees')
+      .select('id,documento,nombre,telefono,sede_codigo,sede_nombre')
+      .in('id', employeeIds);
+    if (employeesError) throw employeesError;
+    (employees || []).forEach((employee) => employeesById.set(String(employee.id), employee));
+  }
+
+  const tokenById = new Map(tokens.map((row) => [String(row.id), row]));
+  const rowMap = new Map();
+  const keyFor = (row = {}) => String(row?.employee_id || row?.documento || '').trim();
+  const ensureRow = (source = {}) => {
+    const key = keyFor(source);
+    if (!key) return null;
+    if (!rowMap.has(key)) {
+      const employee = employeesById.get(String(source.employee_id || '')) || {};
+      rowMap.set(key, {
+        employeeId: source.employee_id || null,
+        documento: source.documento || employee.documento || null,
+        nombre: source.nombre || employee.nombre || null,
+        sedeCodigo: source.sede_codigo || employee.sede_codigo || null,
+        sedeNombre: source.sede_nombre || employee.sede_nombre || null,
+        employeePhone: employee.telefono || null,
+        entryAt: null,
+        entryPhone: null,
+        entryDistanceMeters: null,
+        entrySource: null,
+        entryLabel: null,
+        exitAt: null,
+        exitPhone: null,
+        exitDistanceMeters: null
+      });
+    }
+    return rowMap.get(key);
+  };
+
+  tokens.filter((row) => row?.action === 'entry').forEach((tokenRow) => {
+    const row = ensureRow(tokenRow);
+    if (!row) return;
+    row.entryAt = tokenRow.used_at || null;
+    row.entryPhone = tokenRow.phone_number || null;
+    row.entryDistanceMeters = tokenRow.request_distance_meters == null ? null : Number(tokenRow.request_distance_meters);
+  });
+  const entryKeys = new Set(
+    tokens
+      .filter((row) => row?.action === 'entry')
+      .flatMap((row) => [
+        row?.employee_id ? `id:${String(row.employee_id).trim()}` : '',
+        row?.documento ? `doc:${String(row.documento).trim()}` : ''
+      ])
+      .filter(Boolean)
+  );
+  attendance.forEach((attendanceRow) => {
+    const row = ensureRow({
+      employee_id: attendanceRow.empleado_id || null,
+      documento: attendanceRow.documento || null,
+      nombre: attendanceRow.nombre || null,
+      sede_codigo: attendanceRow.sede_codigo || null,
+      sede_nombre: attendanceRow.sede_nombre || null
+    });
+    if (!row) return;
+    if (!row.entryAt) row.entryAt = attendanceRow.created_at || null;
+    if (!row.entrySource) row.entrySource = 'attendance';
+    const noveltyCode = String(attendanceRow.novedad || '').trim();
+    const noveltyLabel = noveltyLabelByCode(noveltyCode);
+    if (noveltyLabel && noveltyCode !== NOVELTIES.WORKING.code) row.entryLabel = noveltyLabel;
+    else if (noveltyCode && noveltyCode !== NOVELTIES.WORKING.code) row.entryLabel = `Novedad ${noveltyCode}`;
+  });
+  const attendanceKeys = new Set(
+    attendance
+      .flatMap((row) => [
+        row?.empleado_id ? `id:${String(row.empleado_id).trim()}` : '',
+        row?.documento ? `doc:${String(row.documento).trim()}` : ''
+      ])
+      .filter(Boolean)
+  );
+  const incapacityByKey = new Map();
+  const setIncapacityKey = (key, row) => {
+    if (key && !incapacityByKey.has(key)) incapacityByKey.set(key, row);
+  };
+  incapacities.forEach((row) => {
+    setIncapacityKey(row?.employee_id ? `id:${String(row.employee_id).trim()}` : '', row);
+    setIncapacityKey(row?.documento ? `doc:${String(row.documento).trim()}` : '', row);
+  });
+  const incapacityKeys = new Set(
+    incapacities
+      .flatMap((row) => [
+        row?.employee_id ? `id:${String(row.employee_id).trim()}` : '',
+        row?.documento ? `doc:${String(row.documento).trim()}` : ''
+      ])
+      .filter(Boolean)
+  );
+  registeredStatusRows.forEach((statusRow) => {
+    const employeeId = String(statusRow?.employee_id || '').trim();
+    const documento = String(statusRow?.documento || '').trim();
+    const incapacity = (employeeId && incapacityByKey.get(`id:${employeeId}`)) || (documento && incapacityByKey.get(`doc:${documento}`)) || null;
+    const statusLabel = String(statusRow?.novedad_nombre || '').trim() || dailyStatusLabel(statusRow?.estado_dia);
+    if (!incapacity && !statusLabel) return;
+    const row = ensureRow({
+      employee_id: statusRow.employee_id || incapacity?.employee_id || null,
+      documento: statusRow.documento || incapacity?.documento || null,
+      nombre: statusRow.nombre || incapacity?.nombre || null,
+      sede_codigo: statusRow.sede_codigo || null,
+      sede_nombre: statusRow.sede_nombre_snapshot || null
+    });
+    if (!row) return;
+    if (!row.entrySource) row.entrySource = incapacity ? 'incapacity' : 'daily_status';
+    if (!row.entryLabel) row.entryLabel = String(incapacity?.source || '').trim() || statusLabel;
+  });
+
+  exits.forEach((exitRow) => {
+    const row = ensureRow(exitRow);
+    if (!row) return;
+    const exitToken = tokenById.get(String(exitRow.qr_token_id || '')) || null;
+    row.exitAt = exitRow.exit_at || null;
+    row.exitPhone = exitToken?.phone_number || null;
+    row.exitDistanceMeters = exitToken?.request_distance_meters == null ? null : Number(exitToken.request_distance_meters);
+  });
+
+  tokens.filter((row) => row?.action === 'exit' && !rowMap.has(keyFor(row))).forEach((tokenRow) => {
+    const row = ensureRow(tokenRow);
+    if (!row) return;
+    row.exitAt = tokenRow.used_at || null;
+    row.exitPhone = tokenRow.phone_number || null;
+    row.exitDistanceMeters = tokenRow.request_distance_meters == null ? null : Number(tokenRow.request_distance_meters);
+  });
+
+  const rows = [...rowMap.values()]
+    .map((row) => {
+      const entryPhoneDifferent = isDifferentQrPhone(row.entryPhone, row.employeePhone);
+      const exitPhoneDifferent = isDifferentQrPhone(row.exitPhone, row.employeePhone);
+      return {
+        ...row,
+        entryPhoneDifferent,
+        exitPhoneDifferent,
+        phoneDifferent: entryPhoneDifferent || exitPhoneDifferent,
+        alert: entryPhoneDifferent || exitPhoneDifferent ? 'Celular diferente' : null
+      };
+    })
+    .sort((a, b) => String(a.sedeNombre || '').localeCompare(String(b.sedeNombre || '')) || String(a.nombre || '').localeCompare(String(b.nombre || '')));
+  const pendingRows = pendingStatusRows
+    .filter((row) => {
+      const employeeId = String(row?.employee_id || '').trim();
+      const documento = String(row?.documento || '').trim();
+      const hasEntry = (employeeId && entryKeys.has(`id:${employeeId}`)) || (documento && entryKeys.has(`doc:${documento}`));
+      const hasAttendance = (employeeId && attendanceKeys.has(`id:${employeeId}`)) || (documento && attendanceKeys.has(`doc:${documento}`));
+      const hasIncapacity = (employeeId && incapacityKeys.has(`id:${employeeId}`)) || (documento && incapacityKeys.has(`doc:${documento}`));
+      return !hasEntry && !hasAttendance && !hasIncapacity;
+    })
+    .map((row) => {
+      const sede = qrSedesByCode.get(String(row?.sede_codigo || '').trim()) || {};
+      const employee = employeesById.get(String(row?.employee_id || '')) || {};
+      return {
+        employeeId: row.employee_id || null,
+        documento: row.documento || employee.documento || null,
+        nombre: row.nombre || employee.nombre || null,
+        telefono: employee.telefono || null,
+        sedeCodigo: row.sede_codigo || sede.codigo || null,
+        sedeNombre: row.sede_nombre_snapshot || sede.nombre || null,
+        dependenciaCodigo: row.dependencia_codigo_snapshot || sede.dependencia_codigo || null,
+        dependenciaNombre: row.dependencia_nombre_snapshot || sede.dependencia_nombre || null,
+        zonaCodigo: row.zona_codigo_snapshot || sede.zona_codigo || null,
+        zonaNombre: row.zona_nombre_snapshot || sede.zona_nombre || null
+      };
+    })
+    .sort((a, b) => String(a.sedeNombre || '').localeCompare(String(b.sedeNombre || '')) || String(a.nombre || '').localeCompare(String(b.nombre || '')));
+
+  return { rows, pendingRows };
+}
+
+function isDifferentQrPhone(qrPhone, employeePhone) {
+  const qr = normalizePhone(qrPhone);
+  const expected = normalizePhone(employeePhone);
+  if (!qr || !expected) return false;
+  return qr !== expected;
+}
+
+function noveltyLabelByCode(code) {
+  const target = String(code || '').trim();
+  if (!target) return '';
+  const novelty = Object.values(NOVELTIES).find((item) => String(item?.code || '').trim() === target);
+  return String(novelty?.label || '').trim();
+}
+
+function dailyStatusLabel(status) {
+  switch (String(status || '').trim().toLowerCase()) {
+    case 'incapacidad':
+      return 'Incapacidad';
+    case 'vacaciones':
+      return 'Vacaciones';
+    case 'compensatorio':
+      return 'Compensatorio';
+    default:
+      return '';
+  }
+}
+
 async function storeIncomingEvent({ eventType, payload }) {
   const row = {
     id: payload?.id || payload?.message_id || crypto.randomUUID(),
@@ -194,6 +1045,37 @@ async function markIncomingProcessed(id, status, reason) {
   }).eq('id', id);
 }
 
+async function notifyProcessingError(message, error) {
+  if (error?.userNotified === true) return;
+  const phone = normalizePhone(message?.from);
+  if (!phone) return;
+  try {
+    await sendText(phone, userMessageForProcessingError(error));
+  } catch (notifyError) {
+    console.error('No se pudo notificar error al usuario WhatsApp:', notifyError);
+  }
+}
+
+function userMessageForProcessingError(error) {
+  const raw = `${error?.message || ''} ${error?.details || ''} ${error?.hint || ''}`.toLowerCase();
+  if (raw.includes('request_latitude') || raw.includes('qr_latitude') || raw.includes('location_verified_at')) {
+    return 'No pudimos generar el QR porque falta actualizar la base de datos con la migracion de ubicacion QR. Comunicate con el supervisor.';
+  }
+  if (raw.includes('attendance_qr_tokens')) {
+    return 'No pudimos generar el QR por una novedad en la configuracion QR. Comunicate con el supervisor.';
+  }
+  if (raw.includes('send_failed')) {
+    return 'Validamos tu solicitud, pero no pudimos enviar el QR por WhatsApp. Intenta nuevamente en unos minutos.';
+  }
+  if (raw.includes('attendance_missing_sede')) {
+    return 'No pudimos generar el QR porque tu registro no tiene sede asignada. Comunicate con el supervisor.';
+  }
+  if (raw.includes('employee_registered_before_transfer')) {
+    return 'El empleado ya se registro hoy en la sede anterior. No se puede iniciar el cambio de sede hoy.';
+  }
+  return 'No pudimos procesar tu solicitud en este momento. Intenta nuevamente o comunicate con el supervisor.';
+}
+
 async function processIncomingMessage(message) {
   const phone = normalizePhone(message?.from);
   if (!phone) throw new Error('missing_phone_number');
@@ -201,7 +1083,7 @@ async function processIncomingMessage(message) {
   const session = await getSession(phone);
   const parsed = parseInboundAction(message);
 
-  if (!parsed.value && !parsed.id) {
+  if (!parsed.value && !parsed.id && !parsed.location) {
     await sendText(phone, 'No entendí tu respuesta. Por favor selecciona una opción del menú.');
     return;
   }
@@ -241,6 +1123,12 @@ async function processIncomingMessage(message) {
       return;
     case SESSION.AWAITING_WORKING_SEDE_SELECTION:
       await handleWorkingSedeSelection(phone, session, parsed);
+      return;
+    case SESSION.AWAITING_QR_ATTENDANCE_ACTION:
+      await handleQrAttendanceAction(phone, session, parsed);
+      return;
+    case SESSION.AWAITING_QR_LOCATION:
+      await handleQrLocationInput(phone, session, parsed);
       return;
     case SESSION.AWAITING_NOVELTY:
       await handleNoveltySelection(phone, session, parsed);
@@ -398,6 +1286,10 @@ async function handleActionSelection(phone, session, parsed) {
       await sendText(phone, 'Escribe una palabra clave del nombre de la sede en la que te encuentras:');
       return;
     }
+    if (await isQrEnabledForSede(employee.sede_codigo)) {
+      await promptQrAttendanceAction(phone, employee, null);
+      return;
+    }
     await registerNovelty(phone, employee, NOVELTIES.WORKING, null);
     return;
   }
@@ -537,6 +1429,7 @@ async function handleTransferSelection(phone, session, parsed) {
   };
 
   const transferDate = currentDate();
+  await assertNoEmployeeAttendanceTodayBeforeSedeTransfer(employee, transferDate);
   const employeeUpdatePayload = {
     sede_codigo: selected.codigo || null,
     sede_nombre: selected.nombre || null,
@@ -628,7 +1521,258 @@ async function handleWorkingSedeSelection(phone, session, parsed) {
     return;
   }
 
+  if (novelty?.code === NOVELTIES.WORKING.code && await isQrEnabledForSede(selected.codigo)) {
+    await promptQrAttendanceAction(phone, employee, selected);
+    return;
+  }
+
   await registerNovelty(phone, employee, novelty, selected);
+}
+
+async function isQrEnabledForSede(sedeCodigo) {
+  const sede = await getSedeByCode(sedeCodigo);
+  return sede?.qr_enabled === true;
+}
+
+async function promptQrAttendanceAction(phone, employee, selectedSede = null) {
+  const freshEmployee = await reloadEmployeeForAttendance(employee);
+  const sedeCodigo = selectedSede?.codigo || freshEmployee?.sede_codigo || null;
+  const sedeNombre = selectedSede?.nombre || freshEmployee?.sede_nombre || null;
+  if (!sedeCodigo) {
+    throw new Error(`attendance_missing_sede:${freshEmployee?.id || 'no_id'}:${freshEmployee?.documento || 'no_doc'}`);
+  }
+
+  await storeSession(phone, {
+    employee_id: freshEmployee.id,
+    documento: freshEmployee.documento,
+    session_state: SESSION.AWAITING_QR_ATTENDANCE_ACTION,
+    session_data: {
+      employee: sessionEmployee(freshEmployee),
+      selectedSede: selectedSede ? {
+        id: selectedSede.id || null,
+        codigo: sedeCodigo,
+        nombre: sedeNombre,
+        zona_codigo: selectedSede.zona_codigo || freshEmployee.zona_codigo || null,
+        zona_nombre: selectedSede.zona_nombre || freshEmployee.zona_nombre || null
+      } : null
+    }
+  });
+
+  await sendButtons(phone, `La sede ${sedeNombre || sedeCodigo} usa registro por QR.\n\nQue deseas registrar?`, [
+    { id: MENU_IDS.QR_ENTRY, title: 'Ingreso' },
+    { id: MENU_IDS.QR_EXIT, title: 'Salida' }
+  ]);
+}
+
+async function handleQrAttendanceAction(phone, session, parsed) {
+  const employee = await loadEmployeeFromSession(session);
+  if (!employee) {
+    await sendText(phone, NO_REGISTERED_MESSAGE);
+    await resetSession(phone, session, {});
+    return;
+  }
+
+  const normalizedId = normalizeKey(parsed.id);
+  const normalizedValue = normalizeKey(parsed.value);
+  let action = null;
+  if (normalizedId === normalizeKey(MENU_IDS.QR_ENTRY) || normalizedValue === 'ingreso') action = 'entry';
+  if (normalizedId === normalizeKey(MENU_IDS.QR_EXIT) || normalizedValue === 'salida') action = 'exit';
+  if (!action) {
+    await sendText(phone, 'Selecciona una opcion valida: Ingreso o Salida.');
+    return;
+  }
+
+  const selectedSede = session?.session_data?.selectedSede || null;
+  const freshEmployee = await reloadEmployeeForAttendance(employee);
+  const documento = normalizeDocument(freshEmployee?.documento);
+  try {
+    await validateQrActionAvailability({
+      action,
+      fecha: currentDate(),
+      documento
+    });
+  } catch (error) {
+    if (String(error?.message || '') === 'entry_exists') {
+      await storeSession(phone, {
+        employee_id: freshEmployee.id,
+        documento: freshEmployee.documento,
+        session_state: SESSION.COMPLETED,
+        session_data: { employee: sessionEmployee(freshEmployee) }
+      });
+      await sendText(phone, 'Ya tienes un ingreso registrado para hoy. Si necesitas marcar salida, escribe "Hola" y selecciona Salida.');
+      return;
+    }
+    if (String(error?.message || '') === 'exit_requires_entry') {
+      await sendText(phone, 'No encontramos un ingreso registrado para hoy. Primero debes registrar Ingreso.');
+      return;
+    }
+    if (String(error?.message || '') === 'exit_exists') {
+      await storeSession(phone, {
+        employee_id: freshEmployee.id,
+        documento: freshEmployee.documento,
+        session_state: SESSION.COMPLETED,
+        session_data: { employee: sessionEmployee(freshEmployee) }
+      });
+      await sendText(phone, 'Ya tienes una salida registrada para hoy. No es necesario generar otro QR.');
+      return;
+    }
+    throw error;
+  }
+
+  await storeSession(phone, {
+    employee_id: freshEmployee.id,
+    documento: freshEmployee.documento,
+    session_state: SESSION.AWAITING_QR_LOCATION,
+    session_data: {
+      ...(session.session_data || {}),
+      employee: sessionEmployee(freshEmployee),
+      selectedSede,
+      pendingQrAction: action
+    }
+  });
+
+  await sendText(phone, 'Para generar el QR comparte tu ubicacion actual desde WhatsApp. Debes estar a maximo 500 metros de la sede.');
+}
+
+async function handleQrLocationInput(phone, session, parsed) {
+  const employee = await loadEmployeeFromSession(session);
+  if (!employee) {
+    await sendText(phone, NO_REGISTERED_MESSAGE);
+    await resetSession(phone, session, {});
+    return;
+  }
+
+  const location = parsed.location || null;
+  if (!location) {
+    await sendText(phone, 'Por favor comparte tu ubicacion actual usando la opcion Ubicacion de WhatsApp para generar el QR.');
+    return;
+  }
+  if (isNamedLocation(location)) {
+    await sendText(phone, 'Recibimos una ubicacion con nombre o direccion, que puede corresponder a una busqueda. Para generar el QR comparte tu ubicacion actual desde WhatsApp, sin seleccionar una direccion del mapa.');
+    return;
+  }
+
+  const action = String(session?.session_data?.pendingQrAction || '').trim();
+  if (!['entry', 'exit'].includes(action)) {
+    await resetSession(phone, session, {});
+    await sendText(phone, 'No encontramos la accion QR pendiente. Escribe "Hola" para iniciar de nuevo.');
+    return;
+  }
+
+  const selectedSede = session?.session_data?.selectedSede || null;
+  const sedeCodigo = selectedSede?.codigo || employee?.sede_codigo || null;
+  const sede = await getSedeByCode(sedeCodigo);
+  const validation = validateQrLocationForSede(location, sede);
+  if (!validation.ok) {
+    await sendText(phone, validation.message);
+    return;
+  }
+
+  try {
+    await sendAttendanceQr(phone, employee, action, selectedSede, {
+      latitude: location.latitude,
+      longitude: location.longitude,
+      distanceMeters: validation.distanceMeters
+    });
+  } catch (error) {
+    console.error('Error generando QR despues de validar ubicacion:', error);
+    await sendText(phone, userMessageForProcessingError(error));
+    error.userNotified = true;
+    throw error;
+  }
+}
+
+function validateQrLocationForSede(location, sede) {
+  const sedeLat = Number(sede?.qr_latitude);
+  const sedeLng = Number(sede?.qr_longitude);
+  const userLat = Number(location?.latitude);
+  const userLng = Number(location?.longitude);
+  const radius = Number(sede?.qr_radius_meters || 500);
+
+  if (!Number.isFinite(sedeLat) || !Number.isFinite(sedeLng)) {
+    return {
+      ok: false,
+      message: 'Esta sede tiene QR activo pero no tiene latitud/longitud configurada. Comunicate con el supervisor.'
+    };
+  }
+  if (!Number.isFinite(userLat) || !Number.isFinite(userLng)) {
+    return {
+      ok: false,
+      message: 'No pudimos leer tu ubicacion. Por favor comparte tu ubicacion actual desde WhatsApp.'
+    };
+  }
+
+  const distanceMeters = Math.round(distanceBetweenMeters(userLat, userLng, sedeLat, sedeLng));
+  if (distanceMeters > radius) {
+    return {
+      ok: false,
+      distanceMeters,
+      message: `Tu ubicacion esta a ${distanceMeters} metros de la sede. El maximo permitido es ${radius} metros. Comparte tu ubicacion actual cuando estes en la sede.`
+    };
+  }
+
+  return { ok: true, distanceMeters };
+}
+
+function isNamedLocation(location = {}) {
+  return Boolean(String(location?.name || '').trim() || String(location?.address || '').trim());
+}
+
+function distanceBetweenMeters(latA, lngA, latB, lngB) {
+  const earthRadiusMeters = 6371000;
+  const toRadians = (value) => Number(value) * Math.PI / 180;
+  const deltaLat = toRadians(latB - latA);
+  const deltaLng = toRadians(lngB - lngA);
+  const startLat = toRadians(latA);
+  const endLat = toRadians(latB);
+  const a = Math.sin(deltaLat / 2) ** 2
+    + Math.cos(startLat) * Math.cos(endLat) * Math.sin(deltaLng / 2) ** 2;
+  return earthRadiusMeters * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+async function sendAttendanceQr(phone, employee, action, selectedSede = null, locationProof = null) {
+  const freshEmployee = await reloadEmployeeForAttendance(employee);
+  const documento = normalizeDocument(freshEmployee?.documento);
+  const sedeCodigo = selectedSede?.codigo || freshEmployee?.sede_codigo || null;
+  const sedeNombre = selectedSede?.nombre || freshEmployee?.sede_nombre || null;
+  if (!documento || !freshEmployee?.id) throw new Error('missing_employee_identity');
+  if (!sedeCodigo) throw new Error(`attendance_missing_sede:${freshEmployee?.id || 'no_id'}:${documento || 'no_doc'}`);
+
+  const token = createQrToken();
+  const date = currentDate();
+  const { data, error } = await supabaseAdmin.from('attendance_qr_tokens').insert({
+    token_hash: hashToken(token),
+    action,
+    fecha: date,
+    employee_id: freshEmployee.id,
+    documento,
+    nombre: freshEmployee.nombre || null,
+    sede_codigo: sedeCodigo,
+    sede_nombre: sedeNombre || null,
+    phone_number: phone,
+    request_latitude: typeof locationProof?.latitude === 'number' ? locationProof.latitude : null,
+    request_longitude: typeof locationProof?.longitude === 'number' ? locationProof.longitude : null,
+    request_distance_meters: Number.isFinite(Number(locationProof?.distanceMeters)) ? Number(locationProof.distanceMeters) : null,
+    location_verified_at: new Date().toISOString(),
+    expires_at: qrExpiresAtIso()
+  }).select('id,expires_at').single();
+  if (error) throw error;
+
+  await storeSession(phone, {
+    employee_id: freshEmployee.id,
+    documento: freshEmployee.documento,
+    session_state: SESSION.COMPLETED,
+    session_data: {
+      employee: sessionEmployee(freshEmployee),
+      lastQrTokenId: data.id,
+      lastQrAction: action
+    }
+  });
+
+  const actionLabel = action === 'exit' ? 'salida' : 'ingreso';
+  const distanceText = Number.isFinite(Number(locationProof?.distanceMeters)) ? `\nUbicacion validada: ${Number(locationProof.distanceMeters)} m de la sede.` : '';
+  const caption = `QR temporal para registrar ${actionLabel}.\nEmpleado: ${freshEmployee.nombre || documento}\nSede: ${sedeNombre || sedeCodigo}${distanceText}\nVence en ${Number(config.qrTokenMinutes || 10)} minutos.`;
+  await sendQrImage(phone, token, caption);
 }
 
 async function handleNoveltySelection(phone, session, parsed) {
@@ -860,7 +2004,7 @@ async function removeInvalidScheduledEmployeeDailyStatusRows(date) {
     selectAllRows('sedes'),
     selectAllRows('employees'),
     selectAllRows('cargos', 'codigo, alineacion_crud, nombre'),
-    selectAllRows('employee_cargo_history', 'id, employee_id, cargo_codigo, cargo_nombre, sede_codigo, fecha_ingreso, fecha_retiro, created_at')
+    selectAllRows('employee_cargo_history', 'id, employee_id, sede_codigo, fecha_ingreso, fecha_retiro, created_at')
   ]);
   if (statusError) throw statusError;
 
@@ -886,10 +2030,9 @@ async function removeInvalidScheduledEmployeeDailyStatusRows(date) {
     .filter((row) => {
       const employeeId = String(row?.employee_id || '').trim();
       const employee = employeeById.get(employeeId) || null;
-      const historyRows = historyByEmployeeId.get(employeeId) || [];
       if (!employee) return true;
-      if (isEmployeeSupernumerarioOnDateByCargoMap(employee, day, cargoMap, historyRows)) return true;
-      return !isEmployeeAssignedToActiveSedeOnDate(employee, day, activeSedeCodes, historyRows);
+      if (isEmployeeSupernumerarioByCargoMap(employee, cargoMap)) return true;
+      return !isEmployeeAssignedToActiveSedeOnDate(employee, day, activeSedeCodes, historyByEmployeeId.get(employeeId) || []);
     })
     .map((row) => String(row?.id || '').trim())
     .filter(Boolean);
@@ -963,6 +2106,7 @@ async function recomputeDailyMetrics(date) {
     { data: replacements, error: replacementsError },
     sedesRows,
     employeesRows,
+    employeeHistoryRows,
     cargosRows,
     novedadesRows
   ] = await Promise.all([
@@ -970,6 +2114,7 @@ async function recomputeDailyMetrics(date) {
     supabaseAdmin.from('import_replacements').select('*').eq('fecha', day),
     selectAllRows('sedes'),
     selectAllRows('employees'),
+    selectAllRows('employee_cargo_history', 'id, employee_id, cargo_codigo, cargo_nombre, sede_codigo, sede_nombre, fecha_ingreso, fecha_retiro, created_at'),
     selectAllRows('cargos', 'codigo, alineacion_crud, nombre'),
     selectAllRows('novedades', 'codigo, codigo_novedad, nombre, reemplazo')
   ]);
@@ -991,10 +2136,11 @@ async function recomputeDailyMetrics(date) {
     fecha: row?.fecha,
     employeeId: row?.empleado_id || row?.employee_id
   }), row]));
+  const historyByEmployeeId = buildEmployeeHistoryByEmployeeId(employeeHistoryRows);
   const fallbackExpected = (employeesRows || []).filter((emp) => {
     if (String(emp?.estado || '').trim().toLowerCase() !== 'activo') return false;
-    const sedeCodigo = String(emp?.sede_codigo || '').trim();
-    if (!sedeCodigo || !activeSedeCodes.has(sedeCodigo)) return false;
+    const employeeId = String(emp?.id || '').trim();
+    if (!isEmployeeAssignedToActiveSedeOnDate(emp, day, activeSedeCodes, historyByEmployeeId.get(employeeId) || [])) return false;
     return !isEmployeeSupernumerarioByCargoMap(emp, cargoMap);
   }).length;
   const planned = scheduledSedes.reduce((sum, sede) => {
@@ -1049,6 +2195,7 @@ async function recomputeSedeStatusSnapshot(date) {
     { data: replacements, error: replacementsError },
     sedesRows,
     employeesRows,
+    employeeHistoryRows,
     cargosRows,
     novedadesRows
   ] = await Promise.all([
@@ -1056,6 +2203,7 @@ async function recomputeSedeStatusSnapshot(date) {
     supabaseAdmin.from('import_replacements').select('*').eq('fecha', day),
     selectAllRows('sedes'),
     selectAllRows('employees'),
+    selectAllRows('employee_cargo_history', 'id, employee_id, cargo_codigo, cargo_nombre, sede_codigo, sede_nombre, fecha_ingreso, fecha_retiro, created_at'),
     selectAllRows('cargos', 'codigo, alineacion_crud, nombre'),
     selectAllRows('novedades', 'codigo, codigo_novedad, nombre, reemplazo')
   ]);
@@ -1081,15 +2229,19 @@ async function recomputeSedeStatusSnapshot(date) {
   const employeeById = new Map();
   const employeeByDoc = new Map();
   const contractedBySede = new Map();
+  const historyByEmployeeId = buildEmployeeHistoryByEmployeeId(employeeHistoryRows);
 
   (employeesRows || []).forEach((emp) => {
     const empId = String(emp?.id || '').trim();
     const doc = String(emp?.documento || '').trim();
     if (empId) employeeById.set(empId, emp);
     if (doc) employeeByDoc.set(doc, emp);
-    if (!isEmployeeAssignedToActiveSedeOnDate(emp, day, activeSedeCodes)) return;
+    const historyRows = historyByEmployeeId.get(empId) || [];
+    if (!isEmployeeAssignedToActiveSedeOnDate(emp, day, activeSedeCodes, historyRows)) return;
     if (isEmployeeSupernumerarioByCargoMap(emp, cargoMap)) return;
-    const sedeCode = String(emp?.sede_codigo || '').trim();
+    const assignment = resolveEmployeeAssignmentHistoryOnDate(emp, day, historyRows);
+    const source = assignment || emp;
+    const sedeCode = String(source?.sede_codigo || source?.sedeCodigo || '').trim();
     if (!contractedBySede.has(sedeCode)) contractedBySede.set(sedeCode, new Set());
     contractedBySede.get(sedeCode).add(doc || empId);
   });
@@ -1101,7 +2253,10 @@ async function recomputeSedeStatusSnapshot(date) {
     if (doc && replacementSuperDocs.has(`${String(row?.fecha || '').trim()}|${doc}`)) return;
     const empId = String(row?.empleado_id || row?.empleadoId || '').trim();
     const employee = (empId && employeeById.get(empId)) || (doc && employeeByDoc.get(doc)) || null;
-    const sedeCode = String(row?.sede_codigo || employee?.sede_codigo || '').trim();
+    const historyRows = employee ? (historyByEmployeeId.get(String(employee?.id || '').trim()) || []) : [];
+    const assignment = employee ? resolveEmployeeAssignmentHistoryOnDate(employee, day, historyRows) : null;
+    const source = assignment || employee;
+    const sedeCode = String(row?.sede_codigo || source?.sede_codigo || source?.sedeCodigo || '').trim();
     if (!sedeCode || !activeSedeCodes.has(sedeCode)) return;
     if (!registeredBySede.has(sedeCode)) registeredBySede.set(sedeCode, new Set());
     registeredBySede.get(sedeCode).add(doc || empId || String(row?.id || '').trim());
@@ -1339,18 +2494,6 @@ function isEmployeeSupernumerarioByCargoMap(emp, cargoMap = new Map()) {
   return alignment === 'supernumerario';
 }
 
-function isEmployeeSupernumerarioOnDateByCargoMap(emp, selectedDate, cargoMap = new Map(), historyRows = []) {
-  const assignment = resolveEmployeeAssignmentHistoryOnDate(emp, selectedDate, historyRows);
-  const effective = assignment
-    ? {
-        ...emp,
-        cargo_codigo: assignment.cargo_codigo ?? assignment.cargoCodigo ?? emp?.cargo_codigo,
-        cargo_nombre: assignment.cargo_nombre ?? assignment.cargoNombre ?? emp?.cargo_nombre
-      }
-    : emp;
-  return isEmployeeSupernumerarioByCargoMap(effective, cargoMap);
-}
-
 function resolveEmployeeAssignmentHistoryOnDate(emp, selectedDate, historyRows = []) {
   const day = String(selectedDate || '').trim();
   if (!day) return null;
@@ -1371,6 +2514,16 @@ function resolveEmployeeAssignmentHistoryOnDate(emp, selectedDate, historyRows =
     return String(right?.id || '').localeCompare(String(left?.id || ''));
   });
   return matching[0] || null;
+}
+
+function buildEmployeeHistoryByEmployeeId(rows = []) {
+  return (Array.isArray(rows) ? rows : []).reduce((acc, row) => {
+    const employeeId = String(row?.employee_id || row?.employeeId || '').trim();
+    if (!employeeId) return acc;
+    if (!acc.has(employeeId)) acc.set(employeeId, []);
+    acc.get(employeeId).push(row);
+    return acc;
+  }, new Map());
 }
 
 function isEmployeeAssignedToActiveSedeOnDate(emp, selectedDate, activeSedeCodes = new Set(), historyRows = []) {
@@ -1504,6 +2657,7 @@ async function computeDailySedeClosureSnapshot(date) {
     { data: replacements, error: replacementsError },
     sedesRows,
     employeesRows,
+    employeeHistoryRows,
     cargosRows,
     novedadesRows
   ] = await Promise.all([
@@ -1511,6 +2665,7 @@ async function computeDailySedeClosureSnapshot(date) {
     supabaseAdmin.from('import_replacements').select('*').eq('fecha', day),
     selectAllRows('sedes'),
     selectAllRows('employees'),
+    selectAllRows('employee_cargo_history', 'id, employee_id, cargo_codigo, cargo_nombre, sede_codigo, sede_nombre, fecha_ingreso, fecha_retiro, created_at'),
     selectAllRows('cargos', 'codigo, alineacion_crud, nombre'),
     selectAllRows('novedades', 'codigo, codigo_novedad, nombre, reemplazo')
   ]);
@@ -1535,18 +2690,22 @@ async function computeDailySedeClosureSnapshot(date) {
   const employeeByDoc = new Map();
   const contractedBySede = new Map();
   const supernumerarioDocs = new Set();
+  const historyByEmployeeId = buildEmployeeHistoryByEmployeeId(employeeHistoryRows);
 
   for (const emp of employeesRows || []) {
     const empId = String(emp?.id || '').trim();
     const doc = String(emp?.documento || '').trim();
     if (empId) employeeById.set(empId, emp);
     if (doc) employeeByDoc.set(doc, emp);
-    if (doc && isEmployeeSupernumerarioByCargoMap(emp, cargoMap) && isEmployeeAssignedToActiveSedeOnDate(emp, day, activeSedeCodes)) {
+    const historyRows = historyByEmployeeId.get(empId) || [];
+    if (doc && isEmployeeSupernumerarioByCargoMap(emp, cargoMap) && isEmployeeAssignedToActiveSedeOnDate(emp, day, activeSedeCodes, historyRows)) {
       supernumerarioDocs.add(doc);
     }
-    if (!isEmployeeAssignedToActiveSedeOnDate(emp, day, activeSedeCodes)) continue;
+    if (!isEmployeeAssignedToActiveSedeOnDate(emp, day, activeSedeCodes, historyRows)) continue;
     if (isEmployeeSupernumerarioByCargoMap(emp, cargoMap)) continue;
-    const sedeCode = String(emp?.sede_codigo || emp?.sedeCodigo || '').trim();
+    const assignment = resolveEmployeeAssignmentHistoryOnDate(emp, day, historyRows);
+    const source = assignment || emp;
+    const sedeCode = String(source?.sede_codigo || source?.sedeCodigo || '').trim();
     if (!sedeCode) continue;
     if (!contractedBySede.has(sedeCode)) contractedBySede.set(sedeCode, new Set());
     contractedBySede.get(sedeCode).add(doc || empId);
@@ -1560,7 +2719,10 @@ async function computeDailySedeClosureSnapshot(date) {
     const empId = String(row?.empleado_id || row?.empleadoId || '').trim();
     const employee = (empId && employeeById.get(empId)) || (doc && employeeByDoc.get(doc)) || null;
     if (isEmployeeSupernumerarioByCargoMap(employee, cargoMap)) continue;
-    const sedeCode = String(row?.sede_codigo || row?.sedeCodigo || employee?.sede_codigo || employee?.sedeCodigo || '').trim();
+    const historyRows = employee ? (historyByEmployeeId.get(String(employee?.id || '').trim()) || []) : [];
+    const assignment = employee ? resolveEmployeeAssignmentHistoryOnDate(employee, day, historyRows) : null;
+    const source = assignment || employee;
+    const sedeCode = String(row?.sede_codigo || row?.sedeCodigo || source?.sede_codigo || source?.sedeCodigo || '').trim();
     if (!sedeCode || !activeSedeCodes.has(sedeCode)) continue;
     if (!registeredBySede.has(sedeCode)) registeredBySede.set(sedeCode, new Set());
     registeredBySede.get(sedeCode).add(doc || empId || String(row?.id || '').trim());
@@ -2164,7 +3326,30 @@ async function findEmployeeByDocument(document) {
 async function hydrateEmployee(row) {
   const employee = { ...row };
   employee.telefono = normalizePhone(employee.telefono);
+  await applyEmployeeAssignmentForDate(employee, currentDate());
   employee.isSupernumerario = await isEmployeeSupernumerario(employee);
+  return employee;
+}
+
+async function applyEmployeeAssignmentForDate(employee, date) {
+  const employeeId = String(employee?.id || '').trim();
+  const day = String(date || '').trim();
+  if (!employeeId || !day) return employee;
+
+  const { data, error } = await supabaseAdmin
+    .from('employee_cargo_history')
+    .select('id, employee_id, cargo_codigo, cargo_nombre, sede_codigo, sede_nombre, fecha_ingreso, fecha_retiro, created_at')
+    .eq('employee_id', employeeId)
+    .order('fecha_ingreso', { ascending: false })
+    .limit(50);
+  if (error) throw error;
+
+  const assignment = resolveEmployeeAssignmentHistoryOnDate(employee, day, data || []);
+  if (!assignment) return employee;
+  employee.cargo_codigo = assignment.cargo_codigo || employee.cargo_codigo || null;
+  employee.cargo_nombre = assignment.cargo_nombre || employee.cargo_nombre || null;
+  employee.sede_codigo = assignment.sede_codigo || employee.sede_codigo || null;
+  employee.sede_nombre = assignment.sede_nombre || employee.sede_nombre || null;
   return employee;
 }
 
@@ -2295,7 +3480,22 @@ function parseInboundAction(message) {
   return {
     id: String(buttonReply?.id || listReply?.id || '').trim(),
     title: String(buttonReply?.title || listReply?.title || '').trim(),
-    value: String(buttonReply?.title || listReply?.title || textValue || '').trim()
+    value: String(buttonReply?.title || listReply?.title || textValue || '').trim(),
+    location: extractMessageLocation(message)
+  };
+}
+
+function extractMessageLocation(payload) {
+  const location = payload?.location || null;
+  if (!location) return null;
+  const latitude = Number(location.latitude);
+  const longitude = Number(location.longitude);
+  if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return null;
+  return {
+    latitude,
+    longitude,
+    name: location.name || null,
+    address: location.address || null
   };
 }
 
@@ -2450,6 +3650,22 @@ async function sendList(to, body, buttonText, sections) {
   });
 }
 
+async function sendQrImage(to, token, caption) {
+  const imageUrl = buildQrImageUrl(token);
+  try {
+    await sendWhatsAppMessage(to, {
+      type: 'image',
+      image: {
+        link: imageUrl,
+        caption
+      }
+    });
+  } catch (error) {
+    console.error('No se pudo enviar QR como imagen, enviando enlace:', error);
+    await sendText(to, `${caption}\n\nAbre este enlace para mostrar el QR:\n${imageUrl}`);
+  }
+}
+
 async function sendWhatsAppMessage(to, payload) {
   if (!config.whatsappAccessToken || !config.whatsappPhoneNumberId) {
     throw new Error('missing_whatsapp_credentials_or_recipient');
@@ -2494,6 +3710,48 @@ function normalizePhone(value) {
 
 function normalizeDocument(value) {
   return String(value || '').replace(/\D+/g, '').trim();
+}
+
+async function assertNoEmployeeAttendanceTodayBeforeSedeTransfer(employee = {}, transferDate) {
+  const day = String(transferDate || '').trim();
+  const employeeId = String(employee?.id || '').trim();
+  const documento = normalizeDocument(employee?.documento);
+  const previousSede = String(employee?.sede_codigo || '').trim();
+  if (!day || !employeeId) return;
+
+  const queries = [
+    supabaseAdmin
+      .from('attendance')
+      .select('id, sede_codigo, sede_nombre')
+      .eq('fecha', day)
+      .eq('empleado_id', employeeId)
+  ];
+  if (documento) {
+    queries.push(
+      supabaseAdmin
+        .from('attendance')
+        .select('id, sede_codigo, sede_nombre')
+        .eq('fecha', day)
+        .eq('documento', documento)
+    );
+  }
+
+  const results = await Promise.all(queries);
+  const rows = [];
+  for (const { data, error } of results) {
+    if (error) throw error;
+    rows.push(...(data || []));
+  }
+
+  const matchingRegistration = rows.find((row) => {
+    const sede = String(row?.sede_codigo || '').trim();
+    return !sede || !previousSede || sede === previousSede;
+  });
+  if (matchingRegistration) {
+    const error = new Error('employee_registered_before_transfer');
+    error.details = matchingRegistration.sede_nombre || matchingRegistration.sede_codigo || previousSede || null;
+    throw error;
+  }
 }
 
 function normalizeKey(value) {
