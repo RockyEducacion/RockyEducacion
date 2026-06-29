@@ -3,7 +3,8 @@ import crypto from 'node:crypto';
 import express from 'express';
 import QRCode from 'qrcode';
 import { config } from './config.js';
-import { registerEmployeePortalRoutes } from './employee-portal.js';
+import { buildEmployeeCertificatePdf, certificateFileName, normalizeCertificateType } from './certificates/certificate-service.js';
+import { getActiveEmployeePortalContext, registerEmployeePortalRoutes } from './employee-portal.js';
 import { supabaseAdmin } from './supabase.js';
 
 const app = express();
@@ -72,6 +73,7 @@ app.get('/health', (_req, res) => {
 
 registerEmployeePortalRoutes(app);
 registerAttendanceQrRoutes(app);
+registerCertificateRoutes(app);
 
 app.get(['/cron/close-daily-operation', '/api/cron/close-daily-operation'], async (req, res) => {
   try {
@@ -436,6 +438,289 @@ function attendanceQrCors(req, res) {
 
 function sendQrJson(res, statusCode, payload) {
   res.status(statusCode).json(payload);
+}
+
+function registerCertificateRoutes(appInstance) {
+  appInstance.use([
+    '/employee-certificates',
+    '/api/employee-certificates',
+    '/certificates/verify/:code',
+    '/api/certificates/verify/:code',
+    '/certificates/employees/:employeeId',
+    '/api/certificates/employees/:employeeId'
+  ], (req, res, next) => {
+    certificateCors(req, res);
+    if (req.method === 'OPTIONS') return res.status(204).end();
+    return next();
+  });
+
+  appInstance.post(['/employee-certificates', '/api/employee-certificates'], async (req, res) => {
+    const ip = getClientIp(req);
+    const userAgent = getUserAgent(req);
+    try {
+      const { session, employee: portalEmployee } = await getActiveEmployeePortalContext(req, { ip, userAgent });
+      const type = normalizeCertificateType(req.body?.type);
+      const { employee, cargo } = await loadCertificateContextByEmployeeId(portalEmployee.id);
+      const verificationCode = await insertEmployeeCertificateAudit({
+        employee,
+        type,
+        channel: 'employee_portal',
+        requestedByEmployeeSessionId: session.id,
+        ip,
+        userAgent
+      });
+      const pdf = await buildEmployeeCertificatePdf({
+        employee,
+        cargo,
+        type,
+        verificationCode,
+        verificationUrl: buildCertificateVerificationUrl(verificationCode)
+      });
+      sendCertificatePdf(res, pdf, certificateFileName(employee, type));
+    } catch (error) {
+      console.error('Error generando certificado desde portal:', error);
+      sendCertificateError(res, error);
+    }
+  });
+
+  appInstance.post(['/certificates/employees/:employeeId', '/api/certificates/employees/:employeeId'], async (req, res) => {
+    const ip = getClientIp(req);
+    const userAgent = getUserAgent(req);
+    try {
+      const profile = await requireCertificateAdminUser(req);
+      const employeeId = String(req.params?.employeeId || '').trim();
+      if (!employeeId) throw certificateError('invalid_employee', 400);
+      const type = normalizeCertificateType(req.body?.type);
+      const { employee, cargo } = await loadCertificateContextByEmployeeId(employeeId);
+      const verificationCode = await insertEmployeeCertificateAudit({
+        employee,
+        type,
+        channel: 'admin',
+        requestedByProfileId: profile.id || null,
+        requestedByEmail: profile.email || null,
+        ip,
+        userAgent
+      });
+      const pdf = await buildEmployeeCertificatePdf({
+        employee,
+        cargo,
+        type,
+        verificationCode,
+        verificationUrl: buildCertificateVerificationUrl(verificationCode)
+      });
+      sendCertificatePdf(res, pdf, certificateFileName(employee, type));
+    } catch (error) {
+      console.error('Error generando certificado administrativo:', error);
+      sendCertificateError(res, error);
+    }
+  });
+
+  appInstance.get(['/certificates/verify/:code', '/api/certificates/verify/:code'], async (req, res) => {
+    try {
+      const code = normalizeCertificateVerificationCode(req.params?.code);
+      if (!code) return sendCertificateVerificationHtml(res, 404, null);
+      const row = await getCertificateAuditByVerificationCode(code);
+      if (!row) return sendCertificateVerificationHtml(res, 404, null);
+      return sendCertificateVerificationHtml(res, 200, row);
+    } catch (error) {
+      console.error('Error verificando certificado:', error);
+      return sendCertificateVerificationHtml(res, 500, null, 'No fue posible verificar el certificado.');
+    }
+  });
+}
+
+function certificateCors(req, res) {
+  const origin = String(req.headers.origin || '').trim();
+  if (!origin) return;
+  if (config.employeePortalAllowedOrigins.length && !config.employeePortalAllowedOrigins.includes(origin)) return;
+  res.setHeader('Access-Control-Allow-Origin', origin);
+  res.setHeader('Vary', 'Origin');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.setHeader('Access-Control-Expose-Headers', 'Content-Disposition');
+}
+
+function sendCertificatePdf(res, pdf, filename) {
+  res.setHeader('Content-Type', 'application/pdf');
+  res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+  res.setHeader('Cache-Control', 'no-store');
+  res.status(200).send(Buffer.from(pdf));
+}
+
+function sendCertificateError(res, error) {
+  const status = Number(error?.statusCode || 500);
+  res.status(status).json({
+    ok: false,
+    error: certificateMessageFromError(error),
+    code: String(error?.message || 'certificate_failed')
+  });
+}
+
+function certificateError(message, statusCode = 400) {
+  const error = new Error(message);
+  error.statusCode = statusCode;
+  return error;
+}
+
+function certificateMessageFromError(error) {
+  switch (String(error?.message || '').trim()) {
+    case 'missing_auth':
+      return 'Debes iniciar sesion para generar certificados.';
+    case 'forbidden':
+      return 'No tienes permiso para generar certificados.';
+    case 'invalid_employee':
+      return 'Selecciona un empleado valido.';
+    case 'employee_not_found':
+      return 'No encontramos el empleado seleccionado.';
+    case 'employee_inactive':
+      return 'Solo se pueden generar certificados de empleados activos.';
+    case 'missing_salary':
+      return 'El cargo del empleado no tiene salario configurado.';
+    case 'verification_code_failed':
+      return 'No fue posible crear el codigo de verificacion del certificado.';
+    default:
+      return 'No fue posible generar el certificado laboral.';
+  }
+}
+
+async function requireCertificateAdminUser(req) {
+  return requireQrUser(req, ({ role, profile }) => (
+    ['superadmin', 'admin'].includes(role) || (role === 'supervisor' && profile?.supervisor_eligible === true)
+  ));
+}
+
+async function loadCertificateContextByEmployeeId(employeeId) {
+  const id = String(employeeId || '').trim();
+  if (!id) throw certificateError('invalid_employee', 400);
+  const { data: employee, error } = await supabaseAdmin
+    .from('employees')
+    .select('id,codigo,documento,nombre,cargo_codigo,cargo_nombre,fecha_ingreso,estado')
+    .eq('id', id)
+    .maybeSingle();
+  if (error) throw error;
+  if (!employee?.id) throw certificateError('employee_not_found', 404);
+  if (String(employee.estado || '').trim().toLowerCase() !== 'activo') throw certificateError('employee_inactive', 409);
+  const cargo = await loadCertificateCargo(employee);
+  return { employee, cargo };
+}
+
+async function loadCertificateCargo(employee) {
+  const cargoCodigo = String(employee?.cargo_codigo || '').trim();
+  const cargoNombre = String(employee?.cargo_nombre || '').trim();
+  if (!cargoCodigo && !cargoNombre) return null;
+  let query = supabaseAdmin.from('cargos').select('codigo,nombre,salario');
+  if (cargoCodigo) query = query.eq('codigo', cargoCodigo);
+  else query = query.eq('nombre', cargoNombre);
+  const { data, error } = await query.maybeSingle();
+  if (error) throw error;
+  return data || null;
+}
+
+async function insertEmployeeCertificateAudit({ employee, type, channel, requestedByProfileId = null, requestedByEmail = null, requestedByEmployeeSessionId = null, ip = null, userAgent = null }) {
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const verificationCode = createCertificateVerificationCode();
+    const { data, error } = await supabaseAdmin.from('employee_certificate_audit').insert({
+      employee_id: employee?.id || null,
+      employee_codigo: employee?.codigo || null,
+      documento: employee?.documento || null,
+      nombre: employee?.nombre || null,
+      verification_code: verificationCode,
+      certificate_type: type,
+      channel,
+      requested_by_profile_id: requestedByProfileId,
+      requested_by_email: requestedByEmail,
+      requested_by_employee_session_id: requestedByEmployeeSessionId,
+      ip,
+      user_agent: userAgent
+    }).select('verification_code').single();
+    if (!error && data?.verification_code) return data.verification_code;
+    if (String(error?.code || '') !== '23505') throw error;
+  }
+  throw certificateError('verification_code_failed', 500);
+}
+
+function createCertificateVerificationCode() {
+  return crypto.randomBytes(9).toString('base64url').toUpperCase();
+}
+
+function buildCertificateVerificationUrl(code) {
+  return `${config.publicBackendUrl}/api/certificates/verify/${encodeURIComponent(code)}`;
+}
+
+function normalizeCertificateVerificationCode(value) {
+  return String(value || '').replace(/[^a-zA-Z0-9_-]+/g, '').trim().toUpperCase();
+}
+
+async function getCertificateAuditByVerificationCode(code) {
+  const { data, error } = await supabaseAdmin
+    .from('employee_certificate_audit')
+    .select('verification_code,documento,nombre,certificate_type,channel,created_at')
+    .eq('verification_code', code)
+    .maybeSingle();
+  if (error) throw error;
+  return data || null;
+}
+
+function sendCertificateVerificationHtml(res, statusCode, row, customMessage = '') {
+  const ok = statusCode === 200 && row;
+  const title = ok ? 'Certificado valido' : 'Certificado no encontrado';
+  const message = customMessage || (ok
+    ? 'Este certificado fue emitido por Rocky y existe en el registro de auditoria.'
+    : 'No encontramos un certificado emitido con este codigo de verificacion.');
+  const typeLabel = row?.certificate_type === 'with_salary' ? 'Laboral con salario' : 'Laboral basico';
+  const channelLabel = row?.channel === 'employee_portal' ? 'Portal de empleados' : 'Administrativo';
+  const issuedAt = row?.created_at ? new Date(row.created_at).toLocaleString('es-CO', { timeZone: 'America/Bogota' }) : '-';
+  const html = `<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>${escapeHtml(title)}</title>
+  <style>
+    body{font-family:Arial,sans-serif;background:#f5f7fb;color:#1f2933;margin:0;padding:32px;}
+    main{max-width:680px;margin:0 auto;background:#fff;border:1px solid #e4e7ec;border-radius:8px;padding:28px;box-shadow:0 10px 30px rgba(15,23,42,.08);}
+    h1{margin:0 0 12px;font-size:24px;}
+    p{line-height:1.5;}
+    dl{display:grid;grid-template-columns:180px 1fr;gap:10px 16px;margin-top:24px;}
+    dt{font-weight:700;color:#475467;}
+    dd{margin:0;}
+    .ok{color:#047857;}
+    .bad{color:#b42318;}
+  </style>
+</head>
+<body>
+  <main>
+    <h1 class="${ok ? 'ok' : 'bad'}">${escapeHtml(title)}</h1>
+    <p>${escapeHtml(message)}</p>
+    ${ok ? `<dl>
+      <dt>Codigo</dt><dd>${escapeHtml(row.verification_code || '')}</dd>
+      <dt>Empleado</dt><dd>${escapeHtml(row.nombre || '-')}</dd>
+      <dt>Documento</dt><dd>${escapeHtml(maskDocument(row.documento))}</dd>
+      <dt>Tipo</dt><dd>${escapeHtml(typeLabel)}</dd>
+      <dt>Canal</dt><dd>${escapeHtml(channelLabel)}</dd>
+      <dt>Fecha de emision</dt><dd>${escapeHtml(issuedAt)}</dd>
+    </dl>` : ''}
+  </main>
+</body>
+</html>`;
+  res.setHeader('Content-Type', 'text/html; charset=utf-8');
+  res.setHeader('Cache-Control', 'no-store');
+  res.status(statusCode).send(html);
+}
+
+function maskDocument(value) {
+  const raw = String(value || '').trim();
+  if (raw.length <= 4) return raw || '-';
+  return `${'*'.repeat(Math.max(0, raw.length - 4))}${raw.slice(-4)}`;
+}
+
+function escapeHtml(value) {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
 }
 
 function qrError(message, statusCode = 400) {

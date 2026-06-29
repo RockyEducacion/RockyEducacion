@@ -53,6 +53,47 @@ async function request(path, options = {}) {
   return data;
 }
 
+async function requestBlob(path, options = {}) {
+  const token = getSessionToken();
+  const response = await fetch(apiUrl(path), {
+    headers: {
+      'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...(options.headers || {})
+    },
+    ...options
+  });
+
+  if (!response.ok) {
+    let data = {};
+    try {
+      data = await response.json();
+    } catch {
+      data = {};
+    }
+    if (response.status === 401 || response.status === 403) setSessionToken('');
+    const error = new Error(data?.error || 'No fue posible descargar el archivo.');
+    error.redirectMain = data?.redirectMain === true;
+    throw error;
+  }
+
+  const blob = await response.blob();
+  const disposition = String(response.headers.get('content-disposition') || '');
+  const filename = disposition.match(/filename="([^"]+)"/)?.[1] || 'certificado-laboral.pdf';
+  return { blob, filename };
+}
+
+function downloadBlob(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename || 'archivo.pdf';
+  document.body.append(link);
+  link.click();
+  link.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
 function setMessage(node, text, state = '') {
   node.textContent = text || ' ';
   if (state) node.dataset.state = state;
@@ -175,6 +216,8 @@ function renderDashboardCard(session) {
       statCard('Sesion vence', formatDate(session?.expiresAt))
     ]),
     el('div', { className: 'divider' }, []),
+    renderCertificateActions(),
+    el('div', { className: 'divider' }, []),
     uploadMount
   ]);
 
@@ -182,6 +225,41 @@ function renderDashboardCard(session) {
   host.append(info);
   CargarDatos(uploadMount, { apiRequest: request, portalSession: session });
   return host;
+}
+
+function renderCertificateActions() {
+  const msg = el('p', { className: 'employee-message text-muted mt-1' }, [' ']);
+  const btnBasic = el('button', { className: 'btn btn--primary', type: 'button' }, ['Certificado laboral']);
+  const btnSalary = el('button', { className: 'btn', type: 'button' }, ['Certificado con salario']);
+  const node = el('section', { className: 'employee-panel' }, [
+    el('h3', { style: 'margin-top:0;' }, ['Certificados']),
+    el('p', { className: 'text-muted' }, ['Descarga tu certificado laboral en PDF.']),
+    el('div', { className: 'employee-form__actions' }, [btnBasic, btnSalary]),
+    msg
+  ]);
+
+  btnBasic.addEventListener('click', () => downloadCertificate('basic', msg));
+  btnSalary.addEventListener('click', () => downloadCertificate('with_salary', msg));
+  return node;
+}
+
+async function downloadCertificate(type, msg) {
+  setMessage(msg, 'Generando certificado...', 'ok');
+  try {
+    const result = await requestBlob('/api/employee-certificates', {
+      method: 'POST',
+      body: JSON.stringify({ type })
+    });
+    downloadBlob(result.blob, result.filename);
+    setMessage(msg, 'Certificado descargado.', 'ok');
+  } catch (error) {
+    setMessage(msg, error.message || 'No fue posible generar el certificado.', 'error');
+    if (error.redirectMain) {
+      window.setTimeout(() => {
+        window.location.href = 'access.html';
+      }, 1400);
+    }
+  }
 }
 
 async function renderDashboard() {

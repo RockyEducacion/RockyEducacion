@@ -1,21 +1,11 @@
 import { el, qs } from '../utils/dom.js';
+import { showActionModal } from '../utils/actionModal.js';
 
 export const Login = (mount, deps = {}) => {
-  let currentTab = 'login';
-  const root = el('section', { className: 'main-card' }, [
+  const root = el('section', { className: 'main-card login-card' }, [
     el('h2', {}, ['Acceso']),
-    el('div', { className: 'tabs' }, [tabBtn('Acceso', 'login'), tabBtn('Crear cuenta', 'register')]),
-    el('div', { id: 'tabContent', className: 'mt-2' }, [])
+    el('div', { id: 'loginContent', className: 'mt-2' }, [])
   ]);
-
-  function tabBtn(text, key) {
-    const b = el('button', { className: `tab${currentTab === key ? ' is-active' : ''}` }, [text]);
-    b.addEventListener('click', () => {
-      currentTab = key;
-      renderTab();
-    });
-    return b;
-  }
 
   function consumeBlockedMessage() {
     try {
@@ -27,23 +17,21 @@ export const Login = (mount, deps = {}) => {
     }
   }
 
-  function renderTab() {
-    const c = qs('#tabContent', root);
-    if (currentTab === 'login') c.replaceChildren(loginForm());
-    else c.replaceChildren(registerForm());
-    const idx = { login: 0, register: 1 }[currentTab];
-    root.querySelectorAll('.tab').forEach((b) => b.classList.remove('is-active'));
-    root.querySelectorAll('.tab')[idx].classList.add('is-active');
+  function setMessage(text) {
+    const msg = qs('#msg', root);
+    if (msg) msg.textContent = text || ' ';
   }
 
   function loginForm() {
-    const ui = el('div', {}, [
+    const ui = el('div', { className: 'login-form' }, [
       el('label', { className: 'label mt-2' }, ['Correo']),
       el('input', { id: 'email', type: 'email', placeholder: 'correo@dominio.com', className: 'input' }),
       el('label', { className: 'label mt-2' }, ['Contrasena']),
       el('input', { id: 'pass', type: 'password', placeholder: '********', className: 'input' }),
-      el('div', { className: 'mt-2' }, [el('button', { id: 'btnLogin', className: 'btn btn--primary' }, ['Iniciar sesion'])]),
-      el('p', { className: 'mt-2' }, [el('span', { className: 'text-muted' }, ['No tienes cuenta? ']), el('span', { className: 'link', onclick: () => { currentTab = 'register'; renderTab(); } }, ['Crear cuenta'])]),
+      el('div', { className: 'form-row login-actions mt-2' }, [
+        el('button', { id: 'btnLogin', className: 'btn btn--primary', type: 'button' }, ['Iniciar sesion']),
+        el('button', { id: 'btnOpenCreate', className: 'btn btn--primary', type: 'button' }, ['Crear cuenta'])
+      ]),
       el('p', { id: 'msg', className: 'text-muted mt-2' }, [' '])
     ]);
 
@@ -58,61 +46,54 @@ export const Login = (mount, deps = {}) => {
           const email = ui.querySelector('#email').value.trim();
           const pass = ui.querySelector('#pass').value;
           await deps.login(email, pass);
-          qs('#msg', ui).textContent = 'Sesion iniciada.';
+          setMessage('Sesion iniciada.');
         } catch (e) {
-          qs('#msg', ui).textContent = `Error al iniciar sesion: ${e?.message || e}`;
+          setMessage(`Error al iniciar sesion: ${e?.message || e}`);
         }
       });
     }
 
+    ui.querySelector('#btnOpenCreate').addEventListener('click', openRegisterModal);
     return ui;
   }
 
-  function registerForm() {
-    const ui = el('div', {}, [
-      el('label', { className: 'label mt-2' }, ['Documento']),
-      el('input', { id: 'doc', placeholder: 'Numero de documento', className: 'input' }),
-      el('label', { className: 'label mt-2' }, ['Nombre completo']),
-      el('input', { id: 'name', placeholder: 'Tu nombre y apellidos', className: 'input' }),
-      el('label', { className: 'label mt-2' }, ['Correo']),
-      el('input', { id: 'email', type: 'email', placeholder: 'correo@dominio.com', className: 'input' }),
-      el('label', { className: 'label mt-2' }, ['Contrasena']),
-      el('input', { id: 'pass', type: 'password', placeholder: '********', className: 'input' }),
-      el('div', { className: 'mt-2' }, [el('button', { id: 'btnReg', className: 'btn btn--primary' }, ['Crear cuenta'])]),
-      el('p', { className: 'mt-2' }, [el('span', { className: 'link', onclick: () => { currentTab = 'login'; renderTab(); } }, ['<- Volver a Acceso'])]),
-      el('p', { id: 'msg', className: 'text-muted mt-2' }, [' '])
-    ]);
-
+  async function openRegisterModal() {
     if (!deps.register) {
-      qs('#msg', ui).textContent = 'El proveedor de autenticacion no esta disponible.';
-    } else {
-      ui.querySelector('#btnReg').addEventListener('click', async () => {
-        try {
-          const doc = ui.querySelector('#doc').value.trim();
-          const name = ui.querySelector('#name').value.trim();
-          const email = ui.querySelector('#email').value.trim();
-          const pass = ui.querySelector('#pass').value;
-          if (!doc || !name || !email || !pass) throw new Error('Completa documento, nombre, correo y contrasena.');
-          const cred = await deps.register(email, pass, { nombre: name, documento: doc });
-          if (cred?.session && cred?.user?.uid && deps.createUserProfile) {
-            await deps.createUserProfile(cred.user.uid, { email, nombre: name, documento: doc });
-            qs('#msg', ui).textContent = 'Cuenta creada. Comunicate con el administrador para que te asigne los permisos correspondientes.';
-            currentTab = 'login';
-            renderTab();
-            return;
-          }
-          qs('#msg', ui).textContent = 'Cuenta creada. Inicia sesion y comunicate con el administrador para que te asigne los permisos correspondientes.';
-          currentTab = 'login';
-          renderTab();
-        } catch (e) {
-          qs('#msg', ui).textContent = `Error al registrar: ${e?.message || e}`;
-        }
-      });
+      setMessage('El proveedor de autenticacion no esta disponible.');
+      return;
     }
 
-    return ui;
+    const modal = await showActionModal({
+      title: 'Crear cuenta',
+      message: 'Completa la informacion para crear tu cuenta.',
+      confirmText: 'Crear cuenta',
+      fields: [
+        { id: 'doc', label: 'Documento', type: 'text', required: true, placeholder: 'Numero de documento' },
+        { id: 'name', label: 'Nombre completo', type: 'text', required: true, placeholder: 'Tu nombre y apellidos' },
+        { id: 'email', label: 'Correo', type: 'email', required: true, placeholder: 'correo@dominio.com' },
+        { id: 'pass', label: 'Contrasena', type: 'password', required: true, placeholder: '********' }
+      ]
+    });
+    if (!modal.confirmed) return;
+
+    try {
+      const doc = String(modal.values.doc || '').trim();
+      const name = String(modal.values.name || '').trim();
+      const email = String(modal.values.email || '').trim();
+      const pass = String(modal.values.pass || '');
+      if (!doc || !name || !email || !pass) throw new Error('Completa documento, nombre, correo y contrasena.');
+      const cred = await deps.register(email, pass, { nombre: name, documento: doc });
+      if (cred?.session && cred?.user?.uid && deps.createUserProfile) {
+        await deps.createUserProfile(cred.user.uid, { email, nombre: name, documento: doc });
+        setMessage('Cuenta creada. Comunicate con el administrador para que te asigne los permisos correspondientes.');
+        return;
+      }
+      setMessage('Cuenta creada. Inicia sesion y comunicate con el administrador para que te asigne los permisos correspondientes.');
+    } catch (e) {
+      setMessage(`Error al registrar: ${e?.message || e}`);
+    }
   }
 
-  renderTab();
+  qs('#loginContent', root).replaceChildren(loginForm());
   mount.replaceChildren(root);
 };

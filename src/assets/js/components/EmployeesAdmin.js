@@ -434,6 +434,7 @@ export const EmployeesAdmin=(mount,deps={})=>{
           { value:'edit', label:'Editar' },
           { value:'transfer', label:'Trasladar empleado' },
           { value:'cargo', label:'Cambiar cargo' },
+          { value:'certificate', label:'Generar certificado' },
           { value:'retire', label:'Retirar empleado' }
         ]
       }]
@@ -442,7 +443,31 @@ export const EmployeesAdmin=(mount,deps={})=>{
     if(modal.values.action==='edit') return openEditEmployeeModal(e);
     if(modal.values.action==='transfer') return openTransferEmployeeModal(e);
     if(modal.values.action==='cargo') return openChangeCargoModal(e);
+    if(modal.values.action==='certificate') return openCertificateModal(e);
     if(modal.values.action==='retire') return openRetireEmployeeModal(e);
+  }
+  async function openCertificateModal(e){
+    if(e.estado!=='activo') return alert('Solo puedes generar certificados de empleados activos.');
+    const modal=await showActionModal({
+      title:'Generar certificado',
+      message:`Empleado: ${e.nombre||'-'}`,
+      confirmText:'Descargar PDF',
+      fields:[{
+        id:'type',
+        label:'Tipo de certificado',
+        type:'select',
+        required:true,
+        options:[
+          { value:'basic', label:'Laboral basico' },
+          { value:'with_salary', label:'Laboral con salario' }
+        ]
+      }]
+    });
+    if(!modal.confirmed) return;
+    try{
+      await deps.generateEmployeeCertificate?.(e.id, modal.values.type||'basic');
+      await deps.addAuditLog?.({ targetType:'employee', targetId:e.id, action:'generate_employee_certificate', after:{ documento:e.documento||null, type:modal.values.type||'basic' } });
+    }catch(err){ alert('Error: '+(err?.message||err)); }
   }
   async function openEditEmployeeModal(e){
     const modal=await showActionModal({

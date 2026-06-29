@@ -46,7 +46,7 @@ export const QrTabletScanner = (mount, deps = {}) => {
           el('span', {}, ['Toca para activar la camara'])
         ])
       ]),
-      el('div', { className: 'row-actions' }, [
+      el('div', { className: 'row-actions qr-scanner-controls' }, [
         el('button', { id: 'btnStartCamera', className: 'btn btn--primary', type: 'button' }, ['Iniciar camara']),
         el('button', { id: 'btnStopCamera', className: 'btn', type: 'button' }, ['Detener'])
       ])

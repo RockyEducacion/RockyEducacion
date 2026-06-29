@@ -36,7 +36,7 @@ import { QrDailyRegistry } from './components/QrDailyRegistry.js';
 import { QrDevicesInfo } from './components/QrDevicesInfo.js';
 
 import { addRoute, startRouter, navigate, refreshRoute } from './router.js';
-import { getState, setState } from './state.js';
+import { getState, setState, subscribe } from './state.js';
 import { can, PERMS, isSuperAdmin } from './permissions.js';
 import { ROLES } from './roles.js';
 import { installBrowserAlertReplacement } from './utils/notifications.js';
@@ -50,6 +50,7 @@ let deps={};
 sidebarMount.replaceChildren(Sidebar());
 headerMount.replaceChildren(Header());
 footerMount.replaceChildren(Footer());
+subscribe('userProfile', () => footerMount.replaceChildren(Footer()));
 
 let unsubRoleMatrix=null; let unsubUserOverrides=null; let unsubAudit=null;
 let authSyncToken = 0;
@@ -70,13 +71,14 @@ const guardWrite=(perm,fn)=> async (...args)=>{
         streamRoleMatrix:fb.streamRoleMatrix, setRolePermissions:fb.setRolePermissions, streamUserOverrides:fb.streamUserOverrides,
         getUserOverrides:fb.getUserOverrides, setUserOverrides:fb.setUserOverrides, clearUserOverrides:fb.clearUserOverrides,
         addAuditLog:fb.addAuditLog, streamAuditLogs:(cb,max)=>{ if(unsubAudit)unsubAudit(); unsubAudit=fb.streamAuditLogs(cb,max); return unsubAudit; },
-        streamUsers:fb.streamUsers, setUserRole:guardWrite(PERMS.EDIT_USERS,fb.setUserRole), setUserStatus:guardWrite(PERMS.EDIT_USERS,fb.setUserStatus), softDeleteUser:guardWrite(PERMS.EDIT_USERS,fb.softDeleteUser), findUserByEmail:fb.findUserByEmail,
+        streamUsers:fb.streamUsers, setUserRole:guardWrite(PERMS.EDIT_USERS,fb.setUserRole), syncSupervisorAccessForUser:guardWrite(PERMS.EDIT_USERS,fb.syncSupervisorAccessForUser), setUserStatus:guardWrite(PERMS.EDIT_USERS,fb.setUserStatus), softDeleteUser:guardWrite(PERMS.EDIT_USERS,fb.softDeleteUser), findUserByEmail:fb.findUserByEmail,
         streamZones:fb.streamZones, createZone:guardWrite(PERMS.EDIT_ZONES,fb.createZone), updateZone:guardWrite(PERMS.EDIT_ZONES,fb.updateZone), setZoneStatus:guardWrite(PERMS.EDIT_ZONES,fb.setZoneStatus), findZoneByCode:fb.findZoneByCode, getNextZoneCode:fb.getNextZoneCode,
         streamDependencies:fb.streamDependencies, createDependency:guardWrite(PERMS.EDIT_DEPENDENCIES,fb.createDependency), updateDependency:guardWrite(PERMS.EDIT_DEPENDENCIES,fb.updateDependency), setDependencyStatus:guardWrite(PERMS.EDIT_DEPENDENCIES,fb.setDependencyStatus), findDependencyByCode:fb.findDependencyByCode, getNextDependencyCode:fb.getNextDependencyCode,
         streamSedes:fb.streamSedes, createSede:guardWrite(PERMS.EDIT_SEDES,fb.createSede), updateSede:guardWrite(PERMS.EDIT_SEDES,fb.updateSede), setSedeStatus:guardWrite(PERMS.EDIT_SEDES,fb.setSedeStatus), findSedeByCode:fb.findSedeByCode, getNextSedeCode:fb.getNextSedeCode,
         createQrDevice:guardWrite(PERMS.MANAGE_QR_DEVICES,fb.createQrDevice), setQrDeviceStatus:guardWrite(PERMS.MANAGE_QR_DEVICES,fb.setQrDeviceStatus), listQrDevices:fb.listQrDevices, streamQrDevices:fb.streamQrDevices, scanAttendanceQr:fb.scanAttendanceQr, listDailyQrRecords:fb.listDailyQrRecords, streamDailyQrRecords:fb.streamDailyQrRecords,
         createSedesBulk:guardWrite(PERMS.EDIT_SEDES,fb.createSedesBulk),
         streamEmployees:fb.streamEmployees, streamActiveBaseEmployees:fb.streamActiveBaseEmployees, createEmployee:guardWrite(PERMS.EDIT_EMPLOYEES,fb.createEmployee), updateEmployee:guardWrite(PERMS.EDIT_EMPLOYEES,fb.updateEmployee), setEmployeeStatus:guardWrite(PERMS.EDIT_EMPLOYEES,fb.setEmployeeStatus), updateProgrammedEmployeeAssignment:guardWrite(PERMS.MANAGE_EMPLOYEE_SCHEDULES,fb.updateProgrammedEmployeeAssignment), cancelProgrammedEmployeeAssignment:guardWrite(PERMS.MANAGE_EMPLOYEE_SCHEDULES,fb.cancelProgrammedEmployeeAssignment), findEmployeeByCode:fb.findEmployeeByCode, findEmployeeByDocument:fb.findEmployeeByDocument, getNextEmployeeCode:fb.getNextEmployeeCode,
+        generateEmployeeCertificate:fb.generateEmployeeCertificate,
         streamEmployeeCargoHistory:fb.streamEmployeeCargoHistory, streamEmployeeCargoHistoryAll:fb.streamEmployeeCargoHistoryAll,
         createEmployeesBulk:guardWrite(PERMS.EDIT_EMPLOYEES,fb.createEmployeesBulk),
         streamSupernumerarios:fb.streamSupernumerarios, createSupernumerario:guardWrite(PERMS.EDIT_SUPERNUMERARIOS,fb.createSupernumerario), updateSupernumerario:guardWrite(PERMS.EDIT_SUPERNUMERARIOS,fb.updateSupernumerario), setSupernumerarioStatus:guardWrite(PERMS.EDIT_SUPERNUMERARIOS,fb.setSupernumerarioStatus), findSupernumerarioByCode:fb.findSupernumerarioByCode, findSupernumerarioByDocument:fb.findSupernumerarioByDocument, getNextSupernumerarioCode:fb.getNextSupernumerarioCode,
@@ -118,6 +120,10 @@ const guardWrite=(perm,fn)=> async (...args)=>{
         }
         if(String(profile?.role||'').trim().toLowerCase()===ROLES.TABLET_QR){
           window.location.replace('qr.html');
+          return;
+        }
+        if(String(profile?.role||'').trim().toLowerCase()===ROLES.SUPERVISOR && profile?.supervisorEligible===true){
+          window.location.replace('supervisor.html');
           return;
         }
         setState({ user, userProfile: profile });

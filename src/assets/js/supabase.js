@@ -1471,6 +1471,7 @@ async function upsertSupervisorProfileFromEmployee(employee, override = {}) {
     .select('*')
     .single();
   if (error) throw error;
+  await syncSupervisorAccessProfilesByDocument(payload.documento, payload.zona_codigo, audit);
   await notifyTableReload('supervisor_profile');
   return data;
 }
@@ -2382,6 +2383,121 @@ export async function findUserByEmail(email) {
   return data ? mapUserProfileRow(data) : null;
 }
 
+function oneZoneArray(zonaCodigo) {
+  const code = String(zonaCodigo || '').trim();
+  return code ? [code] : [];
+}
+
+async function resolveSupervisorAccessByDocument(documento) {
+  const doc = String(documento || '').trim();
+  if (!doc) return null;
+
+  const { data: supervisorProfile, error: supervisorProfileError } = await supabase
+    .from('supervisor_profile')
+    .select('*')
+    .eq('documento', doc)
+    .maybeSingle();
+  if (supervisorProfileError) throw supervisorProfileError;
+
+  const mappedSupervisor = supervisorProfile ? mapSupervisorProfileRow(supervisorProfile) : null;
+  if (mappedSupervisor?.zonaCodigo) {
+    return {
+      zonaCodigo: mappedSupervisor.zonaCodigo,
+      zonaNombre: mappedSupervisor.zonaNombre || null,
+      source: 'supervisor_profile'
+    };
+  }
+
+  const employee = await findEmployeeByDocument(doc);
+  if (!employee) return null;
+  const alignment = await getCargoCrudAlignmentByCode(employee.cargoCodigo, employee.cargoNombre);
+  if (alignment !== 'supervisor' || !employee.zonaCodigo) return null;
+  return {
+    zonaCodigo: employee.zonaCodigo,
+    zonaNombre: employee.zonaNombre || null,
+    source: 'employees'
+  };
+}
+
+async function supervisorAccessPatchForUser(uid) {
+  const targetUid = String(uid || '').trim();
+  if (!targetUid) throw new Error('Falta el usuario a sincronizar.');
+  const { data: profile, error } = await supabase
+    .from(SUPABASE_PROFILES_TABLE)
+    .select('id,email,documento')
+    .eq('id', targetUid)
+    .maybeSingle();
+  if (error) throw error;
+  if (!profile) throw new Error('No se encontro el perfil del usuario.');
+
+  const documento = String(profile.documento || '').trim();
+  if (!documento) {
+    throw new Error('El usuario no tiene documento en su perfil. No se puede validar como supervisor.');
+  }
+
+  const supervisorAccess = await resolveSupervisorAccessByDocument(documento);
+  if (!supervisorAccess?.zonaCodigo) {
+    throw new Error('El usuario no tiene una zona asignada en el modulo Supervisores.');
+  }
+
+  return {
+    supervisor_eligible: true,
+    zona_codigo: supervisorAccess.zonaCodigo,
+    zonas_permitidas: oneZoneArray(supervisorAccess.zonaCodigo)
+  };
+}
+
+async function syncSupervisorAccessProfilesByDocument(documento, zonaCodigo, audit = null) {
+  const doc = String(documento || '').trim();
+  const zone = String(zonaCodigo || '').trim();
+  if (!doc || !zone) return 0;
+
+  const { data: profiles, error } = await supabase
+    .from(SUPABASE_PROFILES_TABLE)
+    .select('id')
+    .eq('documento', doc)
+    .eq('role', 'supervisor');
+  if (error) throw error;
+
+  const rows = Array.isArray(profiles) ? profiles : [];
+  for (const profile of rows) {
+    const { error: updateError } = await supabase
+      .from(SUPABASE_PROFILES_TABLE)
+      .update({
+        supervisor_eligible: true,
+        zona_codigo: zone,
+        zonas_permitidas: oneZoneArray(zone),
+        updated_at: new Date().toISOString(),
+        last_modified_by_uid: audit?.created_by_uid || null,
+        last_modified_by_email: audit?.created_by_email || null
+      })
+      .eq('id', profile.id);
+    if (updateError) throw updateError;
+  }
+
+  if (rows.length) await notifyTableReload(SUPABASE_PROFILES_TABLE);
+  return rows.length;
+}
+
+export async function syncSupervisorAccessForUser(uid) {
+  const targetUid = String(uid || '').trim();
+  if (!targetUid) throw new Error('Falta el usuario a sincronizar.');
+  const audit = await getCurrentAuditFields();
+  const patch = {
+    ...(await supervisorAccessPatchForUser(targetUid)),
+    updated_at: new Date().toISOString(),
+    last_modified_by_uid: audit.created_by_uid,
+    last_modified_by_email: audit.created_by_email
+  };
+  const { error } = await supabase
+    .from(SUPABASE_PROFILES_TABLE)
+    .update(patch)
+    .eq('id', targetUid)
+    .eq('role', 'supervisor');
+  if (error) throw error;
+  await notifyTableReload(SUPABASE_PROFILES_TABLE);
+}
+
 export async function setUserRole(uid, role) {
   const targetUid = String(uid || '').trim();
   const nextRole = String(role || '').trim().toLowerCase();
@@ -2394,6 +2510,11 @@ export async function setUserRole(uid, role) {
     last_modified_by_uid: audit.created_by_uid,
     last_modified_by_email: audit.created_by_email
   };
+  if (nextRole === 'supervisor') {
+    Object.assign(patch, await supervisorAccessPatchForUser(targetUid));
+  } else {
+    patch.supervisor_eligible = false;
+  }
   const { error } = await supabase
     .from(SUPABASE_PROFILES_TABLE)
     .update(patch)
@@ -2720,7 +2841,11 @@ export async function createSedesBulk(rows = []) {
       zonaCodigo: row.zonaCodigo || null,
       zonaNombre: row.zonaNombre || null,
       numeroOperarios: typeof row.numeroOperarios === 'number' ? row.numeroOperarios : Number(row.numeroOperarios || 0),
-      jornada: row.jornada || 'lun_vie'
+      jornada: row.jornada || 'lun_vie',
+      qrEnabled: row.qrEnabled === true,
+      qrLatitude: row.qrLatitude,
+      qrLongitude: row.qrLongitude,
+      qrRadiusMeters: typeof row.qrRadiusMeters === 'number' ? row.qrRadiusMeters : Number(row.qrRadiusMeters || 500)
     });
     created += 1;
   }
@@ -2780,6 +2905,38 @@ async function backendJson(path, { method = 'GET', body = null, headers = {} } =
   return payload;
 }
 
+async function backendBlob(path, { method = 'GET', body = null, headers = {} } = {}) {
+  const base = backendApiBase();
+  if (!base) throw new Error('Configura EMPLOYEE_PORTAL_API_BASE para usar el backend.');
+  const response = await fetch(`${base}${path}`, {
+    method,
+    headers: {
+      'Content-Type': 'application/json',
+      ...headers
+    },
+    body: body ? JSON.stringify(body) : null
+  });
+  if (!response.ok) {
+    const payload = await response.json().catch(() => ({}));
+    throw new Error(payload?.error || `Error backend ${response.status}`);
+  }
+  const blob = await response.blob();
+  const disposition = String(response.headers.get('content-disposition') || '');
+  const filename = disposition.match(/filename="([^"]+)"/)?.[1] || 'certificado-laboral.pdf';
+  return { blob, filename };
+}
+
+function downloadBrowserBlob(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename || 'archivo.pdf';
+  document.body.append(link);
+  link.click();
+  link.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
 export async function createQrDevice({ sedeCodigo, sedeCodigos = [], deviceName }) {
   const token = await getAccessToken();
   const result = await backendJson('/api/attendance-qr/devices', {
@@ -2828,6 +2985,19 @@ export async function listDailyQrRecords(date) {
     rows: payload?.rows || [],
     pendingRows: payload?.pendingRows || []
   };
+}
+
+export async function generateEmployeeCertificate(employeeId, type = 'basic') {
+  const id = String(employeeId || '').trim();
+  if (!id) throw new Error('Selecciona un empleado.');
+  const token = await getAccessToken();
+  const result = await backendBlob(`/api/certificates/employees/${encodeURIComponent(id)}`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}` },
+    body: { type }
+  });
+  downloadBrowserBlob(result.blob, result.filename);
+  return result;
 }
 
 export function streamDailyQrRecords(date, onData, onError = null, onStatus = null) {
@@ -3611,6 +3781,19 @@ export function streamSupernumerarios(onData) {
   };
 }
 
+export async function listSupervisorAvailableSupernumerarios() {
+  const { data, error } = await supabase.rpc('list_supernumerarios_for_current_supervisor');
+  if (error) throw error;
+  return (data || []).map((row) => ({
+    id: row.id,
+    documento: row.documento || null,
+    nombre: row.nombre || null,
+    estado: row.estado || 'activo',
+    sedeCodigo: row.sede_codigo || null,
+    sedeNombre: row.sede_nombre || null
+  }));
+}
+
 export async function getNextSupernumerarioCode(prefix = 'SUPN', width = 4) {
   return getNextPrefixedCode('employees', prefix, width);
 }
@@ -4117,12 +4300,56 @@ export async function createIncapacidad({
     .select('*')
     .single();
   if (error) throw error;
+  await refreshOperationalStateForIncapacityChange(data);
   await notifyTableReload('incapacitados');
   return mapIncapacidadRow(data);
 }
 
 function supportValueOrNull(value) {
   return value ? value : null;
+}
+
+const INCAPACITY_OPERATIONAL_REFRESH_MAX_DAYS = 370;
+
+function collectIncapacityRefreshDays(...rows) {
+  const days = new Set();
+  for (const row of rows) {
+    const start = toISODate(row?.fechaInicio || row?.fecha_inicio);
+    const end = toISODate(row?.fechaFin || row?.fecha_fin || start);
+    if (!start || !end || end < start) continue;
+    let cursor = start;
+    let count = 0;
+    while (cursor && cursor <= end && count < INCAPACITY_OPERATIONAL_REFRESH_MAX_DAYS) {
+      days.add(cursor);
+      cursor = addDaysToIsoDate(cursor, 1);
+      count += 1;
+    }
+  }
+  return [...days].sort();
+}
+
+async function refreshOperationalStateForIncapacityChange(...rows) {
+  const days = collectIncapacityRefreshDays(...rows);
+  for (const day of days) {
+    if (await isOperationDayClosed(day)) continue;
+    await refreshOperationalState(day);
+  }
+}
+
+function incapacityOperationalSignature(row = {}) {
+  return [
+    String(row?.employee_id || row?.employeeId || '').trim(),
+    normalizeDailyDocument(row?.documento),
+    toISODate(row?.fecha_inicio || row?.fechaInicio) || '',
+    toISODate(row?.fecha_fin || row?.fechaFin) || '',
+    String(row?.estado || 'activo').trim().toLowerCase(),
+    String(row?.source || '').trim().toLowerCase()
+  ].join('|');
+}
+
+function hasIncapacityOperationalChange(before = null, after = null) {
+  if (!before || !after) return Boolean(after);
+  return incapacityOperationalSignature(before) !== incapacityOperationalSignature(after);
 }
 
 export async function updateIncapacidad(id, {
@@ -4152,6 +4379,12 @@ export async function updateIncapacidad(id, {
   if (soporteNombre !== undefined) patch.soporte_nombre = soporteNombre || null;
   if (soporteTipo !== undefined) patch.soporte_tipo = soporteTipo || null;
   if (soporteStoragePath !== undefined) patch.soporte_storage_path = soporteStoragePath || null;
+  const { data: previous, error: previousError } = await supabase
+    .from('incapacitados')
+    .select('*')
+    .eq('id', id)
+    .maybeSingle();
+  if (previousError) throw previousError;
   const { data, error } = await supabase
     .from('incapacitados')
     .update(patch)
@@ -4159,11 +4392,20 @@ export async function updateIncapacidad(id, {
     .select('*')
     .single();
   if (error) throw error;
+  if (hasIncapacityOperationalChange(previous, data)) {
+    await refreshOperationalStateForIncapacityChange(previous, data);
+  }
   await notifyTableReload('incapacitados');
   return mapIncapacidadRow(data);
 }
 
 export async function setIncapacidadStatus(id, estado) {
+  const { data: previous, error: previousError } = await supabase
+    .from('incapacitados')
+    .select('*')
+    .eq('id', id)
+    .maybeSingle();
+  if (previousError) throw previousError;
   const { data, error } = await supabase
     .from('incapacitados')
     .update({ estado: estado || 'activo' })
@@ -4171,6 +4413,9 @@ export async function setIncapacidadStatus(id, estado) {
     .select('*')
     .single();
   if (error) throw error;
+  if (hasIncapacityOperationalChange(previous, data)) {
+    await refreshOperationalStateForIncapacityChange(previous, data);
+  }
   await notifyTableReload('incapacitados');
   return mapIncapacidadRow(data);
 }
@@ -4302,6 +4547,155 @@ export async function listDailySedeClosuresRange(dateFrom, dateTo) {
     .order('sede_codigo', { ascending: true });
   if (error) throw error;
   return (data || []).map(mapDailySedeClosureRow);
+}
+
+function normalizeZoneCodeList(zoneCodes = []) {
+  return [...new Set((Array.isArray(zoneCodes) ? zoneCodes : [zoneCodes])
+    .map((value) => String(value || '').trim())
+    .filter(Boolean))];
+}
+
+function supervisorRegistryHasNovelty(row = {}) {
+  const code = String(row?.novedadCodigo || '').trim();
+  if (code && !['1', '7'].includes(code)) return true;
+  const name = normalizeMetricText(row?.novedadNombre || '');
+  if (name && !['trabajando', 'compensatorio', 'ok', '-'].includes(name)) return true;
+  const state = normalizeMetricText(String(row?.estadoDia || '').replace(/_/g, ' '));
+  if (!state) return false;
+  return !['sin registro', 'trabajando', 'trabajado reemplazo', 'compensatorio', 'ok'].includes(state);
+}
+
+export async function listSupervisorDailyRegistry(fecha, zoneCodes = []) {
+  const day = String(fecha || '').trim();
+  const zones = normalizeZoneCodeList(zoneCodes);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(day) || !zones.length) {
+    return {
+      fecha: day || null,
+      zones,
+      sedes: [],
+      employees: [],
+      dailyStatus: [],
+      attendance: [],
+      replacements: [],
+      incapacities: [],
+      closures: []
+    };
+  }
+
+  const { data: sedeRows, error: sedesError } = await supabase
+    .from('sedes')
+    .select('*')
+    .in('zona_codigo', zones)
+    .order('nombre', { ascending: true });
+  if (sedesError) throw sedesError;
+
+  const sedes = (sedeRows || []).map(mapSedeRow);
+  const sedeCodes = [...new Set(sedes.map((sede) => String(sede.codigo || '').trim()).filter(Boolean))];
+
+  const [
+    dailyStatusResult,
+    employeesResult,
+    closuresResult,
+    attendanceResult,
+    replacementsResult,
+    incapacitiesResult
+  ] = await Promise.all([
+    supabase
+      .from('employee_daily_status')
+      .select('*')
+      .eq('fecha', day)
+      .in('zona_codigo_snapshot', zones)
+      .order('sede_codigo', { ascending: true })
+      .order('nombre', { ascending: true }),
+    supabase
+      .from('employees')
+      .select('*')
+      .eq('estado', 'activo')
+      .in('zona_codigo', zones)
+      .order('nombre', { ascending: true }),
+    supabase
+      .from('daily_sede_closures')
+      .select('*')
+      .eq('fecha', day)
+      .in('zona_codigo', zones)
+      .order('sede_codigo', { ascending: true }),
+    sedeCodes.length
+      ? supabase
+        .from('attendance')
+        .select('*')
+        .eq('fecha', day)
+        .in('sede_codigo', sedeCodes)
+        .order('created_at', { ascending: false })
+      : Promise.resolve({ data: [], error: null }),
+    sedeCodes.length
+      ? supabase
+        .from('import_replacements')
+        .select('*')
+        .eq('fecha', day)
+        .in('sede_codigo', sedeCodes)
+        .order('ts', { ascending: false })
+      : Promise.resolve({ data: [], error: null }),
+    supabase
+      .from('incapacitados')
+      .select('*')
+      .eq('estado', 'activo')
+      .lte('fecha_inicio', day)
+      .gte('fecha_fin', day)
+      .order('fecha_inicio', { ascending: false })
+  ]);
+
+  const firstError = dailyStatusResult.error
+    || employeesResult.error
+    || closuresResult.error
+    || attendanceResult.error
+    || replacementsResult.error
+    || incapacitiesResult.error;
+  if (firstError) throw firstError;
+
+  const employeeRows = (employeesResult.data || []).map(mapEmployeeRow);
+  const expectedEmployees = employeeRows.filter((employee) => isEmployeeExpectedForDate(employee, day, sedes));
+  const expectedEmployeeKeys = new Set(
+    expectedEmployees
+      .flatMap((employee) => [
+        employee.id ? `id:${String(employee.id).trim()}` : '',
+        employee.documento ? `doc:${String(employee.documento).trim()}` : ''
+      ])
+      .filter(Boolean)
+  );
+  const operationalDailyStatus = (dailyStatusResult.data || [])
+    .map(mapEmployeeDailyStatusRow)
+    .filter((row) => {
+      const employeeId = String(row.employeeId || '').trim();
+      const documento = String(row.documento || '').trim();
+      const isExpected = (employeeId && expectedEmployeeKeys.has(`id:${employeeId}`))
+        || (documento && expectedEmployeeKeys.has(`doc:${documento}`));
+      return isExpected || supervisorRegistryHasNovelty(row);
+    });
+
+  return {
+    fecha: day,
+    zones,
+    sedes,
+    employees: expectedEmployees,
+    dailyStatus: operationalDailyStatus,
+    attendance: (attendanceResult.data || []).map(mapAttendanceRow),
+    replacements: (replacementsResult.data || []).map(mapImportReplacementRow),
+    incapacities: (incapacitiesResult.data || [])
+      .map(mapIncapacidadRow)
+      .filter((row) => {
+        const employeeId = String(row.employeeId || '').trim();
+        const documento = String(row.documento || '').trim();
+        return (employeeId && expectedEmployeeKeys.has(`id:${employeeId}`))
+          || (documento && expectedEmployeeKeys.has(`doc:${documento}`))
+          || operationalDailyStatus.some((status) => {
+            const statusEmployeeId = String(status.employeeId || '').trim();
+            const statusDocument = String(status.documento || '').trim();
+            return (employeeId && statusEmployeeId === employeeId)
+              || (documento && statusDocument === documento);
+          });
+      }),
+    closures: (closuresResult.data || []).map(mapDailySedeClosureRow)
+  };
 }
 
 async function persistDailySedeClosureSnapshot(day) {

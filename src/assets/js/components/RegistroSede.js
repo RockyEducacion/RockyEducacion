@@ -219,15 +219,17 @@ export const RegistroSede = (mount, deps = {}) => {
       });
 
       const statusBySede = new Map((sedeStatus || []).map((s) => [String(s.sedeCodigo || ''), s]));
+      const activeScheduledSedes = (sedes || [])
+        .filter((s) => String(s.estado || 'activo').trim().toLowerCase() !== 'inactivo')
+        .filter((s) => isSedeScheduledForDate(s, date));
       const activeSedeCodes = new Set(
-        (sedes || [])
-          .filter((s) => String(s.estado || 'activo').trim().toLowerCase() !== 'inactivo')
+        activeScheduledSedes
           .map((s) => String(s.codigo || '').trim())
           .filter(Boolean)
       );
       const superDocs = new Set(
         (supernumerarios || [])
-          .filter((s) => isEmployeeAssignedToActiveSede(s, activeSedeCodes))
+          .filter((s) => isEmployeeExpectedForDate(s, date, activeScheduledSedes))
           .map((s) => String(s.documento || '').trim())
           .filter(Boolean)
       );
@@ -240,7 +242,7 @@ export const RegistroSede = (mount, deps = {}) => {
         const id = String(e.id || '').trim();
         if (doc) employeeByDoc.set(doc, e);
         if (id) employeeById.set(id, e);
-        if (!isEmployeeAssignedToActiveSede(e, activeSedeCodes)) return;
+        if (!isEmployeeExpectedForDate(e, date, activeScheduledSedes)) return;
         if (doc && superDocs.has(doc)) return;
         const sedeCode = String(e.sedeCodigo || '').trim();
         if (!sedeCode) return;
@@ -260,6 +262,8 @@ export const RegistroSede = (mount, deps = {}) => {
         const effectiveSedeCode = resolveAttendanceSedeCode(a, {
           dayClosed,
           activeSedeCodes,
+          selectedDate: date,
+          sedeRows: activeScheduledSedes,
           employeeByDoc,
           employeeById,
           superDocs
@@ -270,8 +274,7 @@ export const RegistroSede = (mount, deps = {}) => {
         attendanceByKey.get(key).push({ ...a, sedeCodigo: effectiveSedeCode });
       });
 
-      sedeDailyRows = (sedes || [])
-        .filter((s) => String(s.estado || 'activo').trim().toLowerCase() !== 'inactivo')
+      sedeDailyRows = activeScheduledSedes
         .map((s) => {
           const sedeCode = String(s.codigo || '').trim();
           const key = `${date}|${sedeCode}`;
@@ -684,8 +687,11 @@ function resolveAttendanceSedeCode(attendanceRow = {}, context = {}) {
     || (documento && context?.employeeByDoc?.get(documento))
     || null;
   if (!employee) return null;
-  if (!isEmployeeAssignedToActiveSede(employee, context?.activeSedeCodes || new Set())) return null;
-  return String(employee?.sedeCodigo || '').trim() || null;
+  if (!isEmployeeExpectedForDate(employee, context?.selectedDate, context?.sedeRows || [])) return null;
+  const sedeCode = String(employee?.sedeCodigo || '').trim();
+  if (!sedeCode) return null;
+  if (context?.activeSedeCodes?.size && !context.activeSedeCodes.has(sedeCode)) return null;
+  return sedeCode;
 }
 
 function isEmployeeExpectedForDate(emp, selectedDate, sedeRows = []) {
@@ -694,7 +700,8 @@ function isEmployeeExpectedForDate(emp, selectedDate, sedeRows = []) {
   if (!ingreso || ingreso > selectedDate) return false;
   const retiro = toISODate(emp?.fechaRetiro);
   const estado = String(emp?.estado || '').trim().toLowerCase();
-  if (estado === 'inactivo') return Boolean(retiro && retiro >= selectedDate);
+  if (estado === 'eliminado') return false;
+  if (estado === 'inactivo' && !(retiro && retiro >= selectedDate)) return false;
   if (retiro && retiro < selectedDate) return false;
   const sedeCodigo = String(emp?.sedeCodigo || '').trim();
   if (!sedeCodigo) return false;
@@ -703,16 +710,80 @@ function isEmployeeExpectedForDate(emp, selectedDate, sedeRows = []) {
   return true;
 }
 
-function isEmployeeAssignedToActiveSede(emp, activeSedeCodes = new Set()) {
-  const sedeCodigo = String(emp?.sedeCodigo || '').trim();
-  if (!sedeCodigo) return false;
-  if (activeSedeCodes.size && !activeSedeCodes.has(sedeCodigo)) return false;
-  const ingreso = toISODate(emp?.fechaIngreso);
-  if (!ingreso) return false;
-  const retiro = toISODate(emp?.fechaRetiro);
-  if (retiro) return false;
-  const estado = String(emp?.estado || '').trim().toLowerCase();
-  return estado !== 'inactivo';
+const colombiaHolidayCache = new Map();
+
+function makeUtcDate(year, month, day) {
+  return new Date(Date.UTC(year, month - 1, day));
+}
+
+function addUtcDays(date, days) {
+  const next = new Date(date.getTime());
+  next.setUTCDate(next.getUTCDate() + Number(days || 0));
+  return next;
+}
+
+function formatUtcDate(date) {
+  return date.toISOString().slice(0, 10);
+}
+
+function easterSundayUtc(year) {
+  const a = year % 19;
+  const b = Math.floor(year / 100);
+  const c = year % 100;
+  const d = Math.floor(b / 4);
+  const e = b % 4;
+  const f = Math.floor((b + 8) / 25);
+  const g = Math.floor((b - f + 1) / 3);
+  const h = (19 * a + b - d - g + 15) % 30;
+  const i = Math.floor(c / 4);
+  const k = c % 4;
+  const l = (32 + 2 * e + 2 * i - h - k) % 7;
+  const m = Math.floor((a + 11 * h + 22 * l) / 451);
+  const month = Math.floor((h + l - 7 * m + 114) / 31);
+  const day = ((h + l - 7 * m + 114) % 31) + 1;
+  return makeUtcDate(year, month, day);
+}
+
+function moveToFollowingMondayUtc(date) {
+  const isoDow = date.getUTCDay() === 0 ? 7 : date.getUTCDay();
+  if (isoDow === 1) return date;
+  return addUtcDays(date, 8 - isoDow);
+}
+
+function getColombiaHolidaySet(year) {
+  if (colombiaHolidayCache.has(year)) return colombiaHolidayCache.get(year);
+
+  const easter = easterSundayUtc(year);
+  const holidays = new Set([
+    formatUtcDate(makeUtcDate(year, 1, 1)),
+    formatUtcDate(makeUtcDate(year, 5, 1)),
+    formatUtcDate(makeUtcDate(year, 7, 20)),
+    formatUtcDate(makeUtcDate(year, 8, 7)),
+    formatUtcDate(makeUtcDate(year, 12, 8)),
+    formatUtcDate(makeUtcDate(year, 12, 25)),
+    formatUtcDate(moveToFollowingMondayUtc(makeUtcDate(year, 1, 6))),
+    formatUtcDate(moveToFollowingMondayUtc(makeUtcDate(year, 3, 19))),
+    formatUtcDate(moveToFollowingMondayUtc(makeUtcDate(year, 6, 29))),
+    formatUtcDate(moveToFollowingMondayUtc(makeUtcDate(year, 8, 15))),
+    formatUtcDate(moveToFollowingMondayUtc(makeUtcDate(year, 10, 12))),
+    formatUtcDate(moveToFollowingMondayUtc(makeUtcDate(year, 11, 1))),
+    formatUtcDate(moveToFollowingMondayUtc(makeUtcDate(year, 11, 11))),
+    formatUtcDate(addUtcDays(easter, -3)),
+    formatUtcDate(addUtcDays(easter, -2)),
+    formatUtcDate(moveToFollowingMondayUtc(addUtcDays(easter, 39))),
+    formatUtcDate(moveToFollowingMondayUtc(addUtcDays(easter, 60))),
+    formatUtcDate(moveToFollowingMondayUtc(addUtcDays(easter, 68)))
+  ]);
+
+  colombiaHolidayCache.set(year, holidays);
+  return holidays;
+}
+
+function isColombiaHolidayDate(selectedDate) {
+  const iso = toISODate(selectedDate);
+  if (!iso) return false;
+  const year = Number(iso.slice(0, 4));
+  return getColombiaHolidaySet(year).has(iso);
 }
 
 function isSedeScheduledForDate(sede, selectedDate) {
@@ -722,6 +793,7 @@ function isSedeScheduledForDate(sede, selectedDate) {
   const weekday = new Date(Date.UTC(year, (month || 1) - 1, day || 1)).getUTCDay();
   const jornada = String(sede?.jornada || 'lun_vie').trim().toLowerCase();
   if (jornada === 'lun_dom') return true;
+  if (isColombiaHolidayDate(iso)) return false;
   if (jornada === 'lun_sab') return weekday >= 1 && weekday <= 6;
   return weekday >= 1 && weekday <= 5;
 }

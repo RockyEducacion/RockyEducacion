@@ -323,7 +323,7 @@ function incapacityOverlapsRange(row = {}, dateFrom = '', dateTo = '') {
   return true;
 }
 
-async function getActiveEmployeePortalContext(req, { ip, userAgent } = {}) {
+export async function getActiveEmployeePortalContext(req, { ip, userAgent } = {}) {
   const token = getSessionTokenFromRequest(req);
   if (!token) {
     const error = new Error('missing_session');
