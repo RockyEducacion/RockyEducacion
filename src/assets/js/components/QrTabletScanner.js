@@ -34,7 +34,8 @@ export const QrTabletScanner = (mount, deps = {}) => {
             el('input', { id: 'deviceToken', className: 'input', type: 'password', value: savedToken, placeholder: 'Token generado desde Sedes' })
           ]),
           el('button', { id: 'btnSaveDevice', className: 'btn btn--primary', type: 'button' }, ['Activar tablet']),
-          el('button', { id: 'btnClearDevice', className: 'btn btn--danger', type: 'button' }, ['Limpiar token'])
+          el('button', { id: 'btnClearDevice', className: 'btn btn--danger', type: 'button' }, ['Limpiar token']),
+          el('button', { id: 'btnQrTabletLogout', className: 'btn', type: 'button' }, ['Cerrar sesion'])
         ])
       ]),
     ]),
@@ -121,7 +122,7 @@ export const QrTabletScanner = (mount, deps = {}) => {
     if (btn) btn.textContent = supportUnlocked ? 'Ocultar soporte' : 'Soporte';
     const hint = qs('#supportHint', ui);
     if (hint) hint.textContent = message || (supportUnlocked
-      ? 'Soporte puede activar o limpiar el token. Se bloqueara automaticamente.'
+      ? 'Soporte puede activar la tablet, limpiar el token o cerrar sesion. Se bloqueara automaticamente.'
       : 'Toca para mostrar las opciones de soporte.');
     if (supportUnlockTimer) clearTimeout(supportUnlockTimer);
     supportUnlockTimer = null;
@@ -312,6 +313,7 @@ export const QrTabletScanner = (mount, deps = {}) => {
 
   qs('#btnSaveDevice', ui)?.addEventListener('click', saveDeviceToken);
   qs('#btnClearDevice', ui)?.addEventListener('click', clearDeviceToken);
+  qs('#btnQrTabletLogout', ui)?.addEventListener('click', () => deps.logout?.());
   qs('#btnUnlockSupport', ui)?.addEventListener('click', toggleSupport);
   qs('#btnStartCamera', ui)?.addEventListener('click', () => startCamera().catch((error) => setMessage(error?.message || 'No se pudo iniciar la camara.', 'error')));
   qs('#btnStopCamera', ui)?.addEventListener('click', () => stopCamera());

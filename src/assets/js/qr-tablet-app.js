@@ -47,8 +47,7 @@ function topbar(profile = {}) {
       ])
     ]),
     el('div', { className: 'qr-tablet-actions' }, [
-      el('a', { className: 'btn', href: 'access.html' }, ['Centro de accesos']),
-      el('button', { id: 'btnQrTabletLogout', className: 'btn btn--primary', type: 'button' }, ['Cerrar sesion'])
+      el('a', { className: 'btn', href: 'access.html' }, ['Centro de accesos'])
     ])
   ]);
 }
@@ -110,7 +109,6 @@ function renderDenied(text = 'No tienes permiso para usar el lector QR.') {
     ])
   ]);
   root.replaceChildren(ui);
-  qs('#btnQrTabletLogout', ui)?.addEventListener('click', logout);
 }
 
 function renderScanner() {
@@ -123,9 +121,9 @@ function renderScanner() {
     scannerMount
   ]);
   root.replaceChildren(ui);
-  qs('#btnQrTabletLogout', ui)?.addEventListener('click', logout);
   scannerCleanup = QrTabletScanner(scannerMount, {
-    scanAttendanceQr: deps.scanAttendanceQr
+    scanAttendanceQr: deps.scanAttendanceQr,
+    logout
   });
 }
 

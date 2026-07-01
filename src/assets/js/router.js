@@ -7,7 +7,7 @@ export const navigate = (path) => {
   window.location.hash = path.startsWith('#') ? path : `#${path}`;
 };
 
-const getPath = () => (window.location.hash || '#/login').replace('#', '');
+const getPath = () => (window.location.hash || '#/login').replace('#', '').split('?')[0];
 
 export const refreshRoute = () => {
   renderCurrentRoute();

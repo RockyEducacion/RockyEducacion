@@ -44,6 +44,47 @@ function nextRealtimeChannelName(base) {
   return `${base}-${realtimeChannelSeq}`;
 }
 
+function readAuthUrlParam(name) {
+  try {
+    const searchValue = new URLSearchParams(window.location.search || '').get(name);
+    if (searchValue) return searchValue;
+
+    const rawHash = String(window.location.hash || '').replace(/^#/, '');
+    const hashQuery = rawHash.includes('?') ? rawHash.slice(rawHash.indexOf('?') + 1) : rawHash;
+    return new URLSearchParams(hashQuery).get(name) || '';
+  } catch {
+    return '';
+  }
+}
+
+async function ensureAuthSessionFromUrl() {
+  const { data: current, error: sessionError } = await supabase.auth.getSession();
+  if (sessionError) throw sessionError;
+  if (current?.session) return current.session;
+
+  const code = readAuthUrlParam('code');
+  if (code) {
+    const { data, error } = await supabase.auth.exchangeCodeForSession(code);
+    if (error) throw error;
+    await syncRealtimeAuth(data.session || null);
+    return data.session || null;
+  }
+
+  const accessToken = readAuthUrlParam('access_token');
+  const refreshToken = readAuthUrlParam('refresh_token');
+  if (accessToken && refreshToken) {
+    const { data, error } = await supabase.auth.setSession({
+      access_token: accessToken,
+      refresh_token: refreshToken
+    });
+    if (error) throw error;
+    await syncRealtimeAuth(data.session || null);
+    return data.session || null;
+  }
+
+  return null;
+}
+
 function normalizeRealtimeError(label, status, error = null) {
   if (error instanceof Error) return error;
   const suffix = error?.message || error?.details || String(error || '').trim() || status || 'unknown';
@@ -2156,12 +2197,12 @@ export const authState = (cb) => {
       return;
     }
     await syncRealtimeAuth(data.session || null);
-    cb(normalizeUser(data.session?.user || null));
+    cb(normalizeUser(data.session?.user || null), null);
   });
 
   const { data } = supabase.auth.onAuthStateChange(async (_event, session) => {
     await syncRealtimeAuth(session || null);
-    cb(normalizeUser(session?.user || null));
+    cb(normalizeUser(session?.user || null), _event);
   });
 
   return () => data.subscription.unsubscribe();
@@ -2202,6 +2243,31 @@ export async function register(email, pass, profile = {}) {
     user: normalizeUser(data.user),
     session: data.session || null
   };
+}
+
+export async function requestPasswordReset(email) {
+  const cleanEmail = String(email || '').trim().toLowerCase();
+  const redirectTo = (() => {
+    try {
+      return `${window.location.origin}${window.location.pathname}?reset_password=1`;
+    } catch {
+      return undefined;
+    }
+  })();
+  const { error } = await supabase.auth.resetPasswordForEmail(cleanEmail, {
+    ...(redirectTo ? { redirectTo } : {})
+  });
+  if (error) throw error;
+}
+
+export async function updatePassword(pass) {
+  const session = await ensureAuthSessionFromUrl();
+  if (!session) {
+    throw new Error('La sesion de recuperacion no esta activa. Solicita un nuevo enlace desde recuperar contrasena.');
+  }
+  const { data, error } = await supabase.auth.updateUser({ password: pass });
+  if (error) throw error;
+  return { user: normalizeUser(data.user) };
 }
 
 export async function logout() {

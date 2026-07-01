@@ -6,7 +6,7 @@ import { Home } from './components/Home.js';
 import { Contact } from './components/Contact.js';
 import { DataTreatment } from './components/DataTreatment.js';
 import { About } from './components/About.js';
-import { Login } from './components/Login.js';
+import { ForgotPassword, Login, ResetPassword } from './components/Login.js';
 import { Notes } from './components/Notes.js';
 
 import { UsersAdmin } from './components/UsersAdmin.js';
@@ -55,6 +55,7 @@ subscribe('userProfile', () => footerMount.replaceChildren(Footer()));
 let unsubRoleMatrix=null; let unsubUserOverrides=null; let unsubAudit=null;
 let authSyncToken = 0;
 let routerStarted = false;
+const PUBLIC_AUTH_ROUTES = new Set(['/login', '/forgot-password', '/reset-password']);
 const guardWrite=(perm,fn)=> async (...args)=>{
   if(typeof fn!=='function') return undefined;
   if(!can(perm)) throw new Error('No tienes permiso de edicion para esta seccion.');
@@ -66,6 +67,7 @@ const guardWrite=(perm,fn)=> async (...args)=>{
     .then((fb) => {
       deps={
         authState:fb.authState, login:fb.login, register:fb.register, logout:fb.logout,
+        requestPasswordReset:fb.requestPasswordReset, updatePassword:fb.updatePassword,
         ensureUserProfile:fb.ensureUserProfile, loadUserProfile:fb.loadUserProfile, createUserProfile:fb.createUserProfile,
         addNote:fb.addNote, streamNotes:fb.streamNotes,
         streamRoleMatrix:fb.streamRoleMatrix, setRolePermissions:fb.setRolePermissions, streamUserOverrides:fb.streamUserOverrides,
@@ -103,13 +105,21 @@ const guardWrite=(perm,fn)=> async (...args)=>{
         streamAttendanceByDate:fb.streamAttendanceByDate, streamAttendanceRecent:fb.streamAttendanceRecent, streamImportReplacementsByDate:fb.streamImportReplacementsByDate
       };
 
-      fb.authState(async (user)=>{
+      fb.authState(async (user, authEvent)=>{
         const syncToken = ++authSyncToken;
         const prevUid = String(getState().user?.uid || '').trim();
         const nextUid = String(user?.uid || '').trim();
         const sameUser = Boolean(prevUid && nextUid && prevUid === nextUid);
         if(!sameUser){ if(unsubRoleMatrix){unsubRoleMatrix();unsubRoleMatrix=null;} if(unsubUserOverrides){unsubUserOverrides();unsubUserOverrides=null;} }
-        if(!user){ setState({ user:null, userProfile:null, userOverrides:{} }); headerMount.replaceChildren(Header(deps)); sidebarMount.replaceChildren(Sidebar()); if(location.hash!=="#/login") navigate('/login'); else refreshRoute(); return; }
+        if(!user){
+          setState({ user:null, userProfile:null, userOverrides:{} });
+          headerMount.replaceChildren(Header(deps));
+          sidebarMount.replaceChildren(Sidebar());
+          if(authEvent==='PASSWORD_RECOVERY' || isRecoveryHash()) navigate('/reset-password');
+          else if(!isPublicAuthRoute()) navigate('/login');
+          else refreshRoute();
+          return;
+        }
         await fb.ensureUserProfile(user); const profile=await fb.loadUserProfile(user.uid);
         if(syncToken!==authSyncToken) return;
         const status=String(profile?.estado||'activo').toLowerCase();
@@ -130,7 +140,8 @@ const guardWrite=(perm,fn)=> async (...args)=>{
         if(!sameUser || !unsubRoleMatrix) unsubRoleMatrix=fb.streamRoleMatrix((map)=> setState({ roleMatrix: map }));
         if(!sameUser || !unsubUserOverrides) unsubUserOverrides=fb.streamUserOverrides(user.uid,(ov)=> setState({ userOverrides: ov||{} }));
         headerMount.replaceChildren(Header(deps)); sidebarMount.replaceChildren(Sidebar());
-        if(location.hash==='' || location.hash==="#/login") navigate('/');
+        if(authEvent==='PASSWORD_RECOVERY' || isRecoveryHash()) navigate('/reset-password');
+        else if(location.hash==='' || location.hash==="#/login") navigate('/');
         else if(!sameUser) refreshRoute();
       });
 
@@ -148,6 +159,8 @@ const guardWrite=(perm,fn)=> async (...args)=>{
     });
 
   addRoute('/login', ()=> Login(root, deps));
+  addRoute('/forgot-password', ()=> ForgotPassword(root, deps));
+  addRoute('/reset-password', ()=> ResetPassword(root, deps));
   addRoute('/', ()=> requireAuth(()=> Home(root, deps)));
   addRoute('/contact', ()=> requireAuth(()=> Contact(root)));
   addRoute('/data-treatment', ()=> requireAuth(()=> DataTreatment(root)));
@@ -198,6 +211,12 @@ const guardWrite=(perm,fn)=> async (...args)=>{
   // Supervisor/Empleado
   addRoute('/upload', ()=> requireAuth(()=> guard(PERMS.UPLOAD_DATA, ()=> CargarDatos(root, deps))));
 })();
+function getRoutePath(){ return (window.location.hash || '#/login').replace('#', '').split('?')[0]; }
+function isPublicAuthRoute(){ return PUBLIC_AUTH_ROUTES.has(getRoutePath()); }
+function isRecoveryHash(){
+  const urlMarkers = `${window.location.search || ''}&${window.location.hash || ''}`;
+  return /(?:[?&#])reset_password=1\b|(?:[?&#])type=recovery\b|(?:[?&#])access_token=|(?:[?&#])code=/.test(urlMarkers);
+}
 function requireAuth(ok){ const { user }=getState(); if(!user){ navigate('/login'); return; } return ok?.(); }
 function guard(perm, ok){ if(!can(perm)) return block('No tienes permiso para acceder a esta sección.'); return ok?.(); }
 function block(text){ const div=document.createElement('div'); div.className='main-card'; div.innerHTML=`<h2 style="margin:0 0 .5rem 0;">RockyDEMO</h2><p>${text}</p>`; root.replaceChildren(div); return null; }

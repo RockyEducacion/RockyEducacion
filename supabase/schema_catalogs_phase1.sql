@@ -51,6 +51,7 @@ create table if not exists public.cargos (
   id uuid primary key default gen_random_uuid(),
   codigo text not null unique,
   nombre text,
+  salario numeric,
   alineacion_crud text not null default 'empleado',
   estado text not null default 'activo',
   created_by_uid uuid references public.profiles(id) on delete set null,
@@ -58,6 +59,9 @@ create table if not exists public.cargos (
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
+
+alter table public.cargos
+  add column if not exists salario numeric;
 
 create table if not exists public.novedades (
   id uuid primary key default gen_random_uuid(),
