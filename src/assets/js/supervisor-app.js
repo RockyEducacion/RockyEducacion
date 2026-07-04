@@ -6,6 +6,7 @@ import { ROLES } from './roles.js';
 installBrowserAlertReplacement();
 
 const root = document.getElementById('supervisor-root');
+const SUPERVISOR_PAGE_SIZE_OPTIONS = [25, 50, 100];
 let deps = {};
 let currentUser = null;
 let currentProfile = null;
@@ -13,6 +14,7 @@ let currentRegistry = emptyRegistry(todayBogota());
 let activeTab = 'home';
 let selectedDate = todayBogota();
 let searchText = '';
+let supernumerarioSearchText = '';
 let statusFilter = 'all';
 let sedeFilter = 'all';
 let loading = false;
@@ -22,6 +24,12 @@ let unSupernumerarios = null;
 let supernumerariosStarted = false;
 let replacementSavingKey = '';
 let replacementMessage = null;
+const pageState = {
+  home: { currentPage: 1, pageSize: 25 },
+  registry: { currentPage: 1, pageSize: 25 },
+  novelties: { currentPage: 1, pageSize: 25 },
+  supernumerarios: { currentPage: 1, pageSize: 25 }
+};
 
 function emptyRegistry(fecha) {
   return {
@@ -212,6 +220,8 @@ function renderApp() {
   const registeredRows = rows.filter((row) => row.status !== 'pendiente');
   const filteredRows = filterRows(registeredRows);
   const noveltyRows = rows.filter((row) => row.hasNovelty || row.status === 'novedad' || row.status === 'ausente');
+  const pending = pendingRows(rows);
+  const supernumerarioRows = filterSupernumerarioRows(buildSupernumerarioRows());
   const summary = summarizeRows(rows);
   const zoneLabel = supervisorZones().join(', ') || 'Sin zona';
 
@@ -221,28 +231,44 @@ function renderApp() {
         el('img', { className: 'supervisor-brand__logo', src: 'src/assets/img/rocky-logo.png', alt: 'Rocky' }),
         el('div', { className: 'supervisor-brand__copy' }, [
           el('span', { className: 'supervisor-brand__eyebrow' }, ['Rocky']),
-          el('strong', { className: 'supervisor-brand__name' }, [displayName()])
+          el('strong', { className: 'supervisor-brand__name' }, [displayName()]),
+          el('span', { className: 'supervisor-brand__zone', title: zoneLabel }, [zoneLabel])
         ])
       ]),
-      el('span', { className: 'supervisor-zone-pill', title: zoneLabel }, [zoneLabel])
+      el('div', { className: 'supervisor-topbar__actions' }, [
+        el('button', {
+          className: `btn supervisor-profile-btn${activeTab === 'profile' ? ' is-active' : ''}`,
+          type: 'button',
+          onclick: () => {
+            activeTab = 'profile';
+            renderApp();
+          }
+        }, ['Perfil'])
+      ])
     ]),
     el('main', { className: 'supervisor-main' }, [
       panel('home', [
         hero(summary, 'home'),
         kpiGrid(summary),
-        sectionHead('Pendientes prioritarios', `${pendingRows(rows).length} pendientes`),
-        listOrEmpty(pendingRows(rows).slice(0, 6), 'No hay pendientes para mostrar.')
+        sectionHead('Pendientes prioritarios', `${pending.length} pendientes`),
+        ...pagedList('home', pending, 'No hay pendientes para mostrar.')
       ]),
       panel('registry', [
         hero(summary, 'registry'),
         toolbar(),
         sectionHead('Registro diario', `${filteredRows.length} registros`),
-        listOrEmpty(filteredRows, 'No hay registros con los filtros actuales.')
+        ...pagedList('registry', filteredRows, 'No hay registros con los filtros actuales.')
       ]),
       panel('novelties', [
         hero(summary, 'novelties'),
         sectionHead('Novedades y ausencias', `${noveltyRows.length} registros`),
-        listOrEmpty(noveltyRows, 'No hay novedades registradas para esta fecha.')
+        ...pagedList('novelties', noveltyRows, 'No hay novedades registradas para esta fecha.')
+      ]),
+      panel('supernumerarios', [
+        hero(summary, 'supernumerarios'),
+        supernumerarioToolbar(),
+        sectionHead('Supernumerarios', `${supernumerarioRows.length} personas`),
+        ...pagedList('supernumerarios', supernumerarioRows, 'No hay supernumerarios para mostrar.', supernumerarioCard)
       ]),
       panel('profile', [
         profilePanel(summary)
@@ -269,6 +295,7 @@ function hero(summary, section = 'home') {
         el('label', { for: 'supervisorDate' }, ['Fecha']),
         el('input', { id: 'supervisorDate', className: 'input', type: 'date', value: selectedDate, onchange: (event) => {
           selectedDate = event.target.value || todayBogota();
+          resetAllPages();
           loadRegistry();
         } })
       ])
@@ -283,11 +310,18 @@ function hero(summary, section = 'home') {
 function sectionTitle(section) {
   if (section === 'registry') return 'Registro diario';
   if (section === 'novelties') return 'Novedades';
+  if (section === 'supernumerarios') return 'Supernumerarios';
+  if (section === 'profile') return 'Perfil';
   return 'Hoy en tu zona';
 }
 
 function sectionMessage(summary, section = 'home') {
   if (currentRegistry.error) return { tone: 'danger', text: `Error: ${currentRegistry.error}` };
+  if (section === 'supernumerarios') {
+    const rows = buildSupernumerarioRows();
+    const occupied = rows.filter((row) => row.ocupado).length;
+    return { tone: occupied ? 'warn' : 'ok', text: `${rows.length - occupied} libres y ${occupied} ocupados para ${selectedDate}.` };
+  }
   if (section === 'registry' || section === 'novelties') {
     const pending = Number(summary.noveltyPending || 0);
     if (pending > 0) {
@@ -327,12 +361,14 @@ function toolbar() {
       value: searchText,
       oninput: (event) => {
         searchText = event.target.value || '';
+        resetPage('registry');
         renderApp();
       }
     }),
     el('div', { className: 'supervisor-filter-row' }, [
       el('select', { className: 'select', value: statusFilter, onchange: (event) => {
         statusFilter = event.target.value || 'all';
+        resetPage('registry');
         renderApp();
       } }, [
         option('all', 'Todos', statusFilter),
@@ -342,6 +378,7 @@ function toolbar() {
       ]),
       el('select', { className: 'select', value: sedeFilter, onchange: (event) => {
         sedeFilter = event.target.value || 'all';
+        resetPage('registry');
         renderApp();
       } }, [
         option('all', 'Todas las sedes', sedeFilter),
@@ -362,9 +399,98 @@ function sectionHead(title, count) {
   ]);
 }
 
-function listOrEmpty(rows, emptyText) {
+function supernumerarioToolbar() {
+  return el('section', { className: 'supervisor-toolbar' }, [
+    el('input', {
+      id: 'supervisorSupernumerarioSearch',
+      className: 'input',
+      placeholder: 'Buscar nombre, documento o sede',
+      value: supernumerarioSearchText,
+      oninput: (event) => {
+        supernumerarioSearchText = event.target.value || '';
+        resetPage('supernumerarios');
+        renderApp();
+      }
+    })
+  ]);
+}
+
+function listOrEmpty(rows, emptyText, cardRenderer = recordCard) {
   if (!rows.length) return el('p', { className: 'supervisor-empty' }, [emptyText]);
-  return el('div', { className: 'supervisor-list' }, rows.map(recordCard));
+  return el('div', { className: 'supervisor-list' }, rows.map(cardRenderer));
+}
+
+function pagedList(key, rows, emptyText, cardRenderer = recordCard) {
+  const page = paginateRows(key, rows);
+  return [
+    listOrEmpty(page.rows, emptyText, cardRenderer),
+    paginationControls(key, page)
+  ].filter(Boolean);
+}
+
+function paginateRows(key, rows = []) {
+  const state = pageState[key] || pageState.home;
+  const totalRows = rows.length;
+  const effectivePageSize = Math.max(Number(state.pageSize || 25), 1);
+  const totalPages = Math.max(1, Math.ceil(totalRows / effectivePageSize));
+  state.currentPage = Math.min(Math.max(Number(state.currentPage || 1), 1), totalPages);
+  const startIndex = totalRows ? (state.currentPage - 1) * effectivePageSize : 0;
+  return {
+    rows: rows.slice(startIndex, startIndex + effectivePageSize),
+    totalRows,
+    totalPages,
+    startIndex,
+    pageSize: effectivePageSize,
+    currentPage: state.currentPage
+  };
+}
+
+function paginationControls(key, page = {}) {
+  if (!page.totalRows || page.totalRows <= page.pageSize) return null;
+  const state = pageState[key] || pageState.home;
+  const visibleFrom = page.startIndex + 1;
+  const visibleTo = page.startIndex + page.rows.length;
+  return el('div', { className: 'supervisor-pagination' }, [
+    el('span', { className: 'supervisor-pagination__summary' }, [`Mostrando ${visibleFrom}-${visibleTo} de ${page.totalRows}`]),
+    el('div', { className: 'supervisor-pagination__controls' }, [
+      el('select', {
+        className: 'select supervisor-pagination__size',
+        value: String(state.pageSize),
+        onchange: (event) => {
+          state.pageSize = Number(event.target.value || 25) || 25;
+          state.currentPage = 1;
+          renderApp();
+        }
+      }, SUPERVISOR_PAGE_SIZE_OPTIONS.map((size) => option(String(size), String(size), String(state.pageSize)))),
+      el('button', {
+        className: 'btn supervisor-page-btn',
+        type: 'button',
+        disabled: page.currentPage <= 1,
+        onclick: () => {
+          state.currentPage -= 1;
+          renderApp();
+        }
+      }, ['Anterior']),
+      el('span', { className: 'supervisor-pagination__page' }, [`Pagina ${page.currentPage} de ${page.totalPages}`]),
+      el('button', {
+        className: 'btn supervisor-page-btn',
+        type: 'button',
+        disabled: page.currentPage >= page.totalPages,
+        onclick: () => {
+          state.currentPage += 1;
+          renderApp();
+        }
+      }, ['Siguiente'])
+    ])
+  ]);
+}
+
+function resetPage(key) {
+  if (pageState[key]) pageState[key].currentPage = 1;
+}
+
+function resetAllPages() {
+  Object.keys(pageState).forEach(resetPage);
 }
 
 function recordCard(row) {
@@ -558,15 +684,17 @@ function replacementRowKey(row = {}) {
 
 function bottomNav() {
   const items = [
-    ['home', 'Inicio'],
-    ['registry', 'Registros'],
-    ['novelties', 'Novedades'],
-    ['profile', 'Perfil']
+    ['home', 'Inicio', 'Inicio'],
+    ['registry', 'Registros', 'Registros'],
+    ['novelties', 'Novedades', 'Novedades'],
+    ['supernumerarios', 'Supernum.', 'Supernumerarios']
   ];
-  return el('nav', { className: 'supervisor-bottom-nav', 'aria-label': 'Navegacion supervisores' }, items.map(([key, label]) => (
+  return el('nav', { className: 'supervisor-bottom-nav', 'aria-label': 'Navegacion supervisores' }, items.map(([key, label, fullLabel]) => (
     el('button', {
       className: `supervisor-nav-btn${activeTab === key ? ' is-active' : ''}`,
       type: 'button',
+      title: fullLabel,
+      'aria-label': fullLabel,
       onclick: () => {
         activeTab = key;
         renderApp();
@@ -591,6 +719,79 @@ function profilePanel(summary) {
       actionButton('Administrativo', () => { window.location.href = 'app.html#/login'; }),
       actionButton('Cerrar sesion', async () => { await deps.logout?.(); }, true)
     ])
+  ]);
+}
+
+function buildSupernumerarioRows() {
+  const occupied = new Map();
+  (currentRegistry.replacements || []).forEach((row) => {
+    if (String(row.decision || '').trim().toLowerCase() !== 'reemplazo') return;
+    const info = {
+      empleadoId: row.empleadoId || null,
+      documento: row.documento || null,
+      nombre: row.nombre || null,
+      sedeNombre: row.sedeNombre || null,
+      novedadNombre: row.novedadNombre || null,
+      supernumerarioId: row.supernumerarioId || null,
+      supernumerarioDocumento: row.supernumerarioDocumento || null
+    };
+    const superId = String(row.supernumerarioId || '').trim();
+    const superDoc = String(row.supernumerarioDocumento || '').trim();
+    const superName = normalizeSupervisorText(row.supernumerarioNombre || '');
+    if (superId) occupied.set(`id:${superId}`, info);
+    if (superDoc) occupied.set(`doc:${superDoc}`, info);
+    if (superName) occupied.set(`name:${superName}`, info);
+  });
+
+  return (supernumerarios || []).map((row) => {
+    const id = String(row.id || '').trim();
+    const doc = String(row.documento || '').trim();
+    const name = normalizeSupervisorText(row.nombre || '');
+    const coverage = occupied.get(`id:${id}`) || occupied.get(`doc:${doc}`) || occupied.get(`name:${name}`) || null;
+    return {
+      ...row,
+      ocupado: Boolean(coverage),
+      cobertura: coverage
+    };
+  });
+}
+
+function filterSupernumerarioRows(rows = []) {
+  const term = supernumerarioSearchText.trim().toLowerCase();
+  if (!term) return rows;
+  return rows.filter((row) => [
+    row.nombre,
+    row.documento,
+    row.telefono,
+    row.sedeNombre,
+    row.cobertura?.nombre,
+    row.cobertura?.sedeNombre
+  ].join(' ').toLowerCase().includes(term));
+}
+
+function supernumerarioCard(row = {}) {
+  const phone = normalizePhone(row.telefono);
+  const coverage = row.cobertura || {};
+  const cardDetails = [
+    detail('Estado dia', row.ocupado ? 'Ocupado' : 'Libre'),
+    detail('Sede base', row.sedeNombre || row.sedeCodigo || '-'),
+    row.ocupado ? detail('Cubriendo a', coverage.nombre || coverage.documento || '-') : null,
+    row.ocupado ? detail('Sede cobertura', coverage.sedeNombre || '-') : null,
+    row.ocupado ? detail('Novedad', coverage.novedadNombre || '-') : null
+  ].filter(Boolean);
+  return el('article', { className: 'supervisor-card' }, [
+    el('div', { className: 'supervisor-card__main' }, [
+      el('div', {}, [
+        el('h3', { className: 'supervisor-card__name' }, [row.nombre || 'Sin nombre']),
+        el('p', { className: 'supervisor-card__meta' }, [`${row.documento || '-'} · ${row.sedeNombre || 'Sin sede'}`])
+      ]),
+      el('span', { className: `supervisor-status supervisor-status--${row.ocupado ? 'ocupado' : 'libre'}` }, [row.ocupado ? 'Ocupado' : 'Libre'])
+    ]),
+    el('div', { className: 'supervisor-card__details' }, cardDetails),
+    el('div', { className: 'supervisor-card__actions' }, [
+      phone ? linkAction('Llamar', `tel:${phone}`) : null,
+      phone ? linkAction('WhatsApp', `https://wa.me/${phone}`) : null
+    ].filter(Boolean))
   ]);
 }
 

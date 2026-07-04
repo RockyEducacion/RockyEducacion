@@ -54,21 +54,41 @@
   text-overflow:ellipsis;
   white-space:nowrap
 }
-.supervisor-zone-pill{
+.supervisor-brand__zone{
+  display:block;
+  max-width:54vw;
+  color:#607789;
+  font-size:.68rem;
+  line-height:1.15;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap
+}
+.supervisor-topbar__actions{
+  display:flex;
+  align-items:center;
+  gap:.45rem;
+  flex:0 0 auto
+}
+.supervisor-profile-btn{
   display:inline-flex;
   align-items:center;
+  justify-content:center;
   min-height:34px;
-  max-width:42vw;
-  padding:.35rem .6rem;
-  border-radius:999px;
+  padding:.4rem .62rem;
+  border-radius:8px;
   border:1px solid #c9d7e4;
   background:#f7fafc;
   color:#31566e;
   font-size:.78rem;
+  font-weight:800;
   line-height:1.1;
-  overflow:hidden;
-  text-overflow:ellipsis;
-  white-space:nowrap
+  box-shadow:none
+}
+.supervisor-profile-btn.is-active{
+  background:#e9f3fc;
+  color:#0b63bc;
+  border-color:#bad5ee
 }
 .supervisor-main{
   flex:1;
@@ -224,6 +244,8 @@
 .supervisor-status--novedad{color:#8a3d00;background:#f9731614;border-color:#f9731636}
 .supervisor-status--ausente{color:#c43d34;background:#c43d3412;border-color:#c43d3430}
 .supervisor-status--neutral{color:#526a7c;background:#eef3f7;border-color:#d7e1ea}
+.supervisor-status--libre{color:#187a46;background:#187a4612;border-color:#187a4630}
+.supervisor-status--ocupado{color:#8a3d00;background:#f9731614;border-color:#f9731636}
 .supervisor-card__details{
   display:grid;
   grid-template-columns:repeat(2,minmax(0,1fr));
@@ -299,6 +321,41 @@
   border-radius:8px;
   box-shadow:none;
   font-size:.86rem
+}
+.supervisor-pagination{
+  display:grid;
+  gap:.55rem;
+  padding:.72rem;
+  border-radius:8px;
+  border:1px solid #dce6ef;
+  background:#fff
+}
+.supervisor-pagination__summary{
+  color:#607789;
+  font-size:.82rem
+}
+.supervisor-pagination__controls{
+  display:flex;
+  align-items:center;
+  gap:.45rem;
+  flex-wrap:wrap
+}
+.supervisor-pagination__size{
+  width:auto;
+  min-width:72px;
+  min-height:40px;
+  border-radius:8px
+}
+.supervisor-page-btn{
+  min-height:40px;
+  border-radius:8px;
+  box-shadow:none
+}
+.supervisor-pagination__page{
+  min-width:92px;
+  color:#607789;
+  font-size:.82rem;
+  text-align:center
 }
 .supervisor-empty{
   padding:1rem;
@@ -406,9 +463,13 @@
   .supervisor-kpis{grid-template-columns:repeat(4,minmax(0,1fr))}
 }
 @media (max-width:420px){
-  .supervisor-zone-pill{max-width:36vw}
+  .supervisor-brand__zone{max-width:48vw}
   .supervisor-hero__top{display:grid}
   .supervisor-date{min-width:0}
   .supervisor-card__details{grid-template-columns:1fr}
   .supervisor-replacement__row{grid-template-columns:1fr}
+  .supervisor-pagination__controls{display:grid;grid-template-columns:1fr 1fr}
+  .supervisor-pagination__size,
+  .supervisor-pagination__page{grid-column:1 / -1}
+  .supervisor-pagination__page{text-align:left}
 }

@@ -147,11 +147,14 @@ as $$
   );
 $$;
 
+drop function if exists public.list_supernumerarios_for_current_supervisor();
+
 create or replace function public.list_supernumerarios_for_current_supervisor()
 returns table (
   id uuid,
   documento text,
   nombre text,
+  telefono text,
   estado text,
   sede_codigo text,
   sede_nombre text
@@ -165,6 +168,7 @@ as $$
     e.id,
     e.documento,
     e.nombre,
+    e.telefono,
     e.estado,
     e.sede_codigo,
     e.sede_nombre

@@ -201,6 +201,25 @@ async function selectAllRows(table, {
   return rows;
 }
 
+async function selectPagedRows(buildQuery) {
+  const rows = [];
+  let from = 0;
+
+  while (true) {
+    const { data, error } = await buildQuery()
+      .range(from, from + POSTGREST_PAGE_SIZE - 1);
+    if (error) throw error;
+
+    const batch = Array.isArray(data) ? data : [];
+    rows.push(...batch);
+
+    if (batch.length < POSTGREST_PAGE_SIZE) break;
+    from += POSTGREST_PAGE_SIZE;
+  }
+
+  return rows;
+}
+
 function normalizeUser(user) {
   if (!user) return null;
   return {
@@ -3867,6 +3886,7 @@ export async function listSupervisorAvailableSupernumerarios() {
     id: row.id,
     documento: row.documento || null,
     nombre: row.nombre || null,
+    telefono: row.telefono || null,
     estado: row.estado || 'activo',
     sedeCodigo: row.sede_codigo || null,
     sedeNombre: row.sede_nombre || null
@@ -4501,50 +4521,46 @@ export async function setIncapacidadStatus(id, estado) {
 
 export async function listIncapacidadesRange(dateFrom, dateTo) {
   if (!dateFrom || !dateTo) return [];
-  const { data, error } = await supabase
+  const rows = await selectPagedRows(() => supabase
     .from('incapacitados')
     .select('*')
-    .order('created_at', { ascending: false });
-  if (error) throw error;
-  return (data || [])
+    .order('created_at', { ascending: false }));
+  return rows
     .map(mapIncapacidadRow)
     .filter((row) => incapacityOverlapsRange(row, dateFrom, dateTo));
 }
 
 export async function listSedeStatusRange(dateFrom, dateTo) {
   if (!dateFrom || !dateTo) return [];
-  const { data, error } = await supabase
+  const rows = await selectPagedRows(() => supabase
     .from('sede_status')
     .select('*')
     .gte('fecha', dateFrom)
     .lte('fecha', dateTo)
-    .order('fecha', { ascending: true });
-  if (error) throw error;
-  return (data || []).map(mapSedeStatusRow);
+    .order('fecha', { ascending: true }));
+  return rows.map(mapSedeStatusRow);
 }
 
 export async function listAttendanceRange(dateFrom, dateTo) {
   if (!dateFrom || !dateTo) return [];
-  const { data, error } = await supabase
+  const rows = await selectPagedRows(() => supabase
     .from('attendance')
     .select('*')
     .gte('fecha', dateFrom)
     .lte('fecha', dateTo)
-    .order('fecha', { ascending: true });
-  if (error) throw error;
-  return (data || []).map(mapAttendanceRow);
+    .order('fecha', { ascending: true }));
+  return rows.map(mapAttendanceRow);
 }
 
 export async function listImportReplacementsRange(dateFrom, dateTo) {
   if (!dateFrom || !dateTo) return [];
-  const { data, error } = await supabase
+  const rows = await selectPagedRows(() => supabase
     .from('import_replacements')
     .select('*')
     .gte('fecha', dateFrom)
     .lte('fecha', dateTo)
-    .order('fecha', { ascending: true });
-  if (error) throw error;
-  return (data || []).map(mapImportReplacementRow);
+    .order('fecha', { ascending: true }));
+  return rows.map(mapImportReplacementRow);
 }
 
 export async function listEmployeeDailyStatusRange(dateFrom, dateTo) {
@@ -4575,14 +4591,13 @@ export async function listEmployeeDailyStatusRange(dateFrom, dateTo) {
 
 export async function listDailyMetricsRange(dateFrom, dateTo) {
   if (!dateFrom || !dateTo) return [];
-  const { data, error } = await supabase
+  const rows = await selectPagedRows(() => supabase
     .from('daily_metrics')
     .select('*')
     .gte('fecha', dateFrom)
     .lte('fecha', dateTo)
-    .order('fecha', { ascending: true });
-  if (error) throw error;
-  return (data || []).map(mapDailyMetricsRow);
+    .order('fecha', { ascending: true }));
+  return rows.map(mapDailyMetricsRow);
 }
 
 export async function isOperationDayClosed(fecha) {
@@ -4605,27 +4620,25 @@ export async function listClosedOperationDaysRange(dateFrom, dateTo) {
 
 export async function listDailyClosuresRange(dateFrom, dateTo) {
   if (!dateFrom || !dateTo) return [];
-  const { data, error } = await supabase
+  const rows = await selectPagedRows(() => supabase
     .from('daily_closures')
     .select('*')
     .gte('fecha', dateFrom)
     .lte('fecha', dateTo)
-    .order('fecha', { ascending: true });
-  if (error) throw error;
-  return (data || []).map(mapDailyClosureRow);
+    .order('fecha', { ascending: true }));
+  return rows.map(mapDailyClosureRow);
 }
 
 export async function listDailySedeClosuresRange(dateFrom, dateTo) {
   if (!dateFrom || !dateTo) return [];
-  const { data, error } = await supabase
+  const rows = await selectPagedRows(() => supabase
     .from('daily_sede_closures')
     .select('*')
     .gte('fecha', dateFrom)
     .lte('fecha', dateTo)
     .order('fecha', { ascending: true })
-    .order('sede_codigo', { ascending: true });
-  if (error) throw error;
-  return (data || []).map(mapDailySedeClosureRow);
+    .order('sede_codigo', { ascending: true }));
+  return rows.map(mapDailySedeClosureRow);
 }
 
 function normalizeZoneCodeList(zoneCodes = []) {
@@ -4661,77 +4674,68 @@ export async function listSupervisorDailyRegistry(fecha, zoneCodes = []) {
     };
   }
 
-  const { data: sedeRows, error: sedesError } = await supabase
+  const sedeRows = await selectPagedRows(() => supabase
     .from('sedes')
     .select('*')
     .in('zona_codigo', zones)
-    .order('nombre', { ascending: true });
-  if (sedesError) throw sedesError;
+    .order('nombre', { ascending: true }));
 
   const sedes = (sedeRows || []).map(mapSedeRow);
   const sedeCodes = [...new Set(sedes.map((sede) => String(sede.codigo || '').trim()).filter(Boolean))];
 
   const [
-    dailyStatusResult,
-    employeesResult,
-    closuresResult,
-    attendanceResult,
-    replacementsResult,
-    incapacitiesResult
+    dailyStatusRows,
+    employeeRowsRaw,
+    closureRows,
+    attendanceRows,
+    replacementRows,
+    incapacityRows
   ] = await Promise.all([
-    supabase
+    selectPagedRows(() => supabase
       .from('employee_daily_status')
       .select('*')
       .eq('fecha', day)
       .in('zona_codigo_snapshot', zones)
       .order('sede_codigo', { ascending: true })
-      .order('nombre', { ascending: true }),
-    supabase
+      .order('nombre', { ascending: true })),
+    selectPagedRows(() => supabase
       .from('employees')
       .select('*')
       .eq('estado', 'activo')
       .in('zona_codigo', zones)
-      .order('nombre', { ascending: true }),
-    supabase
+      .order('nombre', { ascending: true })),
+    selectPagedRows(() => supabase
       .from('daily_sede_closures')
       .select('*')
       .eq('fecha', day)
       .in('zona_codigo', zones)
-      .order('sede_codigo', { ascending: true }),
+      .order('sede_codigo', { ascending: true })),
     sedeCodes.length
-      ? supabase
+      ? selectPagedRows(() => supabase
         .from('attendance')
         .select('*')
         .eq('fecha', day)
         .in('sede_codigo', sedeCodes)
-        .order('created_at', { ascending: false })
-      : Promise.resolve({ data: [], error: null }),
+        .order('created_at', { ascending: false }))
+      : Promise.resolve([]),
     sedeCodes.length
-      ? supabase
+      ? selectPagedRows(() => supabase
         .from('import_replacements')
         .select('*')
         .eq('fecha', day)
         .in('sede_codigo', sedeCodes)
-        .order('ts', { ascending: false })
-      : Promise.resolve({ data: [], error: null }),
-    supabase
+        .order('ts', { ascending: false }))
+      : Promise.resolve([]),
+    selectPagedRows(() => supabase
       .from('incapacitados')
       .select('*')
       .eq('estado', 'activo')
       .lte('fecha_inicio', day)
       .gte('fecha_fin', day)
-      .order('fecha_inicio', { ascending: false })
+      .order('fecha_inicio', { ascending: false }))
   ]);
 
-  const firstError = dailyStatusResult.error
-    || employeesResult.error
-    || closuresResult.error
-    || attendanceResult.error
-    || replacementsResult.error
-    || incapacitiesResult.error;
-  if (firstError) throw firstError;
-
-  const employeeRows = (employeesResult.data || []).map(mapEmployeeRow);
+  const employeeRows = (employeeRowsRaw || []).map(mapEmployeeRow);
   const expectedEmployees = employeeRows.filter((employee) => isEmployeeExpectedForDate(employee, day, sedes));
   const expectedEmployeeKeys = new Set(
     expectedEmployees
@@ -4741,7 +4745,7 @@ export async function listSupervisorDailyRegistry(fecha, zoneCodes = []) {
       ])
       .filter(Boolean)
   );
-  const operationalDailyStatus = (dailyStatusResult.data || [])
+  const operationalDailyStatus = (dailyStatusRows || [])
     .map(mapEmployeeDailyStatusRow)
     .filter((row) => {
       const employeeId = String(row.employeeId || '').trim();
@@ -4757,9 +4761,9 @@ export async function listSupervisorDailyRegistry(fecha, zoneCodes = []) {
     sedes,
     employees: expectedEmployees,
     dailyStatus: operationalDailyStatus,
-    attendance: (attendanceResult.data || []).map(mapAttendanceRow),
-    replacements: (replacementsResult.data || []).map(mapImportReplacementRow),
-    incapacities: (incapacitiesResult.data || [])
+    attendance: (attendanceRows || []).map(mapAttendanceRow),
+    replacements: (replacementRows || []).map(mapImportReplacementRow),
+    incapacities: (incapacityRows || [])
       .map(mapIncapacidadRow)
       .filter((row) => {
         const employeeId = String(row.employeeId || '').trim();
@@ -4773,7 +4777,7 @@ export async function listSupervisorDailyRegistry(fecha, zoneCodes = []) {
               || (documento && statusDocument === documento);
           });
       }),
-    closures: (closuresResult.data || []).map(mapDailySedeClosureRow)
+    closures: (closureRows || []).map(mapDailySedeClosureRow)
   };
 }
 
