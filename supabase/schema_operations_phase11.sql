@@ -11,6 +11,24 @@ as $$
   end;
 $$;
 
+do $$
+begin
+  if not exists (
+    select 1
+    from pg_constraint
+    where conname = 'employee_cargo_history_valid_date_range'
+      and conrelid = 'public.employee_cargo_history'::regclass
+  ) then
+    alter table public.employee_cargo_history
+      add constraint employee_cargo_history_valid_date_range
+      check (
+        fecha_ingreso is null
+        or fecha_retiro is null
+        or fecha_ingreso::date <= fecha_retiro::date
+      ) not valid;
+  end if;
+end $$;
+
 create or replace function public.bool_from_text_truthy(value text)
 returns boolean
 language sql
@@ -196,6 +214,19 @@ declare
 begin
   if p_fecha is null or p_fecha !~ '^\d{4}-\d{2}-\d{2}$' then
     raise exception 'Fecha invalida para employee_daily_status: %', p_fecha;
+  end if;
+
+  if exists (
+    select 1
+    from public.daily_closures dc
+    where dc.fecha = p_fecha
+      and (dc.locked = true or lower(trim(coalesce(dc.status, ''))) = 'closed')
+  ) then
+    select count(*)::integer
+    into v_rows
+    from public.employee_daily_status
+    where fecha = p_fecha;
+    return v_rows;
   end if;
 
   delete from public.employee_daily_status where fecha = p_fecha;

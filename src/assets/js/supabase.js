@@ -1632,6 +1632,10 @@ async function refreshEmployeeDailyStatusSnapshot(fecha) {
 async function refreshOperationalSnapshotsFromEmployeeDailyStatus(fecha) {
   const day = String(fecha || '').trim();
   if (!day) return null;
+  if (await isOperationDayClosed(day)) {
+    const metrics = await getDailyMetricsRowByDate(day);
+    return metrics ? { fecha: day, skipped: 'closed' } : null;
+  }
 
   const refreshed = await refreshEmployeeDailyStatusSnapshot(day);
   if (refreshed === null) return null;
@@ -1650,6 +1654,7 @@ async function refreshOperationalSnapshotsFromEmployeeDailyStatus(fecha) {
 async function refreshOperationalState(fecha) {
   const day = String(fecha || '').trim();
   if (!day) return null;
+  if (await isOperationDayClosed(day)) return getDailyMetricsRowByDate(day);
 
   const refreshed = await refreshOperationalSnapshotsFromEmployeeDailyStatus(day);
   if (refreshed !== null) {
@@ -1663,6 +1668,7 @@ async function refreshOperationalState(fecha) {
 async function recomputeDailyMetrics(fecha) {
   const day = String(fecha || '').trim();
   if (!day) return null;
+  if (await isOperationDayClosed(day)) return getDailyMetricsRowByDate(day);
 
   const refreshed = await refreshEmployeeDailyStatusSnapshot(day);
   if (refreshed !== null) {
@@ -1772,6 +1778,7 @@ async function recomputeDailyMetrics(fecha) {
 async function recomputeSedeStatusSnapshot(fecha) {
   const day = String(fecha || '').trim();
   if (!day) return;
+  if (await isOperationDayClosed(day)) return null;
 
   const refreshed = await refreshEmployeeDailyStatusSnapshot(day);
   if (refreshed !== null) {
@@ -4929,13 +4936,6 @@ export async function closeOperationDayManual(fecha) {
   const day = String(fecha || '').trim();
   if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) throw new Error('Fecha invalida.');
   if (await isOperationDayClosed(day)) {
-    await persistDailySedeClosureSnapshot(day);
-    await runPostClosureTasks(day);
-    const refreshedAlreadyClosed = await refreshOperationalSnapshotsFromEmployeeDailyStatus(day);
-    if (refreshedAlreadyClosed === null) {
-      await recomputeSedeStatusSnapshot(day);
-      await recomputeDailyMetrics(day);
-    }
     return { ok: true, results: [{ date: day, status: 'already_closed' }] };
   }
 

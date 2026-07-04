@@ -665,7 +665,7 @@ function sendCertificateVerificationHtml(res, statusCode, row, customMessage = '
   const ok = statusCode === 200 && row;
   const title = ok ? 'Certificado valido' : 'Certificado no encontrado';
   const message = customMessage || (ok
-    ? 'Este certificado fue emitido por Servilimpieza S.A. a través de Rocky.'
+    ? 'Este certificado fue emitido por Servicios Integrales S.I. S.A.S. a través de Rocky.'
     : 'No encontramos un certificado emitido con este codigo de verificacion.');
   const typeLabel = row?.certificate_type === 'with_salary' ? 'Laboral con salario' : 'Laboral basico';
   const channelLabel = row?.channel === 'employee_portal' ? 'Portal de empleados' : 'Administrativo';
@@ -2352,6 +2352,10 @@ async function refreshEmployeeDailyStatusSnapshot(date) {
 async function refreshOperationalSnapshotsFromEmployeeDailyStatus(date) {
   const day = String(date || '').trim();
   if (!day) return null;
+  if (await isOperationDayClosed(day)) {
+    const metrics = await fetchDailyMetricsRow(day);
+    return metrics ? { fecha: day, skipped: 'closed' } : null;
+  }
 
   const refreshed = await refreshEmployeeDailyStatusSnapshot(day);
   if (refreshed === null) return null;
@@ -2368,6 +2372,7 @@ async function refreshOperationalSnapshotsFromEmployeeDailyStatus(date) {
 async function refreshOperationalState(date) {
   const day = String(date || '').trim();
   if (!day) return null;
+  if (await isOperationDayClosed(day)) return fetchDailyMetricsRow(day);
 
   const refreshed = await refreshOperationalSnapshotsFromEmployeeDailyStatus(day);
   if (refreshed !== null) {
@@ -2381,6 +2386,7 @@ async function refreshOperationalState(date) {
 async function recomputeDailyMetrics(date) {
   const day = String(date || '').trim();
   if (!day) return null;
+  if (await isOperationDayClosed(day)) return fetchDailyMetricsRow(day);
 
   const refreshed = await refreshEmployeeDailyStatusSnapshot(day);
   if (refreshed !== null) {
@@ -2470,6 +2476,7 @@ async function recomputeDailyMetrics(date) {
 async function recomputeSedeStatusSnapshot(date) {
   const day = String(date || '').trim();
   if (!day) return;
+  if (await isOperationDayClosed(day)) return null;
 
   const refreshed = await refreshEmployeeDailyStatusSnapshot(day);
   if (refreshed !== null) {
@@ -3076,20 +3083,13 @@ async function closeOperationDay(date) {
   if (existingClosureError) throw existingClosureError;
 
   if (existingClosure?.locked === true || String(existingClosure?.status || '').trim().toLowerCase() === 'closed') {
-    await persistDailySedeClosureSnapshot(day);
-    await runPostClosureTasks(day);
-    const refreshedAlreadyClosed = await refreshOperationalSnapshotsFromEmployeeDailyStatus(day);
-    if (refreshedAlreadyClosed === null) {
-      await recomputeSedeStatusSnapshot(day);
-      await recomputeDailyMetrics(day);
-    }
     await insertSystemAuditLog({
       actorEmail: 'cron@system',
       targetType: 'daily_closure',
       targetId: day,
-      action: 'cron_close_reconciled',
+      action: 'cron_close_skipped_already_closed',
       before: existingClosure,
-      note: 'El cierre automatico de ' + day + ' ya estaba cerrado; se reconciliaron tareas pendientes de post-cierre.'
+      note: 'El cierre automatico de ' + day + ' ya estaba cerrado; no se recalcularon snapshots ni metricas.'
     });
     return { date: day, status: 'already_closed' };
   }

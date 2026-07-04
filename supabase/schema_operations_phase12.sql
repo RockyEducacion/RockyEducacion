@@ -11,6 +11,19 @@ begin
     raise exception 'Fecha invalida para sede_status: %', p_fecha;
   end if;
 
+  if exists (
+    select 1
+    from public.daily_closures dc
+    where dc.fecha = p_fecha
+      and (dc.locked = true or lower(trim(coalesce(dc.status, ''))) = 'closed')
+  ) then
+    select count(*)::integer
+    into v_rows
+    from public.sede_status
+    where fecha = p_fecha;
+    return v_rows;
+  end if;
+
   delete from public.sede_status where fecha = p_fecha;
 
   with active_sedes as (
@@ -66,6 +79,22 @@ declare
 begin
   if p_fecha is null or p_fecha !~ '^\d{4}-\d{2}-\d{2}$' then
     raise exception 'Fecha invalida para daily_metrics: %', p_fecha;
+  end if;
+
+  if exists (
+    select 1
+    from public.daily_closures dc
+    where dc.fecha = p_fecha
+      and (dc.locked = true or lower(trim(coalesce(dc.status, ''))) = 'closed')
+  ) then
+    select *
+    into v_result
+    from public.daily_metrics dm
+    where dm.fecha = p_fecha
+    limit 1;
+    if found then
+      return v_result;
+    end if;
   end if;
 
   with active_sedes as (
