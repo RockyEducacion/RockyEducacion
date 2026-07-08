@@ -182,10 +182,10 @@ async function logout() {
   renderLogin();
 }
 
-function statCard(label, value) {
-  return el('article', { className: 'employee-stat' }, [
-    el('p', { className: 'employee-stat__label' }, [label]),
-    el('p', { className: 'employee-stat__value' }, [value])
+function sessionMetaItem(label, value) {
+  return el('div', { className: 'employee-session-meta__item' }, [
+    el('span', { className: 'employee-session-meta__label' }, [label]),
+    el('strong', { className: 'employee-session-meta__value' }, [value || '-'])
   ]);
 }
 
@@ -203,26 +203,27 @@ function renderDashboardCard(session) {
   const host = el('div');
   const uploadMount = el('div');
   const info = employeeCard([
-    el('div', { className: 'employee-dashboard-head form-row' }, [
-        el('div', {}, [
-          el('p', { className: 'employee-card__kicker' }, ['Sesion activa']),
-          el('h2', { style: 'margin:0;' }, [`Hola, ${session?.nombre || 'Empleado'}`]),
-          el('p', { className: 'text-muted mt-1' }, ['Tu acceso esta limitado a la seccion de incapacidades del portal de empleados.'])
+    el('div', { className: 'employee-dashboard-overview' }, [
+      el('div', { className: 'employee-session-copy' }, [
+        el('div', { className: 'employee-session-titlebar' }, [
+          el('div', {}, [
+            el('p', { className: 'employee-card__kicker' }, ['Sesion activa']),
+            el('h2', {}, [`Hola, ${session?.nombre || 'Empleado'}`])
+          ]),
+          el('button', { className: 'btn', type: 'button' }, ['Cerrar sesion'])
         ]),
-      el('button', { className: 'btn right', type: 'button' }, ['Cerrar sesion'])
+        el('p', { className: 'text-muted' }, ['Gestiona tus incapacidades y descarga tus certificados laborales desde este portal.']),
+        el('div', { className: 'employee-session-meta' }, [
+          sessionMetaItem('Documento', session?.documento || '-'),
+          sessionMetaItem('Sesion vence', formatDate(session?.expiresAt))
+        ])
+      ]),
+      renderCertificateActions()
     ]),
-    el('div', { className: 'employee-grid mt-2' }, [
-      statCard('Documento', session?.documento || '-'),
-      statCard('Sesion vence', formatDate(session?.expiresAt))
-    ]),
-    el('div', { className: 'divider' }, []),
-    renderCertificateActions(),
-    el('div', { className: 'divider' }, []),
-    uploadMount
   ]);
 
   info.querySelector('button')?.addEventListener('click', logout);
-  host.append(info);
+  host.append(info, uploadMount);
   CargarDatos(uploadMount, { apiRequest: request, portalSession: session });
   return host;
 }
@@ -231,9 +232,9 @@ function renderCertificateActions() {
   const msg = el('p', { className: 'employee-message text-muted mt-1' }, [' ']);
   const btnBasic = el('button', { className: 'btn btn--primary', type: 'button' }, ['Certificado laboral']);
   const btnSalary = el('button', { className: 'btn', type: 'button' }, ['Certificado con salario']);
-  const node = el('section', { className: 'employee-panel' }, [
-    el('h3', { style: 'margin-top:0;' }, ['Certificados']),
-    el('p', { className: 'text-muted' }, ['Descarga tu certificado laboral en PDF.']),
+  const node = el('section', { className: 'employee-cert-actions' }, [
+    el('h3', {}, ['Certificados laborales']),
+    el('p', { className: 'text-muted' }, ['Descarga tu certificado laboral en PDF, con o sin informacion salarial.']),
     el('div', { className: 'employee-form__actions' }, [btnBasic, btnSalary]),
     msg
   ]);

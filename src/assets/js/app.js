@@ -22,9 +22,8 @@ import { NovedadesAdmin } from './components/NovedadesAdmin.js';
 import { CargueMasivoAdmin } from './components/CargueMasivoAdmin.js';
 import { CargueMasivoSedesAdmin } from './components/CargueMasivoSedesAdmin.js';
 import { ImportHistory } from './components/ImportHistory.js';
-import { Payroll } from './components/Payroll.js';
 import { Absenteeism } from './components/Absenteeism.js';
-import { DailyReports } from './components/DailyReports.js';
+import { HistoricalDailyRegistry } from './components/HistoricalDailyRegistry.js';
 import { ConsolidatedReports } from './components/ConsolidatedReports.js';
 import { ImportReplacements } from './components/ImportReplacements.js';
 import { CargarDatos } from './components/CargarDatos.js';
@@ -47,7 +46,12 @@ const footerMount =document.getElementById('app-footer');
 const root        =document.getElementById('app-root');
 
 let deps={};
-sidebarMount.replaceChildren(Sidebar());
+function renderSidebar(){
+  const current=sidebarMount.firstElementChild;
+  current?._cleanup?.();
+  sidebarMount.replaceChildren(Sidebar(deps));
+}
+renderSidebar();
 headerMount.replaceChildren(Header());
 footerMount.replaceChildren(Footer());
 subscribe('userProfile', () => footerMount.replaceChildren(Footer()));
@@ -91,7 +95,7 @@ const guardWrite=(perm,fn)=> async (...args)=>{
         closeOperationDayManual:fb.closeOperationDayManual,
         isOperationDayClosed:fb.isOperationDayClosed, listClosedOperationDaysRange:fb.listClosedOperationDaysRange, listDailyClosuresRange:fb.listDailyClosuresRange,
         listDailySedeClosuresRange:fb.listDailySedeClosuresRange,
-        listSedeStatusRange:fb.listSedeStatusRange, listAttendanceRange:fb.listAttendanceRange, listImportReplacementsRange:fb.listImportReplacementsRange, listEmployeeDailyStatusRange:fb.listEmployeeDailyStatusRange,
+        listSedeStatusRange:fb.listSedeStatusRange, listAttendanceRange:fb.listAttendanceRange, listImportReplacementsRange:fb.listImportReplacementsRange, listSupernumerarioReplacementOccupancy:fb.listSupernumerarioReplacementOccupancy, listEmployeeDailyStatusRange:fb.listEmployeeDailyStatusRange,
         listDailyMetricsRange:fb.listDailyMetricsRange,
         streamDailyMetricsByDate:fb.streamDailyMetricsByDate,
         streamIncapacitadosByDate:fb.streamIncapacitadosByDate,
@@ -114,7 +118,7 @@ const guardWrite=(perm,fn)=> async (...args)=>{
         if(!user){
           setState({ user:null, userProfile:null, userOverrides:{} });
           headerMount.replaceChildren(Header(deps));
-          sidebarMount.replaceChildren(Sidebar());
+          renderSidebar();
           if(authEvent==='PASSWORD_RECOVERY' || isRecoveryHash()) navigate('/reset-password');
           else if(!isPublicAuthRoute()) navigate('/login');
           else refreshRoute();
@@ -139,7 +143,7 @@ const guardWrite=(perm,fn)=> async (...args)=>{
         setState({ user, userProfile: profile });
         if(!sameUser || !unsubRoleMatrix) unsubRoleMatrix=fb.streamRoleMatrix((map)=> setState({ roleMatrix: map }));
         if(!sameUser || !unsubUserOverrides) unsubUserOverrides=fb.streamUserOverrides(user.uid,(ov)=> setState({ userOverrides: ov||{} }));
-        headerMount.replaceChildren(Header(deps)); sidebarMount.replaceChildren(Sidebar());
+        headerMount.replaceChildren(Header(deps)); renderSidebar();
         if(authEvent==='PASSWORD_RECOVERY' || isRecoveryHash()) navigate('/reset-password');
         else if(location.hash==='' || location.hash==="#/login") navigate('/');
         else if(!sameUser) refreshRoute();
@@ -194,18 +198,18 @@ const guardWrite=(perm,fn)=> async (...args)=>{
   addRoute('/registro-qr', ()=> requireAuth(()=> guard(PERMS.VIEW_QR_DAILY_REGISTRY, ()=> QrDailyRegistry(root, deps))));
   addRoute('/imports-replacements', ()=> requireAuth(()=> guard(PERMS.IMPORT_DATA, ()=> ImportReplacements(root, deps))));
   addRoute('/import-history', ()=> requireAuth(()=> guard(PERMS.VIEW_IMPORT_HISTORY, ()=> ImportHistory(root, deps))));
-  addRoute('/payroll', ()=> requireAuth(()=> guard(PERMS.RUN_PAYROLL, ()=> Payroll(root, deps))));
   addRoute('/absenteeism', ()=> requireAuth(()=> guard(PERMS.MANAGE_ABSENTEEISM, ()=> Absenteeism(root, deps))));
 
   // Consultor
   addRoute('/reports', ()=> requireAuth(()=> {
-    if (can(PERMS.VIEW_REPORTS_CLIENT)) { navigate('/reports-daily'); return null; }
+    if (can(PERMS.VIEW_REPORTS_CLIENT)) { navigate('/reports-daily-history'); return null; }
     if (can(PERMS.VIEW_REPORTS_COMPANY)) { navigate('/reports-consolidated'); return null; }
     return block('No tienes permiso para acceder a esta seccion.');
   }));
-  addRoute('/reports-client', ()=> { navigate('/reports-daily'); return null; });
+  addRoute('/reports-client', ()=> { navigate('/reports-daily-history'); return null; });
   addRoute('/reports-company', ()=> { navigate('/reports-consolidated'); return null; });
-  addRoute('/reports-daily', ()=> requireAuth(()=> guard(PERMS.VIEW_REPORTS_CLIENT, ()=> DailyReports(root, deps))));
+  addRoute('/reports-daily', ()=> { navigate('/reports-daily-history'); return null; });
+  addRoute('/reports-daily-history', ()=> requireAuth(()=> guard(PERMS.VIEW_REPORTS_CLIENT, ()=> HistoricalDailyRegistry(root, deps))));
   addRoute('/reports-consolidated', ()=> requireAuth(()=> guard(PERMS.VIEW_REPORTS_COMPANY, ()=> ConsolidatedReports(root, deps))));
 
   // Supervisor/Empleado

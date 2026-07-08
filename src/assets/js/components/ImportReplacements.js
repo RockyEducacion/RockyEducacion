@@ -31,8 +31,42 @@ export const ImportReplacements=(mount,deps={})=>{
 
   const tbody=qs('#tblRep tbody',ui);
   let supernumerarios=[];
+  let occupiedReplacements=[];
   const unSupn=deps.streamSupernumerarios?.((arr)=>{ supernumerarios=(arr||[]).filter((s)=> s.estado!=='inactivo'); render(); });
-  const byDoc=(doc)=> supernumerarios.filter((s)=> String(s.documento||'').trim()!==String(doc||'').trim());
+  loadOccupancy();
+
+  async function loadOccupancy(){
+    if(!fecha || !deps.listSupernumerarioReplacementOccupancy) return;
+    try{
+      occupiedReplacements=await deps.listSupernumerarioReplacementOccupancy(fecha)||[];
+      render();
+    }catch(e){
+      qs('#msg',ui).textContent='No se pudo cargar ocupacion de supernumerarios: '+(e?.message||e);
+    }
+  }
+
+  function occupiedSupernumerarioKeys(){
+    const ids=new Set();
+    const docs=new Set();
+    (occupiedReplacements||[]).forEach((row)=>{
+      if(String(row?.decision||'').trim()!=='reemplazo') return;
+      const id=String(row?.supernumerarioId||'').trim();
+      const doc=String(row?.supernumerarioDocumento||'').trim();
+      if(id) ids.add(id);
+      if(doc) docs.add(doc);
+    });
+    return { ids, docs };
+  }
+
+  const byDoc=(doc)=>{
+    const occupied=occupiedSupernumerarioKeys();
+    return supernumerarios.filter((s)=>{
+      const id=String(s.id||'').trim();
+      const sdoc=String(s.documento||'').trim();
+      if(sdoc===String(doc||'').trim()) return false;
+      return !occupied.ids.has(id) && (!sdoc || !occupied.docs.has(sdoc));
+    });
+  };
 
   function decisionRow(c,idx){
     const tr=el('tr',{'data-idx':String(idx)},[]);
@@ -48,8 +82,12 @@ export const ImportReplacements=(mount,deps={})=>{
       supSel.disabled=decision.value!=='reemplazo';
       if(supSel.disabled) supSel.value='';
     });
-    const options=byDoc(c.documento).map((s)=> el('option',{value:s.id},[`${s.nombre||s.documento||'-'} (${s.documento||'-'})`]));
+    const available=byDoc(c.documento);
+    const options=available.map((s)=> el('option',{value:s.id},[`${s.nombre||s.documento||'-'} (${s.documento||'-'})`]));
     supSel.append(...options);
+    if(!available.length){
+      supSel.append(el('option',{value:'',disabled:true},['Sin supernumerarios libres']));
+    }
     tr.append(
       el('td',{},[c.nombre||'-']),
       el('td',{},[c.documento||'-']),
@@ -79,8 +117,14 @@ export const ImportReplacements=(mount,deps={})=>{
       if(decision==='reemplazo'){
         if(!supnId){ qs('#msg',ui).textContent='Debes seleccionar supernumerario en todas las filas con reemplazo.'; return; }
         if(usedSupn.has(supnId)){ qs('#msg',ui).textContent='No puedes usar el mismo supernumerario dos veces.'; return; }
-        usedSupn.add(supnId);
         const s=supernumerarios.find((x)=> x.id===supnId);
+        const occupied=occupiedSupernumerarioKeys();
+        const supnDoc=String(s?.documento||'').trim();
+        if(occupied.ids.has(supnId) || (supnDoc && occupied.docs.has(supnDoc))){
+          qs('#msg',ui).textContent='Ese supernumerario ya esta ocupado para esta fecha.';
+          return;
+        }
+        usedSupn.add(supnId);
         assignments.push({
           ...c,
           decision,

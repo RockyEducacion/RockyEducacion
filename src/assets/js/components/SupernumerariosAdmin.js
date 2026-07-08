@@ -23,8 +23,14 @@ export const SupernumerariosAdmin=(mount,deps={})=>{
     ]),
     el('div',{id:'tabList'},[
       el('div',{className:'form-row'},[
-        el('div',{},[ el('label',{className:'label'},['Buscar']), el('input',{id:'txtSearch',className:'input',placeholder:'Codigo, documento, nombre o sede...'}) ]),
-        el('div',{},[ el('label',{className:'label'},['Estado']), el('select',{id:'selStatus',className:'select'},[ el('option',{value:''},['Todos']), el('option',{value:'activo'},['Activos']), el('option',{value:'inactivo'},['Inactivos']) ]) ])
+        el('div',{},[ el('label',{className:'label'},['Buscar']), el('input',{id:'txtSearch',className:'input',placeholder:'Codigo, documento, nombre, sede de hoy...'}) ]),
+        el('div',{},[ el('label',{className:'label'},['Estado']), el('select',{id:'selStatus',className:'select'},[
+          el('option',{value:''},['Todos']),
+          el('option',{value:'libre'},['Libres']),
+          el('option',{value:'ocupado'},['Ocupados']),
+          el('option',{value:'incapacitado'},['Incapacitados']),
+          el('option',{value:'inactivo'},['Inactivos'])
+        ]) ])
       ]),
       el('div',{className:'mt-2 table-wrap'},[
         el('table',{className:'table',id:'tbl'},[
@@ -34,10 +40,8 @@ export const SupernumerariosAdmin=(mount,deps={})=>{
             el('th',{'data-sort':'nombre',style:'cursor:pointer'},['Nombre']),
             el('th',{'data-sort':'telefono',style:'cursor:pointer'},['Telefono']),
             el('th',{'data-sort':'cargoNombre',style:'cursor:pointer'},['Cargo']),
-            el('th',{'data-sort':'sedeNombre',style:'cursor:pointer'},['Sede']),
-            el('th',{'data-sort':'estado',style:'cursor:pointer'},['Estado']),
-            el('th',{'data-sort':'fechaIngreso',style:'cursor:pointer'},['Ingreso']),
-            el('th',{'data-sort':'fechaRetiro',style:'cursor:pointer'},['Retiro']),
+            el('th',{'data-sort':'estadoOperativo',style:'cursor:pointer'},['Estado']),
+            el('th',{'data-sort':'sedeHoy',style:'cursor:pointer'},['Sede hoy']),
             el('th',{},['Acciones'])
           ]) ]),
           el('tbody',{})
@@ -106,10 +110,16 @@ export const SupernumerariosAdmin=(mount,deps={})=>{
   let snapshot=[]; const tbody=ui.querySelector('tbody');
   let sortKey=''; let sortDir=1;
   const paginator=createTablePagination(ui,{id:'supernumerarios',after:'#tabList .table-wrap',onChange:render});
+  const today=todayBogota();
   let unSedes=()=>{};
   let unCargos=()=>{};
   let unEmp=()=>{};
+  let unIncapacitados=()=>{};
+  let unReplacements=()=>{};
   let employees=[];
+  let incapacitados=[];
+  let occupancyRows=[];
+  let occupancyRefreshTimer=null;
   const sedeNameByCode=(code)=> sedeList.find(s=>s.codigo===code)?.nombre || '-';
   const cargoNameByCode=(code)=> cargoList.find(c=>c.codigo===code)?.nombre || '-';
   const isLinkedByDoc=(doc)=>{
@@ -139,7 +149,8 @@ export const SupernumerariosAdmin=(mount,deps={})=>{
   }
   function getSortValue(e,key){
     if(key==='cargoNombre') return (e.cargoNombre||cargoNameByCode(e.cargoCodigo)||'').toLowerCase();
-    if(key==='sedeNombre') return (e.sedeNombre||sedeNameByCode(e.sedeCodigo)||'').toLowerCase();
+    if(key==='estadoOperativo') return operationalInfo(e).label.toLowerCase();
+    if(key==='sedeHoy') return operationalInfo(e).sedeLabel.toLowerCase();
     if(key==='fechaIngreso' || key==='fechaRetiro') return toSortableDate(e[key]);
     return String(e[key]??'').toLowerCase();
   }
@@ -175,8 +186,9 @@ export const SupernumerariosAdmin=(mount,deps={})=>{
     const term=search(); const st=filterStatus();
     const data=snapshot.filter(e=>{
       if(shouldHideInComplementaryView(e)) return false;
-      const text=[e.codigo,e.documento,e.nombre,e.cargoNombre,cargoNameByCode(e.cargoCodigo),e.sedeNombre,sedeNameByCode(e.sedeCodigo)].join(' ').toLowerCase();
-      return (!term || text.includes(term)) && (!st || e.estado===st);
+      const op=operationalInfo(e);
+      const text=[e.codigo,e.documento,e.nombre,e.cargoNombre,cargoNameByCode(e.cargoCodigo),op.label,op.sedeLabel].join(' ').toLowerCase();
+      return (!term || text.includes(term)) && (!st || op.key===st);
     });
     const sorted=sortData(data);
     const pageRows=paginator.slice(sorted);
@@ -192,15 +204,129 @@ export const SupernumerariosAdmin=(mount,deps={})=>{
     const tdNombre=el('td',{},[e.nombre||'-']);
     const tdTel=el('td',{},[e.telefono||'-']);
     const tdCargo=el('td',{},[ e.cargoNombre||cargoNameByCode(e.cargoCodigo) ]);
-    const tdSede=el('td',{},[ e.sedeNombre||sedeNameByCode(e.sedeCodigo) ]);
-    const tdEstado=el('td',{},[ statusBadge(e.estado) ]);
-    const tdIngreso=el('td',{},[ formatDate(e.fechaIngreso) ]);
-    const tdRetiro=el('td',{},[ formatDate(e.fechaRetiro) ]);
+    const op=operationalInfo(e);
+    const tdEstado=el('td',{},[ operationalBadge(op) ]);
+    const tdSedeHoy=el('td',{},[ op.sedeLabel || '-' ]);
     const tdAcc=el('td',{},[ actionsCell(e) ]);
-    tr.append(tdCodigo,tdDoc,tdNombre,tdTel,tdCargo,tdSede,tdEstado,tdIngreso,tdRetiro,tdAcc);
+    tr.append(tdCodigo,tdDoc,tdNombre,tdTel,tdCargo,tdEstado,tdSedeHoy,tdAcc);
     return tr;
   }
+  function operationalBadge(info){
+    const cls={
+      libre:'badge--ok',
+      ocupado:'badge--busy',
+      incapacitado:'badge--warn',
+      inactivo:'badge--off'
+    }[info.key] || 'badge--off';
+    const attrs={className:`badge ${cls}`};
+    if(info.title) attrs.title=info.title;
+    return el('span',attrs,[info.label||'-']);
+  }
   function statusBadge(st){ return el('span',{className:'badge '+(st==='activo'?'badge--ok':'badge--off')},[st||'-']); }
+  function operationalInfo(e){
+    if(!isActiveForDay(e,today)) return { key:'inactivo', label:'Inactivo', sedeLabel:'-', title:'Registro administrativo inactivo' };
+    const incap=findActiveIncapacity(e);
+    if(incap){
+      const days=remainingIncapacityDays(incap,today);
+      const suffix=days!=null ? ` (${days} dia${days===1?'':'s'})` : '';
+      return {
+        key:'incapacitado',
+        label:`Incapacitado${suffix}`,
+        sedeLabel:'-',
+        title:`Inicio: ${incap.fechaInicio||'-'} | Fin: ${incap.fechaFin||'-'}`
+      };
+    }
+    const occ=findOccupancy(e);
+    if(occ){
+      const sedeLabel=sedeDisplay(occ.sedeCodigo,occ.sedeNombre);
+      return { key:'ocupado', label:'Ocupado', sedeLabel, title:sedeLabel ? `Trabajando hoy en ${sedeLabel}` : 'Ocupado hoy' };
+    }
+    return { key:'libre', label:'Libre', sedeLabel:'-', title:'Disponible hoy' };
+  }
+  function findActiveIncapacity(e){
+    const doc=String(e?.documento||'').trim();
+    const id=String(e?.id||'').trim();
+    return (incapacitados||[]).find((row)=>{
+      const rowDoc=String(row?.documento||'').trim();
+      const rowId=String(row?.employeeId||'').trim();
+      if(doc && rowDoc===doc) return true;
+      return Boolean(id && rowId===id);
+    })||null;
+  }
+  function findOccupancy(e){
+    const doc=String(e?.documento||'').trim();
+    const id=String(e?.id||'').trim();
+    return (occupancyRows||[]).find((row)=>{
+      if(String(row?.decision||'').trim() && String(row.decision).trim()!=='reemplazo') return false;
+      const rowDoc=String(row?.supernumerarioDocumento||'').trim();
+      const rowId=String(row?.supernumerarioId||'').trim();
+      if(doc && rowDoc===doc) return true;
+      return Boolean(id && rowId===id);
+    })||null;
+  }
+  function sedeDisplay(code,name){
+    const n=String(name||'').trim();
+    const c=String(code||'').trim();
+    if(n && c) return `${n} (${c})`;
+    if(n) return n;
+    if(c) return sedeNameByCode(c)==='-' ? c : `${sedeNameByCode(c)} (${c})`;
+    return '-';
+  }
+  function isActiveForDay(person,day){
+    const estado=String(person?.estado||'activo').trim().toLowerCase();
+    if(estado==='eliminado') return false;
+    if(estado==='inactivo') return false;
+    const ingreso=toIsoDate(person?.fechaIngreso);
+    if(ingreso && ingreso>day) return false;
+    const retiro=toIsoDate(person?.fechaRetiro);
+    return !retiro || retiro>=day;
+  }
+  function normalizeIsoDate(value){ const v=String(value||'').trim(); return /^\d{4}-\d{2}-\d{2}$/.test(v)?v:null; }
+  function toIsoDate(value){
+    if(!value) return '';
+    if(typeof value==='string'){
+      const raw=value.trim();
+      if(/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw;
+      const parsed=new Date(raw);
+      return Number.isNaN(parsed.getTime())?'':parsed.toISOString().slice(0,10);
+    }
+    const parsed=value?.toDate?value.toDate():(value instanceof Date?value:null);
+    return parsed && !Number.isNaN(parsed.getTime())?parsed.toISOString().slice(0,10):'';
+  }
+  function inclusiveDaysBetween(startDate,endDate){
+    const start=normalizeIsoDate(startDate); const end=normalizeIsoDate(endDate);
+    if(!start||!end||end<start) return null;
+    const [sy,sm,sd]=start.split('-').map((n)=>Number(n));
+    const [ey,em,ed]=end.split('-').map((n)=>Number(n));
+    const sUtc=Date.UTC(sy,(sm||1)-1,sd||1);
+    const eUtc=Date.UTC(ey,(em||1)-1,ed||1);
+    return Math.floor((eUtc-sUtc)/86400000)+1;
+  }
+  function remainingIncapacityDays(row,day){
+    const start=normalizeIsoDate(row?.fechaInicio);
+    const end=normalizeIsoDate(row?.fechaFin);
+    if(!start||!end) return null;
+    const effectiveStart=day>start?day:start;
+    return inclusiveDaysBetween(effectiveStart,end);
+  }
+  function todayBogota(){ return new Intl.DateTimeFormat('en-CA',{timeZone:'America/Bogota'}).format(new Date()); }
+  async function refreshOccupancy(){
+    try{
+      if(typeof deps.listSupernumerarioReplacementOccupancy==='function'){
+        occupancyRows=await deps.listSupernumerarioReplacementOccupancy(today)||[];
+      }else if(typeof deps.listImportReplacementsRange==='function'){
+        occupancyRows=(await deps.listImportReplacementsRange(today,today)||[]).filter((row)=>String(row?.decision||'').trim()==='reemplazo');
+      }
+      render();
+    }catch(err){
+      const msg=qs('#msg',ui);
+      if(msg) msg.textContent='No se pudo cargar ocupacion de supernumerarios: '+(err?.message||err);
+    }
+  }
+  function scheduleOccupancyRefresh(){
+    if(occupancyRefreshTimer) clearTimeout(occupancyRefreshTimer);
+    occupancyRefreshTimer=setTimeout(refreshOccupancy,250);
+  }
   function formatDate(ts){
     try{
       const d=ts?.toDate? ts.toDate(): (ts? new Date(ts): null);
@@ -312,10 +438,15 @@ export const SupernumerariosAdmin=(mount,deps={})=>{
     unSedes=deps.streamSedes?.((arr)=>{ sedeList=(arr||[]).filter(s=>s.estado!=='inactivo'); renderSedeSelect(); render(); }) || (()=>{});
     unCargos=deps.streamCargos?.((arr)=>{ cargoList=(arr||[]).filter(c=>c.estado!=='inactivo'); renderCargoSelect(); render(); }) || (()=>{});
     unEmp=deps.streamEmployees?.((arr)=>{ employees=arr||[]; render(); }) || (()=>{});
+    unIncapacitados=deps.streamIncapacitadosByDate?.(today,(arr)=>{ incapacitados=arr||[]; render(); }) || (()=>{});
+    if(typeof deps.streamImportReplacementsByDate==='function'){
+      unReplacements=deps.streamImportReplacementsByDate(today,()=>scheduleOccupancyRefresh(),()=>scheduleOccupancyRefresh()) || (()=>{});
+    }
+    refreshOccupancy();
     un=deps.streamSupernumerarios?.((arr)=>{ snapshot=arr||[]; render(); }) || (()=>{});
   }catch(e){
     const msg=qs('#msg',ui); if(msg) msg.textContent='Error cargando supernumerarios: '+(e?.message||e);
   }
-  return ()=>{ un?.(); unSedes?.(); unCargos?.(); unEmp?.(); };
+  return ()=>{ if(occupancyRefreshTimer) clearTimeout(occupancyRefreshTimer); un?.(); unSedes?.(); unCargos?.(); unEmp?.(); unIncapacitados?.(); unReplacements?.(); };
 };
 

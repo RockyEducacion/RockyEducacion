@@ -137,6 +137,10 @@ html[data-theme="dark"] .main-card{
   .sidebar[data-collapsed="true"] .sidebar__section-toggle{display:flex}
   .sidebar[data-collapsed="true"] .sidebar__section{margin-top:1rem}
   .sidebar[data-collapsed="true"] .sidebar__nav{gap:.32rem}
+  .sidebar[data-collapsed="true"] .sidebar__subsection{padding:.2rem 0 .1rem;gap:.24rem}
+  .sidebar[data-collapsed="true"] .sidebar__subsection-title{display:flex}
+  .sidebar[data-collapsed="true"] .sidebar__subsection.is-collapsed .sidebar__subnav{display:none}
+  .sidebar[data-collapsed="true"] .sidebar__subnav{padding-left:0;gap:.24rem}
   .sidebar[data-collapsed="true"] .sidebar__item-text{display:inline}
   .sidebar[data-collapsed="true"] .sidebar__nav-link{justify-content:flex-start;padding:.62rem .74rem}
   .sidebar__collapse-btn{display:none}

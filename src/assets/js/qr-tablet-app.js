@@ -47,7 +47,7 @@ function topbar(profile = {}) {
       ])
     ]),
     el('div', { className: 'qr-tablet-actions' }, [
-      el('a', { className: 'btn', href: 'access.html' }, ['Centro de accesos'])
+      el('a', { className: 'btn', href: 'https://www.capcol.com.co/access.html' }, ['Centro de accesos'])
     ])
   ]);
 }

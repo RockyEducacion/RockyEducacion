@@ -46,7 +46,6 @@ export const PERMS = {
   VIEW_QR_DAILY_REGISTRY: 'viewQrDailyRegistry',
   MANAGE_QR_DEVICES: 'manageQrDevices',
   VIEW_IMPORT_HISTORY: 'viewImportHistory',
-  RUN_PAYROLL: 'runPayroll',
   MANAGE_ABSENTEEISM: 'manageAbsenteeism',
   VIEW_REPORTS: 'viewReports',
   VIEW_REPORTS_CLIENT: 'viewReportsClient',
@@ -95,7 +94,6 @@ export function permsForRole(role) {
         [PERMS.IMPORT_DATA]: true,
         [PERMS.VIEW_QR_DAILY_REGISTRY]: true,
         [PERMS.VIEW_IMPORT_HISTORY]: true,
-        [PERMS.RUN_PAYROLL]: true,
         [PERMS.MANAGE_ABSENTEEISM]: true
       };
     case ROLES.CONSULTOR:

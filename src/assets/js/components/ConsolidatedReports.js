@@ -1155,19 +1155,25 @@ export const ConsolidatedReports = (mount, deps = {}) => {
         const currentBucketKey = bucketKey(day, siteKey);
         const sourceRows = [...(baseRowsByDaySede.get(currentBucketKey) || [])];
         sourceRows.sort((a, b) => {
-          const scheduledA = a?.servicioProgramado === true ? 1 : 0;
-          const scheduledB = b?.servicioProgramado === true ? 1 : 0;
-          if (scheduledA !== scheduledB) return scheduledB - scheduledA;
-          const byAttendance = Number(Boolean(b?.asistio)) - Number(Boolean(a?.asistio));
-          if (byAttendance !== 0) return byAttendance;
           const byName = String(a?.nombre || '').localeCompare(String(b?.nombre || ''));
           if (byName !== 0) return byName;
           return String(a?.documento || '').localeCompare(String(b?.documento || ''));
         });
         const assignedRows = Array.from({ length: slotCount }, () => null);
+        const scheduledRows = assignedByDaySede.get(currentBucketKey) || [];
+
+        scheduledRows.forEach((row, slotIndex) => {
+          if (slotIndex < 0 || slotIndex >= slotCount || !row) return;
+          const identity = buildServiceWithoutFsIdentity(row);
+          if (!identity) return;
+          const matchIndex = sourceRows.findIndex((candidate) => buildServiceWithoutFsIdentity(candidate) === identity);
+          if (matchIndex < 0) return;
+          assignedRows[slotIndex] = sourceRows.splice(matchIndex, 1)[0];
+        });
 
         baseSlotIdentities.forEach((identity, slotIndex) => {
           if (!identity) return;
+          if (assignedRows[slotIndex]) return;
           const matchIndex = sourceRows.findIndex((row) => buildServiceWithoutFsIdentity(row) === identity);
           if (matchIndex < 0) return;
           assignedRows[slotIndex] = sourceRows.splice(matchIndex, 1)[0];
@@ -1228,13 +1234,14 @@ export const ConsolidatedReports = (mount, deps = {}) => {
               const weekendCarryValue = isWeekdayOnlySede && day.isSpecial
                 ? resolveWeekendServiceWithoutFsCarryValue(history, day.iso, sedeCode, historyByDocument, activeBaseDocForDay)
                 : '';
-              const baseDocForSpecialDay = isWeekdayOnlySede ? activeBaseDocForDay : validBaseDocForDay;
+              const ausCarryValue = hasThreePreviousServiceWithoutFsAus(history) ? 'AUS' : '';
+              const baseDocForSpecialDay = activeBaseDocForDay;
               const specialFallbackValue = isWeekdayOnlySede
                 ? resolveSpecialServiceWithoutFsValue(history)
                 : (day.isSunday
                   ? resolveSundayServiceWithoutFsCarryValue(history)
                   : resolveSpecialServiceWithoutFsValue(history));
-              value = weekendCarryValue || baseDocForSpecialDay || specialFallbackValue || 'NOCON';
+              value = ausCarryValue || weekendCarryValue || baseDocForSpecialDay || specialFallbackValue || 'NOCON';
             }
           } else if (!current) {
             value = 'NOCON';
@@ -1296,6 +1303,8 @@ export const ConsolidatedReports = (mount, deps = {}) => {
             servicioDocumento: serviceDoc,
             asistencias: 0
           };
+          row.__serviceWithoutFsDayPriorities = {};
+          row.__serviceWithoutFsDayCounts = {};
           const previousValues = [...historicalValues];
 
           days.forEach((day, dayIndex) => {
@@ -1305,6 +1314,8 @@ export const ConsolidatedReports = (mount, deps = {}) => {
             const validBaseDocForDay = resolveServiceWithoutFsBaseDocumentForDay(baseDocumentsByDay, contextDayIndex);
             const activeBaseDocForDay = resolveServiceWithoutFsBaseDocumentForHistoryDate(baseDocumentsByDay, contextDayIndex, day.iso, sedeCode, historyByDocument);
             let value = '';
+            let valuePriority = 0;
+            let valueCounts = false;
 
             if (day.isSpecial) {
               if (current) {
@@ -1312,20 +1323,26 @@ export const ConsolidatedReports = (mount, deps = {}) => {
                   ? resolveSaturdayServiceWithoutFsValue(current)
                   : resolveSundayHolidayServiceWithoutFsValue(current);
                 value = String(resolved?.value || '').trim();
-                if (resolved?.counts) row.asistencias += 1;
+                if (resolved?.counts) {
+                  row.asistencias += 1;
+                  valueCounts = true;
+                  valuePriority = String(current?.reemplazadoPorDocumento || '').trim() ? 2 : 1;
+                }
               } else {
                 const weekendCarryValue = isWeekdayOnlySede && day.isSpecial
                   ? resolveWeekendServiceWithoutFsCarryValue(previousValues, day.iso, sedeCode, historyByDocument, activeBaseDocForDay)
                   : '';
-                const baseDocForSpecialDay = isWeekdayOnlySede ? activeBaseDocForDay : validBaseDocForDay;
+                const ausCarryValue = hasThreePreviousServiceWithoutFsAus(previousValues) ? 'AUS' : '';
+                const baseDocForSpecialDay = activeBaseDocForDay;
                 const specialFallbackValue = isWeekdayOnlySede
                   ? resolveSpecialServiceWithoutFsValue(previousValues)
                   : (day.isSunday
                     ? resolveSundayServiceWithoutFsCarryValue(previousValues)
                     : resolveSpecialServiceWithoutFsValue(previousValues));
-                value = weekendCarryValue || baseDocForSpecialDay || specialFallbackValue || 'NOCON';
+                value = ausCarryValue || weekendCarryValue || baseDocForSpecialDay || specialFallbackValue || 'NOCON';
                 if (value && value !== 'AUS' && value !== 'NOCON') {
                   row.asistencias += 1;
+                  valueCounts = true;
                 }
               }
             } else if (!current) {
@@ -1335,6 +1352,8 @@ export const ConsolidatedReports = (mount, deps = {}) => {
               if (workedDoc) {
                 value = workedDoc;
                 row.asistencias += 1;
+                valueCounts = true;
+                valuePriority = String(current?.reemplazadoPorDocumento || '').trim() ? 2 : 1;
               } else if (isConfirmedServiceWithoutFsAbsence(current)) {
                 const crossDoc = isServiceWithoutFsAutoCrossNovedad8(current)
                   ? consumeUnassignedSupernumerarioDocument(day.iso, sedeCode)
@@ -1342,6 +1361,8 @@ export const ConsolidatedReports = (mount, deps = {}) => {
                 if (crossDoc) {
                   value = formatServiceWithoutFsReplacementDocument(crossDoc);
                   row.asistencias += 1;
+                  valueCounts = true;
+                  valuePriority = 1;
                 } else {
                   value = 'AUS';
                 }
@@ -1353,9 +1374,15 @@ export const ConsolidatedReports = (mount, deps = {}) => {
             if (!current || isServiceWithoutFsAutoCrossNovedad8(current)) {
               const crossGap = replaceServiceWithoutFsGapWithSupernumerario(value, day.iso, sedeCode);
               value = crossGap.value;
-              if (crossGap.counts) row.asistencias += 1;
+              if (crossGap.counts) {
+                row.asistencias += 1;
+                valueCounts = true;
+                valuePriority = Math.max(valuePriority, 1);
+              }
             }
             row[day.key] = value;
+            row.__serviceWithoutFsDayPriorities[day.key] = valuePriority;
+            row.__serviceWithoutFsDayCounts[day.key] = valueCounts;
             if (isServiceWithoutFsDocumentValue(value)) dynamicServiceDoc = value;
             previousValues.push(value);
           });
@@ -1365,18 +1392,33 @@ export const ConsolidatedReports = (mount, deps = {}) => {
       });
 
     days.forEach((day) => {
-      const usedDocuments = new Set();
+      const usedDocuments = new Map();
       rows.forEach((row) => {
         const value = String(row?.[day.key] || '').trim();
         if (!isServiceWithoutFsDocumentValue(value)) return;
         const identity = normalizeServiceWithoutFsDocumentIdentity(value);
         if (!identity) return;
-        if (usedDocuments.has(identity)) {
+        const currentPriority = Number(row?.__serviceWithoutFsDayPriorities?.[day.key] || 0);
+        const previousUse = usedDocuments.get(identity);
+        if (previousUse) {
+          const previousPriority = Number(previousUse.row?.__serviceWithoutFsDayPriorities?.[day.key] || 0);
+          if (currentPriority > previousPriority) {
+            previousUse.row[day.key] = 'NOCON';
+            if (previousUse.row?.__serviceWithoutFsDayCounts?.[day.key]) {
+              previousUse.row.asistencias = Math.max(0, Number(previousUse.row.asistencias || 0) - 1);
+              previousUse.row.__serviceWithoutFsDayCounts[day.key] = false;
+            }
+            usedDocuments.set(identity, { row });
+            return;
+          }
           row[day.key] = 'NOCON';
-          row.asistencias = Math.max(0, Number(row.asistencias || 0) - 1);
+          if (row?.__serviceWithoutFsDayCounts?.[day.key]) {
+            row.asistencias = Math.max(0, Number(row.asistencias || 0) - 1);
+            row.__serviceWithoutFsDayCounts[day.key] = false;
+          }
           return;
         }
-        usedDocuments.add(identity);
+        usedDocuments.set(identity, { row });
       });
     });
 

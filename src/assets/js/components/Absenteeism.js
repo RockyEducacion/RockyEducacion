@@ -71,7 +71,10 @@ export const Absenteeism = (mount, deps = {}) => {
   const dependencyPaginator = createTablePagination(ui, { id: 'absDependency', after: '#tblDependency', onChange: () => renderDependency(qs('#opDate', ui).value) });
   const totalsPaginator = createTablePagination(ui, { id: 'absSedes', after: '#tblTotals', onChange: renderTotals });
   const detailPaginator = createTablePagination(ui, { id: 'absDetail', after: '#tblDetail', onChange: renderDetailRows });
-  qs('#opDate', ui).value = todayBogota();
+  const maxQueryDate = yesterdayBogota();
+  const opDateInput = qs('#opDate', ui);
+  opDateInput.max = maxQueryDate;
+  opDateInput.value = maxQueryDate;
 
   let sedeDailyRows = [];
   let dependencyRows = [];
@@ -136,6 +139,11 @@ export const Absenteeism = (mount, deps = {}) => {
     const date = String(qs('#opDate', ui)?.value || '').trim();
     if (!date) {
       msg.textContent = 'Selecciona una fecha.';
+      return;
+    }
+    if (date > maxQueryDate) {
+      clearUi('Ausentismo solo permite consultar desde ayer hacia atras.');
+      opDateInput.value = maxQueryDate;
       return;
     }
 
@@ -582,4 +590,11 @@ function parseOperatorCount(value) {
 function todayBogota() {
   const formatter = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Bogota', year: 'numeric', month: '2-digit', day: '2-digit' });
   return formatter.format(new Date());
+}
+
+function yesterdayBogota() {
+  const [year, month, day] = todayBogota().split('-').map((value) => Number(value));
+  const date = new Date(Date.UTC(year, (month || 1) - 1, day || 1));
+  date.setUTCDate(date.getUTCDate() - 1);
+  return date.toISOString().slice(0, 10);
 }

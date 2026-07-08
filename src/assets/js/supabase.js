@@ -4303,7 +4303,7 @@ export function streamDailyMetricsByDate(fecha, onData, onError = null, onStatus
   };
 }
 
-export function streamIncapacitadosByDate(fecha, onData) {
+export function streamIncapacitadosByDate(fecha, onData, onError = null, onStatus = null) {
   const day = String(fecha || '').trim();
   if (!day) {
     onData([]);
@@ -4321,6 +4321,7 @@ export function streamIncapacitadosByDate(fecha, onData) {
     if (!active) return;
     if (error) {
       console.error('No se pudo cargar incapacitados por fecha:', error);
+      onError?.(error, 'LOAD_ERROR');
       onData([]);
       return;
     }
@@ -4328,13 +4329,15 @@ export function streamIncapacitadosByDate(fecha, onData) {
   };
   emit();
   const unregister = registerTableReloader('incapacitados', emit);
-  const channel = supabase
-    .channel(`incapacitados-${day}`)
-    .on('postgres_changes', { event: '*', schema: 'public', table: 'incapacitados' }, emit)
-    .subscribe();
+  const realtime = subscribeToRealtime(
+    supabase.channel(nextRealtimeChannelName(`incapacitados-${day}`)).on('postgres_changes', { event: '*', schema: 'public', table: 'incapacitados' }, emit),
+    { label: `incapacitados:${day}`, onError, onStatus }
+  );
+  const channel = realtime.subscription;
   return () => {
     active = false;
     unregister();
+    realtime.cancel();
     supabase.removeChannel(channel);
   };
 }
@@ -4563,6 +4566,34 @@ export async function listImportReplacementsRange(dateFrom, dateTo) {
   return rows.map(mapImportReplacementRow);
 }
 
+export async function listSupernumerarioReplacementOccupancy(fecha) {
+  const day = String(fecha || '').trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) return [];
+  const { data, error } = await supabase.rpc('list_supernumerario_replacement_occupancy', { p_fecha: day });
+  if (error) {
+    console.warn('No se pudo consultar ocupacion global de supernumerarios:', error);
+    const rows = await selectPagedRows(() => supabase
+      .from('import_replacements')
+      .select('*')
+      .eq('fecha', day)
+      .eq('decision', 'reemplazo')
+      .order('ts', { ascending: false }));
+    return rows.map(mapImportReplacementRow);
+  }
+  return (data || []).map(mapImportReplacementRow);
+}
+
+export async function listSupernumerarioIncapacitiesForCurrentSupervisor(fecha) {
+  const day = String(fecha || '').trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) return [];
+  const { data, error } = await supabase.rpc('list_supernumerario_incapacities_for_current_supervisor', { p_fecha: day });
+  if (error) {
+    console.warn('No se pudo consultar incapacidades de supernumerarios:', error);
+    return [];
+  }
+  return (data || []).map(mapIncapacidadRow);
+}
+
 export async function listEmployeeDailyStatusRange(dateFrom, dateTo) {
   if (!dateFrom || !dateTo) return [];
   const rows = [];
@@ -4669,6 +4700,7 @@ export async function listSupervisorDailyRegistry(fecha, zoneCodes = []) {
       dailyStatus: [],
       attendance: [],
       replacements: [],
+      supernumerarioOccupancy: [],
       incapacities: [],
       closures: []
     };
@@ -4689,7 +4721,9 @@ export async function listSupervisorDailyRegistry(fecha, zoneCodes = []) {
     closureRows,
     attendanceRows,
     replacementRows,
-    incapacityRows
+    supernumerarioOccupancyRows,
+    incapacityRows,
+    supernumerarioIncapacityRows
   ] = await Promise.all([
     selectPagedRows(() => supabase
       .from('employee_daily_status')
@@ -4726,13 +4760,15 @@ export async function listSupervisorDailyRegistry(fecha, zoneCodes = []) {
         .in('sede_codigo', sedeCodes)
         .order('ts', { ascending: false }))
       : Promise.resolve([]),
+    listSupernumerarioReplacementOccupancy(day),
     selectPagedRows(() => supabase
       .from('incapacitados')
       .select('*')
       .eq('estado', 'activo')
       .lte('fecha_inicio', day)
       .gte('fecha_fin', day)
-      .order('fecha_inicio', { ascending: false }))
+      .order('fecha_inicio', { ascending: false })),
+    listSupernumerarioIncapacitiesForCurrentSupervisor(day)
   ]);
 
   const employeeRows = (employeeRowsRaw || []).map(mapEmployeeRow);
@@ -4755,6 +4791,32 @@ export async function listSupervisorDailyRegistry(fecha, zoneCodes = []) {
       return isExpected || supervisorRegistryHasNovelty(row);
     });
 
+  const scopedIncapacities = (incapacityRows || [])
+    .map(mapIncapacidadRow)
+    .filter((row) => {
+      const employeeId = String(row.employeeId || '').trim();
+      const documento = String(row.documento || '').trim();
+      return (employeeId && expectedEmployeeKeys.has(`id:${employeeId}`))
+        || (documento && expectedEmployeeKeys.has(`doc:${documento}`))
+        || operationalDailyStatus.some((status) => {
+          const statusEmployeeId = String(status.employeeId || '').trim();
+          const statusDocument = String(status.documento || '').trim();
+          return (employeeId && statusEmployeeId === employeeId)
+            || (documento && statusDocument === documento);
+        });
+    });
+  const incapacitiesById = new Map();
+  [...scopedIncapacities, ...(supernumerarioIncapacityRows || [])].forEach((row) => {
+    const key = String(row?.id || '').trim()
+      || [
+        String(row?.employeeId || '').trim(),
+        String(row?.documento || '').trim(),
+        String(row?.fechaInicio || '').trim(),
+        String(row?.fechaFin || '').trim()
+      ].join('|');
+    if (key) incapacitiesById.set(key, row);
+  });
+
   return {
     fecha: day,
     zones,
@@ -4763,20 +4825,8 @@ export async function listSupervisorDailyRegistry(fecha, zoneCodes = []) {
     dailyStatus: operationalDailyStatus,
     attendance: (attendanceRows || []).map(mapAttendanceRow),
     replacements: (replacementRows || []).map(mapImportReplacementRow),
-    incapacities: (incapacityRows || [])
-      .map(mapIncapacidadRow)
-      .filter((row) => {
-        const employeeId = String(row.employeeId || '').trim();
-        const documento = String(row.documento || '').trim();
-        return (employeeId && expectedEmployeeKeys.has(`id:${employeeId}`))
-          || (documento && expectedEmployeeKeys.has(`doc:${documento}`))
-          || operationalDailyStatus.some((status) => {
-            const statusEmployeeId = String(status.employeeId || '').trim();
-            const statusDocument = String(status.documento || '').trim();
-            return (employeeId && statusEmployeeId === employeeId)
-              || (documento && statusDocument === documento);
-          });
-      }),
+    supernumerarioOccupancy: (supernumerarioOccupancyRows || []).map((row) => row?.id ? row : mapImportReplacementRow(row)),
+    incapacities: Array.from(incapacitiesById.values()),
     closures: (closureRows || []).map(mapDailySedeClosureRow)
   };
 }
@@ -4903,6 +4953,36 @@ export async function saveImportReplacements({ importId = null, fechaOperacion =
       used.add(sid);
     }
   }
+  const occupancyByDate = new Map();
+  for (const f of fechas) {
+    occupancyByDate.set(f, await listSupernumerarioReplacementOccupancy(f));
+  }
+  for (const a of data) {
+    if (a.decision !== 'reemplazo') continue;
+    const fecha = String(a.fecha || fechaOperacion || '').trim();
+    const canCoverService = await replacementAssignmentHasScheduledService(a, fecha);
+    if (canCoverService === false) {
+      const target = a.nombre || a.documento || 'la persona';
+      throw new Error(`${target} no tiene servicio programado el ${fecha}; la novedad es solo reporte y no admite reemplazo.`);
+    }
+    const currentId = buildDailyRecordId(fecha, a.documento, a.empleadoId);
+    const superId = String(a.supernumerarioId || '').trim();
+    const superDoc = String(a.supernumerarioDocumento || '').trim();
+    const conflict = (occupancyByDate.get(fecha) || []).find((row) => {
+      if (String(row?.id || '').trim() === currentId) return false;
+      if (String(row?.decision || '').trim() !== 'reemplazo') return false;
+      const rowSuperId = String(row?.supernumerarioId || '').trim();
+      const rowSuperDoc = String(row?.supernumerarioDocumento || '').trim();
+      return (superId && rowSuperId && rowSuperId === superId)
+        || (superDoc && rowSuperDoc && rowSuperDoc === superDoc);
+    });
+    if (conflict) {
+      const superLabel = a.supernumerarioNombre || a.supernumerarioDocumento || 'El supernumerario';
+      const target = conflict.nombre || conflict.documento || 'otro registro';
+      const sede = conflict.sedeNombre || conflict.sedeCodigo || '-';
+      throw new Error(`${superLabel} ya esta ocupado el ${fecha} cubriendo a ${target} en ${sede}.`);
+    }
+  }
   for (const a of data) {
     const empId = String(a.empleadoId || '').trim();
     const fecha = String(a.fecha || fechaOperacion || '').trim();
@@ -4934,6 +5014,29 @@ export async function saveImportReplacements({ importId = null, fechaOperacion =
   }
   await notifyTableReload('import_replacements');
   return { saved: data.length };
+}
+
+async function replacementAssignmentHasScheduledService(assignment = {}, fecha = '') {
+  const employeeId = String(assignment?.empleadoId || assignment?.employeeId || '').trim();
+  const documento = String(assignment?.documento || '').trim();
+  if (!fecha || (!employeeId && !documento)) return null;
+  let query = supabase
+    .from('employee_daily_status')
+    .select('servicio_programado')
+    .eq('fecha', fecha)
+    .limit(1);
+  if (employeeId && documento) {
+    query = query.or(`employee_id.eq.${employeeId},documento.eq.${documento}`);
+  } else if (employeeId) {
+    query = query.eq('employee_id', employeeId);
+  } else {
+    query = query.eq('documento', documento);
+  }
+  const { data, error } = await query;
+  if (error) throw error;
+  const row = Array.isArray(data) ? data[0] : null;
+  if (!row) return null;
+  return row.servicio_programado === true;
 }
 
 export async function closeOperationDayManual(fecha) {

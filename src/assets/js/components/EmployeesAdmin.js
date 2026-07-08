@@ -26,6 +26,7 @@ export const EmployeesAdmin=(mount,deps={})=>{
     el('div',{id:'tabList'},[
       el('div',{className:'form-row'},[
         el('div',{},[ el('label',{className:'label'},['Buscar']), el('input',{id:'txtSearch',className:'input',placeholder:'Codigo, documento, nombre o sede...'}) ]),
+        el('div',{},[ el('label',{className:'label'},['Sede']), el('select',{id:'selSede',className:'select'},[ el('option',{value:''},['Todas']) ]) ]),
         el('div',{},[ el('label',{className:'label'},['Estado']), el('select',{id:'selStatus',className:'select'},[ el('option',{value:''},['Todos']), el('option',{value:'activo'},['Activos']), el('option',{value:'inactivo'},['Inactivos']) ]) ])
       ]),
       el('div',{className:'mt-2 table-wrap'},[
@@ -86,6 +87,23 @@ export const EmployeesAdmin=(mount,deps={})=>{
       .filter((v, i, arr)=> v && arr.indexOf(v)===i)
       .map((value)=> el('option',{value}));
     sedeListNode.replaceChildren(...opts);
+  }
+  function renderSedeFilter(){
+    const select=qs('#selSede',ui);
+    if(!select) return;
+    const cur=select.value;
+    const opts=[
+      el('option',{value:''},['Todas']),
+      ...sedeList
+        .filter((s)=> String(s.codigo||'').trim())
+        .sort((a,b)=> String(a.nombre||a.codigo||'').localeCompare(String(b.nombre||b.codigo||'')))
+        .map((s)=>{
+          const code=String(s.codigo||'').trim();
+          return el('option',{value:code, selected:code===cur},[`${s.nombre||code} (${code})`]);
+        })
+    ];
+    select.replaceChildren(...opts);
+    if(cur && !sedeList.some((s)=> String(s.codigo||'').trim()===cur)) select.value='';
   }
   function resolveSedeCode(inputValue){
     const raw=String(inputValue||'').trim();
@@ -227,6 +245,7 @@ export const EmployeesAdmin=(mount,deps={})=>{
   });
 
   const search=()=> qs('#txtSearch',ui).value.trim().toLowerCase();
+  const filterSede=()=> qs('#selSede',ui)?.value||'';
   const filterStatus=()=> qs('#selStatus',ui).value;
   function toSortableDate(ts){
     try{
@@ -271,9 +290,10 @@ export const EmployeesAdmin=(mount,deps={})=>{
     });
   }
   function render(){
-    const term=search(); const st=filterStatus();
+    const term=search(); const sedeCode=filterSede(); const st=filterStatus();
     const data=snapshot.filter(e=>{
       const view=employeeAssignmentView(e);
+      const currentSedeCode=String(view.current?.sedeCodigo||'').trim();
       const text=[
         e.codigo,
         e.documento,
@@ -287,7 +307,7 @@ export const EmployeesAdmin=(mount,deps={})=>{
         view.programmed?.sedeNombre,
         sedeNameByCode(view.programmed?.sedeCodigo)
       ].join(' ').toLowerCase();
-      return (!term || text.includes(term)) && (!st || e.estado===st);
+      return (!term || text.includes(term)) && (!sedeCode || currentSedeCode===sedeCode) && (!st || e.estado===st);
     });
     const sorted=sortData(data);
     const pageRows=paginator.slice(sorted);
@@ -654,12 +674,13 @@ export const EmployeesAdmin=(mount,deps={})=>{
     return toInputDate(dt);
   }
   qs('#txtSearch',ui).addEventListener('input',()=>{ paginator.reset(); render(); });
+  qs('#selSede',ui).addEventListener('change',()=>{ paginator.reset(); render(); });
   qs('#selStatus',ui).addEventListener('change',()=>{ paginator.reset(); render(); });
   initSorting();
   mount.replaceChildren(ui);
   let un=()=>{};
   try{
-    unSedes=deps.streamSedes?.((arr)=>{ sedeList=(arr||[]).filter(s=>s.estado!=='inactivo'); renderSedeSelect(); render(); }) || (()=>{});
+    unSedes=deps.streamSedes?.((arr)=>{ sedeList=(arr||[]).filter(s=>s.estado!=='inactivo'); renderSedeSelect(); renderSedeFilter(); render(); }) || (()=>{});
     unCargos=deps.streamCargos?.((arr)=>{ cargoList=(arr||[]).filter(c=>c.estado!=='inactivo'); renderCargoSelect(); render(); }) || (()=>{});
     unSup=deps.streamSupervisors?.((arr)=>{ supervisors=arr||[]; render(); }) || (()=>{});
     unSupn=deps.streamSupernumerarios?.((arr)=>{ supernumerarios=arr||[]; render(); }) || (()=>{});

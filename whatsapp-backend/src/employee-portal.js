@@ -2,7 +2,7 @@ import crypto from 'node:crypto';
 import { config } from './config.js';
 import { supabaseAdmin } from './supabase.js';
 
-const PRIVILEGED_ROLES = ['superadmin', 'admin', 'editor', 'consultor', 'supervisor', 'tablet_qr'];
+const MAIN_PORTAL_ONLY_ROLES = ['superadmin', 'admin', 'editor', 'consultor', 'tablet_qr'];
 const INCAPACITY_SUPPORT_BUCKET = 'incapacidades-soportes';
 const MAX_SUPPORT_BYTES = 8 * 1024 * 1024;
 
@@ -156,13 +156,13 @@ async function getEmployeeById(employeeId) {
   return data || null;
 }
 
-async function getPrivilegedProfileByDocument(documento) {
+async function getMainPortalOnlyProfileByDocument(documento) {
   const { data, error } = await supabaseAdmin
     .from('profiles')
     .select('id,email,display_name,role,estado')
     .eq('documento', documento)
     .eq('estado', 'activo')
-    .in('role', PRIVILEGED_ROLES)
+    .in('role', MAIN_PORTAL_ONLY_ROLES)
     .maybeSingle();
   if (error) throw error;
   return data || null;
@@ -372,7 +372,7 @@ export async function getActiveEmployeePortalContext(req, { ip, userAgent } = {}
   }
 
   const documento = session.documento_snapshot || employee.documento;
-  const privilegedProfile = await getPrivilegedProfileByDocument(documento);
+  const privilegedProfile = await getMainPortalOnlyProfileByDocument(documento);
   if (privilegedProfile) {
     await revokeEmployeePortalSession(session.id);
     await createEmployeePortalAudit({
@@ -479,7 +479,7 @@ export function registerEmployeePortalRoutes(app) {
         throw error;
       }
 
-      const privilegedProfile = await getPrivilegedProfileByDocument(documento);
+      const privilegedProfile = await getMainPortalOnlyProfileByDocument(documento);
       if (privilegedProfile) {
         await createEmployeePortalAudit({
           employee_id: employee.id,
@@ -585,7 +585,7 @@ export function registerEmployeePortalRoutes(app) {
         throw error;
       }
 
-      const privilegedProfile = await getPrivilegedProfileByDocument(session.documento_snapshot || employee.documento);
+      const privilegedProfile = await getMainPortalOnlyProfileByDocument(session.documento_snapshot || employee.documento);
       if (privilegedProfile) {
         await revokeEmployeePortalSession(session.id);
         await createEmployeePortalAudit({
