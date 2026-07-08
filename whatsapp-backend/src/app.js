@@ -600,8 +600,60 @@ async function loadCertificateContextByEmployeeId(employeeId) {
   if (error) throw error;
   if (!employee?.id) throw certificateError('employee_not_found', 404);
   if (String(employee.estado || '').trim().toLowerCase() !== 'activo') throw certificateError('employee_inactive', 409);
+  employee.fecha_ingreso = await resolveCertificateEmploymentStartDate(employee);
   const cargo = await loadCertificateCargo(employee);
   return { employee, cargo };
+}
+
+async function resolveCertificateEmploymentStartDate(employee = {}) {
+  const historyRows = await loadCertificateEmployeeHistoryRows(employee);
+  const candidates = [
+    employee?.fecha_ingreso,
+    ...historyRows.map((row) => row?.fecha_ingreso)
+  ];
+  const earliest = earliestDateCandidate(candidates);
+  return earliest?.value || employee?.fecha_ingreso || null;
+}
+
+async function loadCertificateEmployeeHistoryRows(employee = {}) {
+  const employeeId = String(employee?.id || '').trim();
+  const documento = String(employee?.documento || '').trim();
+  const queries = [];
+  if (employeeId) {
+    queries.push(
+      supabaseAdmin
+        .from('employee_cargo_history')
+        .select('id,fecha_ingreso')
+        .eq('employee_id', employeeId)
+    );
+  }
+  if (documento) {
+    queries.push(
+      supabaseAdmin
+        .from('employee_cargo_history')
+        .select('id,fecha_ingreso')
+        .eq('documento', documento)
+    );
+  }
+  if (!queries.length) return [];
+
+  const results = await Promise.all(queries);
+  const rowsById = new Map();
+  for (const { data, error } of results) {
+    if (error) throw error;
+    for (const row of (Array.isArray(data) ? data : [])) {
+      const key = String(row?.id || `${row?.fecha_ingreso || ''}-${rowsById.size}`);
+      if (!rowsById.has(key)) rowsById.set(key, row);
+    }
+  }
+  return [...rowsById.values()];
+}
+
+function earliestDateCandidate(values = []) {
+  return (Array.isArray(values) ? values : [])
+    .map((value) => ({ value, iso: toISODate(value) }))
+    .filter((candidate) => candidate.iso)
+    .sort((left, right) => left.iso.localeCompare(right.iso))[0] || null;
 }
 
 async function loadCertificateCargo(employee) {
@@ -665,7 +717,7 @@ function sendCertificateVerificationHtml(res, statusCode, row, customMessage = '
   const ok = statusCode === 200 && row;
   const title = ok ? 'Certificado valido' : 'Certificado no encontrado';
   const message = customMessage || (ok
-    ? 'Este certificado fue emitido por Servicios Integrales S.I. S.A.S. a través de Rocky.'
+    ? 'Certificado NO VALIDO'
     : 'No encontramos un certificado emitido con este codigo de verificacion.');
   const typeLabel = row?.certificate_type === 'with_salary' ? 'Laboral con salario' : 'Laboral basico';
   const channelLabel = row?.channel === 'employee_portal' ? 'Portal de empleados' : 'Administrativo';

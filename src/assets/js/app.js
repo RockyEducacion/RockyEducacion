@@ -83,7 +83,7 @@ const guardWrite=(perm,fn)=> async (...args)=>{
         streamSedes:fb.streamSedes, createSede:guardWrite(PERMS.EDIT_SEDES,fb.createSede), updateSede:guardWrite(PERMS.EDIT_SEDES,fb.updateSede), setSedeStatus:guardWrite(PERMS.EDIT_SEDES,fb.setSedeStatus), findSedeByCode:fb.findSedeByCode, getNextSedeCode:fb.getNextSedeCode,
         createQrDevice:guardWrite(PERMS.MANAGE_QR_DEVICES,fb.createQrDevice), setQrDeviceStatus:guardWrite(PERMS.MANAGE_QR_DEVICES,fb.setQrDeviceStatus), listQrDevices:fb.listQrDevices, streamQrDevices:fb.streamQrDevices, scanAttendanceQr:fb.scanAttendanceQr, listDailyQrRecords:fb.listDailyQrRecords, streamDailyQrRecords:fb.streamDailyQrRecords,
         createSedesBulk:guardWrite(PERMS.EDIT_SEDES,fb.createSedesBulk),
-        streamEmployees:fb.streamEmployees, streamActiveBaseEmployees:fb.streamActiveBaseEmployees, createEmployee:guardWrite(PERMS.EDIT_EMPLOYEES,fb.createEmployee), updateEmployee:guardWrite(PERMS.EDIT_EMPLOYEES,fb.updateEmployee), setEmployeeStatus:guardWrite(PERMS.EDIT_EMPLOYEES,fb.setEmployeeStatus), updateProgrammedEmployeeAssignment:guardWrite(PERMS.MANAGE_EMPLOYEE_SCHEDULES,fb.updateProgrammedEmployeeAssignment), cancelProgrammedEmployeeAssignment:guardWrite(PERMS.MANAGE_EMPLOYEE_SCHEDULES,fb.cancelProgrammedEmployeeAssignment), findEmployeeByCode:fb.findEmployeeByCode, findEmployeeByDocument:fb.findEmployeeByDocument, getNextEmployeeCode:fb.getNextEmployeeCode,
+        streamEmployees:fb.streamEmployees, streamActiveBaseEmployees:fb.streamActiveBaseEmployees, createEmployee:guardWrite(PERMS.EDIT_EMPLOYEES,fb.createEmployee), rehireEmployee:guardWrite(PERMS.EDIT_EMPLOYEES,fb.rehireEmployee), updateEmployee:guardWrite(PERMS.EDIT_EMPLOYEES,fb.updateEmployee), setEmployeeStatus:guardWrite(PERMS.EDIT_EMPLOYEES,fb.setEmployeeStatus), updateProgrammedEmployeeAssignment:guardWrite(PERMS.MANAGE_EMPLOYEE_SCHEDULES,fb.updateProgrammedEmployeeAssignment), cancelProgrammedEmployeeAssignment:guardWrite(PERMS.MANAGE_EMPLOYEE_SCHEDULES,fb.cancelProgrammedEmployeeAssignment), findEmployeeByCode:fb.findEmployeeByCode, findEmployeeByDocument:fb.findEmployeeByDocument, getNextEmployeeCode:fb.getNextEmployeeCode,
         generateEmployeeCertificate:fb.generateEmployeeCertificate,
         streamEmployeeCargoHistory:fb.streamEmployeeCargoHistory, streamEmployeeCargoHistoryAll:fb.streamEmployeeCargoHistoryAll,
         createEmployeesBulk:guardWrite(PERMS.EDIT_EMPLOYEES,fb.createEmployeesBulk),
@@ -134,10 +134,6 @@ const guardWrite=(perm,fn)=> async (...args)=>{
         }
         if(String(profile?.role||'').trim().toLowerCase()===ROLES.TABLET_QR){
           window.location.replace('qr.html');
-          return;
-        }
-        if(String(profile?.role||'').trim().toLowerCase()===ROLES.SUPERVISOR && profile?.supervisorEligible===true){
-          window.location.replace('supervisor.html');
           return;
         }
         setState({ user, userProfile: profile });

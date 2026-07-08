@@ -55,10 +55,10 @@ El texto principal queda construido asi:
 EMPRESA, identificada con NIT XXXXX, CERTIFICA que EMPLEADO,
 identificado(a) con documento de identidad No. DOCUMENTO,
 se encuentra vinculado(a) laboralmente con nuestra compañía desde FECHA,
-desempeñando el cargo de CARGO.
+desempeñando el cargo de CARGO, vinculado(a) mediante contrato OBRA O LABOR.
 ```
 
-Si el certificado es con salario, se agrega el parrafo de salario configurado desde el cargo del empleado.
+Si el certificado es con salario, se agrega el parrafo de salario configurado desde el cargo del empleado con valor numerico y valor en letras.
 
 ## Verificacion por QR
 

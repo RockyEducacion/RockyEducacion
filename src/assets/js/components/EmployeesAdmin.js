@@ -166,7 +166,14 @@ export const EmployeesAdmin=(mount,deps={})=>{
     if(!/^\d{4}-\d{2}-\d{2}$/.test(ingreso)){ alert('Selecciona la fecha de ingreso.'); return; }
     try{
       const dupDoc=await deps.findEmployeeByDocument?.(doc);
-      if(dupDoc) { alert('Ya existe un empleado con ese documento.'); return; }
+      if(dupDoc) {
+        if(String(dupDoc.estado||'').trim().toLowerCase()==='inactivo') {
+          alert('Ya existe un empleado inactivo con ese documento. Se abrira el reingreso.');
+          return openRehireEmployeeModal(dupDoc,{ nombre:name, telefono:phone, cargoCodigo:cargoCode, sedeCodigo:sedeCode, fechaIngreso:ingreso });
+        }
+        alert('Ya existe un empleado activo con ese documento.');
+        return;
+      }
       const code=await deps.getNextEmployeeCode?.();
       const cargo=cargoList.find(c=>c.codigo===cargoCode);
       const sede=sedeList.find(s=>s.codigo===sedeCode);
@@ -223,7 +230,15 @@ export const EmployeesAdmin=(mount,deps={})=>{
     if(!ingreso){ msg.textContent='Selecciona la fecha de ingreso.'; return; }
     try{
       const dupDoc=await deps.findEmployeeByDocument?.(doc);
-      if(dupDoc) { msg.textContent='Ya existe un empleado con ese documento.'; return; }
+      if(dupDoc) {
+        if(String(dupDoc.estado||'').trim().toLowerCase()==='inactivo') {
+          msg.textContent='Ya existe un empleado inactivo con ese documento. Se abrira el reingreso.';
+          await openRehireEmployeeModal(dupDoc,{ nombre:name, telefono:phone, cargoCodigo:cargoCode, sedeCodigo:sedeCode, fechaIngreso:ingreso });
+          return;
+        }
+        msg.textContent='Ya existe un empleado activo con ese documento.';
+        return;
+      }
       const code=await deps.getNextEmployeeCode?.();
       const cargo=cargoList.find(c=>c.codigo===cargoCode);
       const sede=sedeList.find(s=>s.codigo===sedeCode);
@@ -440,6 +455,7 @@ export const EmployeesAdmin=(mount,deps={})=>{
     },5000);
   }
   async function openMoreOptionsModal(e){
+    const inactive=String(e?.estado||'').trim().toLowerCase()==='inactivo';
     const modal=await showActionModal({
       title:'Mas opciones',
       message:`Empleado: ${e.nombre||'-'}`,
@@ -455,8 +471,9 @@ export const EmployeesAdmin=(mount,deps={})=>{
           { value:'transfer', label:'Trasladar empleado' },
           { value:'cargo', label:'Cambiar cargo' },
           { value:'certificate', label:'Generar certificado' },
+          inactive ? { value:'rehire', label:'Reingresar empleado' } : null,
           { value:'retire', label:'Retirar empleado' }
-        ]
+        ].filter(Boolean)
       }]
     });
     if(!modal.confirmed) return;
@@ -464,6 +481,7 @@ export const EmployeesAdmin=(mount,deps={})=>{
     if(modal.values.action==='transfer') return openTransferEmployeeModal(e);
     if(modal.values.action==='cargo') return openChangeCargoModal(e);
     if(modal.values.action==='certificate') return openCertificateModal(e);
+    if(modal.values.action==='rehire') return openRehireEmployeeModal(e);
     if(modal.values.action==='retire') return openRetireEmployeeModal(e);
   }
   async function openCertificateModal(e){
@@ -623,6 +641,52 @@ export const EmployeesAdmin=(mount,deps={})=>{
       await deps.addAuditLog?.({ targetType:'employee', targetId:e.id, action:'retire_employee', before:{estado:e.estado, fechaRetiro:e.fechaRetiro||null}, after:{estado:'inactivo', fechaRetiro:retiro}, note:modal.values.detail||null });
     }catch(err){ alert('Error: '+(err?.message||err)); }
   }
+  async function openRehireEmployeeModal(e, defaults={}){
+    if(String(e?.estado||'').trim().toLowerCase()!=='inactivo') return alert('Solo puedes reingresar empleados inactivos.');
+    const lastRetiro=lastRetiroDateForEmployee(e);
+    const minIngreso=lastRetiro||'';
+    const modal=await showActionModal({
+      title:'Reingresar empleado',
+      message:`Empleado: ${e.nombre||'-'}${lastRetiro ? `\nUltimo retiro: ${formatInputDate(lastRetiro)}` : ''}`,
+      confirmText:'Reingresar',
+      fields:[
+        { id:'documento', label:'Documento', type:'text', value:e.documento||'', readonly:true },
+        { id:'nombre', label:'Nombre completo', type:'text', required:true, value:defaults.nombre||e.nombre||'' },
+        { id:'telefono', label:'Telefono', type:'text', required:true, value:defaults.telefono||e.telefono||'' },
+        { id:'cargo', label:'Cargo', type:'select', required:true, value:defaults.cargoCodigo||e.cargoCodigo||'', options:cargoOptions() },
+        { id:'sede', label:'Sede', type:'datalist', required:true, placeholder:'Selecciona o escribe sede', value:sedeLabelByCode(defaults.sedeCodigo||e.sedeCodigo)||'', options:sedeOptions() },
+        { id:'fechaIngreso', label:'Nueva fecha ingreso', type:'date', required:true, value:defaults.fechaIngreso||minIngreso, min:minIngreso },
+        { id:'detail', label:'Detalle', type:'textarea', required:true, placeholder:'Describe brevemente el reingreso' }
+      ]
+    });
+    if(!modal.confirmed) return;
+    const newName=String(modal.values.nombre||'').trim();
+    const newPhone=String(modal.values.telefono||'').trim();
+    const newCargoCode=String(modal.values.cargo||'').trim();
+    const newSedeCode=resolveSedeCode(modal.values.sede);
+    const newIngreso=String(modal.values.fechaIngreso||'').trim();
+    if(!newName) return alert('Escribe el nombre completo.');
+    if(!newPhone) return alert('Escribe el telefono.');
+    if(!newCargoCode) return alert('Selecciona un cargo.');
+    if(!newSedeCode) return alert('Selecciona una sede valida.');
+    if(!validInputDate(newIngreso)) return alert('Selecciona una fecha de ingreso valida.');
+    if(lastRetiro && newIngreso<lastRetiro) return alert(`La nueva fecha de ingreso no puede ser anterior al ultimo retiro (${lastRetiro}).`);
+    try{
+      const cargo=cargoList.find(c=>c.codigo===newCargoCode);
+      const sede=sedeList.find(s=>s.codigo===newSedeCode);
+      const updated=await deps.rehireEmployee?.(e.id,{
+        nombre:newName,
+        telefono:newPhone,
+        cargoCodigo:newCargoCode,
+        cargoNombre:cargo?.nombre||null,
+        sedeCodigo:newSedeCode,
+        sedeNombre:sede?.nombre||null,
+        fechaIngreso:new Date(`${newIngreso}T00:00:00`)
+      });
+      await deps.addAuditLog?.({ targetType:'employee', targetId:e.id, action:'rehire_employee', before:{ estado:e.estado, fechaRetiro:e.fechaRetiro||null }, after:{ estado:'activo', fechaIngreso:newIngreso, cargoCodigo:newCargoCode, sedeCodigo:newSedeCode }, note:modal.values.detail||null });
+      alert(`Empleado reingresado OK: ${updated?.nombre||newName}`);
+    }catch(err){ alert('Error: '+(err?.message||err)); }
+  }
   function actionsCell(e){
     const box=el('div',{className:'row-actions'},[]);
     const btnMore=el('button',{className:'btn btn--icon',type:'button',title:'Mas opciones','aria-label':'Mas opciones'},['\u22EF']);
@@ -672,6 +736,13 @@ export const EmployeesAdmin=(mount,deps={})=>{
     if(Number.isNaN(dt.getTime())) return '';
     dt.setDate(dt.getDate()+1);
     return toInputDate(dt);
+  }
+  function lastRetiroDateForEmployee(e={}){
+    const dates=[
+      toISODateValue(e?.fechaRetiro),
+      ...historyRowsByEmployee(e).map((row)=>toISODateValue(row?.fechaRetiro))
+    ].filter(Boolean).sort();
+    return dates.length ? dates[dates.length-1] : '';
   }
   qs('#txtSearch',ui).addEventListener('input',()=>{ paginator.reset(); render(); });
   qs('#selSede',ui).addEventListener('change',()=>{ paginator.reset(); render(); });

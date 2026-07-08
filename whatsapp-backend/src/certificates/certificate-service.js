@@ -88,13 +88,13 @@ async function buildCertificatePdfWithPdfKit({ employee, cargo, type, verificati
     doc.moveDown(2);
     doc.font('Helvetica').fontSize(12);
     doc.text(
-      `${cfg.companyLegalName || ''}, identificada con NIT ${cfg.companyNit || '-'}, CERTIFICA que ${employee.nombre || 'Empleado'}, identificado(a) con documento de identidad No. ${employee.documento || '-'}, se encuentra vinculado(a) laboralmente con nuestra compañía desde el ${formatLongDate(employee.fecha_ingreso, cfg)}, desempeñando el cargo de ${employee.cargo_nombre || cargo?.nombre || employee.cargo_codigo || '-'}.`,
+      `${cfg.companyLegalName || ''}, identificada con NIT ${cfg.companyNit || '-'}, CERTIFICA que ${employee.nombre || 'Empleado'}, identificado(a) con documento de identidad No. ${employee.documento || '-'}, se encuentra vinculado(a) laboralmente con nuestra compañía desde el ${formatLongDate(employee.fecha_ingreso, cfg)}, desempeñando el cargo de ${employee.cargo_nombre || cargo?.nombre || employee.cargo_codigo || '-'}, vinculado(a) mediante contrato OBRA O LABOR.`,
       { width: contentWidth, align: 'justify' }
     );
 
     if (type === 'with_salary') {
       doc.moveDown(1);
-      doc.text(`Actualmente devenga un salario básico de ${formatCurrency(salary, cfg)}.`, {
+      doc.text(`Actualmente devenga un salario básico de ${formatCurrency(salary, cfg)} (${formatCurrencyWords(salary)}).`, {
         width: contentWidth,
         align: 'justify'
       });
@@ -206,6 +206,89 @@ function formatCurrency(value, cfg) {
     currency: 'COP',
     maximumFractionDigits: 0
   }).format(Number(value || 0));
+}
+
+function formatCurrencyWords(value) {
+  const amount = Math.round(Number(value || 0));
+  if (!Number.isFinite(amount)) return 'CERO PESOS M/CTE';
+  const absAmount = Math.abs(amount);
+  const words = apocopateOne(spanishIntegerWords(absAmount));
+  const prefix = amount < 0 ? 'menos ' : '';
+  const currency = absAmount === 1 ? 'peso' : 'pesos';
+  return `${prefix}${words} ${currency} m/cte`.toUpperCase();
+}
+
+function spanishIntegerWords(value) {
+  const number = Math.trunc(Number(value || 0));
+  if (number === 0) return 'cero';
+  if (number < 0) return `menos ${spanishIntegerWords(Math.abs(number))}`;
+  if (number < 1000) return spanishThreeDigitWords(number);
+  if (number < 1000000) return joinNumberGroup(number, 1000, 'mil', 'mil');
+  if (number < 1000000000000) return joinNumberGroup(number, 1000000, 'un millón', 'millones');
+  return joinNumberGroup(number, 1000000000000, 'un billón', 'billones');
+}
+
+function joinNumberGroup(number, divisor, singularLabel, pluralLabel) {
+  const group = Math.trunc(number / divisor);
+  const remainder = number % divisor;
+  const prefix = group === 1
+    ? singularLabel
+    : `${apocopateOne(spanishIntegerWords(group))} ${pluralLabel}`;
+  return remainder ? `${prefix} ${spanishIntegerWords(remainder)}` : prefix;
+}
+
+function spanishThreeDigitWords(number) {
+  const units = [
+    '',
+    'uno',
+    'dos',
+    'tres',
+    'cuatro',
+    'cinco',
+    'seis',
+    'siete',
+    'ocho',
+    'nueve',
+    'diez',
+    'once',
+    'doce',
+    'trece',
+    'catorce',
+    'quince',
+    'dieciséis',
+    'diecisiete',
+    'dieciocho',
+    'diecinueve',
+    'veinte',
+    'veintiuno',
+    'veintidós',
+    'veintitrés',
+    'veinticuatro',
+    'veinticinco',
+    'veintiséis',
+    'veintisiete',
+    'veintiocho',
+    'veintinueve'
+  ];
+  const tens = ['', '', '', 'treinta', 'cuarenta', 'cincuenta', 'sesenta', 'setenta', 'ochenta', 'noventa'];
+  const hundreds = ['', 'ciento', 'doscientos', 'trescientos', 'cuatrocientos', 'quinientos', 'seiscientos', 'setecientos', 'ochocientos', 'novecientos'];
+  if (number < 30) return units[number];
+  if (number < 100) {
+    const ten = Math.trunc(number / 10);
+    const unit = number % 10;
+    return unit ? `${tens[ten]} y ${units[unit]}` : tens[ten];
+  }
+  if (number === 100) return 'cien';
+  const hundred = Math.trunc(number / 100);
+  const remainder = number % 100;
+  return remainder ? `${hundreds[hundred]} ${spanishThreeDigitWords(remainder)}` : hundreds[hundred];
+}
+
+function apocopateOne(value) {
+  return String(value || '')
+    .replace(/veintiuno$/u, 'veintiún')
+    .replace(/ y uno$/u, ' y un')
+    .replace(/uno$/u, 'un');
 }
 
 function formatLongDate(value, cfg) {

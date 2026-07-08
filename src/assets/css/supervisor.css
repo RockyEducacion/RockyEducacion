@@ -272,6 +272,18 @@
   line-height:1.2;
   overflow-wrap:anywhere
 }
+.supervisor-detail--ok{
+  background:#187a4612;
+  border-color:#187a4630
+}
+.supervisor-detail--ok span,
+.supervisor-detail--ok strong{color:#187a46}
+.supervisor-detail--danger{
+  background:#c43d3412;
+  border-color:#c43d3430
+}
+.supervisor-detail--danger span,
+.supervisor-detail--danger strong{color:#c43d34}
 .supervisor-card__actions{
   display:flex;
   gap:.45rem;

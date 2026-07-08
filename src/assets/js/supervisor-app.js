@@ -508,6 +508,7 @@ function recordCard(row) {
     detail('Hora', row.hora || '-'),
     detail(recordDetailLabel, recordDetailValue),
     row.incapacidadDias ? detail('Dias incapacidad', `${row.incapacidadDias} dia${row.incapacidadDias === 1 ? '' : 's'}`) : null,
+    incapacitySupportDetail(row),
     detail('Zona', row.zonaNombre || row.zonaCodigo || '-'),
     detail('Cobertura', coverageLabel(row))
   ].filter(Boolean);
@@ -533,6 +534,17 @@ function detail(label, value) {
   return el('div', { className: 'supervisor-detail' }, [
     el('span', {}, [label]),
     el('strong', {}, [String(value || '-')])
+  ]);
+}
+
+function incapacitySupportDetail(row = {}) {
+  if (row.esIncapacidad !== true) return null;
+  const hasSupport = row.incapacidadSoporteCargado === true;
+  return el('div', {
+    className: `supervisor-detail supervisor-detail--${hasSupport ? 'ok' : 'danger'}`
+  }, [
+    el('span', {}, ['Soporte incapacidad']),
+    el('strong', {}, [hasSupport ? 'Si' : 'No'])
   ]);
 }
 
@@ -996,6 +1008,7 @@ function normalizeRecord({ status = {}, employee = {}, attendance = {}, replacem
   const isIncapacity = Boolean(incapacity.id) || /incap/.test(normalizedNoveltyState);
   const isAbsent = /ausen|incap|permiso|retiro|vacacion/.test(normalizedNoveltyState);
   const incapacityDays = isIncapacity ? incapacityDaysForRecord(incapacity, selectedDate) : null;
+  const incapacityHasSupport = incapacity.soporteCargado === true;
   const hasNovelty = Boolean(novelty) || Boolean(replacement.id);
   let recordStatus = 'pendiente';
   if (hasAttendance) recordStatus = novelty ? 'novedad' : 'presente';
@@ -1016,9 +1029,11 @@ function normalizeRecord({ status = {}, employee = {}, attendance = {}, replacem
     novedadCodigo: noveltyCode,
     novedad: novelty,
     registro: operationalRecord || (recordStatus === 'presente' ? 'Correcto' : null),
+    esIncapacidad: isIncapacity,
     incapacidadDias: incapacityDays,
     incapacidadInicio: incapacity.fechaInicio || null,
     incapacidadFin: incapacity.fechaFin || null,
+    incapacidadSoporteCargado: incapacityHasSupport,
     hora: attendance.hora || formatTime(attendance.createdAt) || null,
     replacementId: replacement.id || null,
     reemplazo: replacement.supernumerarioNombre || status.reemplazadoPorNombre || null,

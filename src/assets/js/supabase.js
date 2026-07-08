@@ -3442,6 +3442,88 @@ export async function createEmployee({ codigo, documento, nombre, telefono, carg
   return data.id;
 }
 
+export async function rehireEmployee(id, { nombre, telefono, cargoCodigo, cargoNombre, sedeCodigo, sedeNombre, fechaIngreso } = {}) {
+  const employeeId = String(id || '').trim();
+  if (!employeeId) throw new Error('No se encontro el empleado a reingresar.');
+  const ingresoIso = toISODate(fechaIngreso);
+  if (!ingresoIso) throw new Error('Selecciona una fecha de ingreso valida.');
+
+  const current = await supabase.from('employees').select('*').eq('id', employeeId).single();
+  if (current.error) throw current.error;
+  const currentRow = current.data;
+  if (String(currentRow.estado || '').trim().toLowerCase() !== 'inactivo') {
+    throw new Error('Solo se pueden reingresar empleados inactivos.');
+  }
+
+  const { data: historyRows, error: historyError } = await supabase
+    .from('employee_cargo_history')
+    .select('fecha_retiro')
+    .eq('employee_id', employeeId);
+  if (historyError) throw historyError;
+
+  const lastRetiro = [
+    toISODate(currentRow.fecha_retiro),
+    ...((historyRows || []).map((row) => toISODate(row?.fecha_retiro)))
+  ]
+    .filter(Boolean)
+    .sort()
+    .pop() || null;
+  if (lastRetiro && ingresoIso < lastRetiro) {
+    throw new Error(`La nueva fecha de ingreso no puede ser anterior al ultimo retiro (${lastRetiro}).`);
+  }
+
+  const audit = await getCurrentAuditFields();
+  const zone = await resolveZoneBySedeCode(sedeCodigo);
+  const patch = {
+    estado: 'activo',
+    nombre: typeof nombre === 'string' ? nombre : currentRow.nombre || null,
+    telefono: typeof telefono === 'string' ? normalizeStoredPhone(telefono) : currentRow.telefono || null,
+    cargo_codigo: cargoCodigo || currentRow.cargo_codigo || null,
+    cargo_nombre: cargoNombre || null,
+    sede_codigo: sedeCodigo || currentRow.sede_codigo || null,
+    sede_nombre: sedeNombre || null,
+    zona_codigo: zone.zonaCodigo || null,
+    zona_nombre: zone.zonaNombre || null,
+    fecha_ingreso: fechaIngreso,
+    fecha_retiro: null,
+    last_modified_by_uid: audit.created_by_uid,
+    last_modified_by_email: audit.created_by_email,
+    last_modified_at: new Date().toISOString()
+  };
+  validateEmployeeDateRange(patch.fecha_ingreso, patch.fecha_retiro);
+
+  const { data: updated, error } = await supabase
+    .from('employees')
+    .update(patch)
+    .eq('id', employeeId)
+    .select('*')
+    .single();
+  if (error) throw error;
+
+  await appendEmployeeCargoHistory({
+    employeeId: updated.id,
+    employeeCodigo: updated.codigo,
+    documento: updated.documento,
+    cargoCodigo: updated.cargo_codigo,
+    cargoNombre: updated.cargo_nombre,
+    sedeCodigo: updated.sede_codigo,
+    sedeNombre: updated.sede_nombre,
+    fechaIngreso: updated.fecha_ingreso,
+    fechaRetiro: null,
+    source: 'rehire_employee'
+  });
+
+  if (await getCargoCrudAlignmentByCode(updated.cargo_codigo, updated.cargo_nombre) === 'supervisor') {
+    await upsertSupervisorProfileFromEmployee(mapEmployeeRow(updated));
+  }
+  await reconcileOperationalSnapshotsForEmployeeChange(currentRow, updated, [lastRetiro, updated.fecha_ingreso]);
+  await Promise.all([
+    notifyTableReload('employees'),
+    notifyTableReload('employee_cargo_history')
+  ]);
+  return mapEmployeeRow(updated);
+}
+
 function normalizeStoredPhone(value) {
   const digits = String(value || '').replace(/\D+/g, '').trim();
   if (!digits) return null;
@@ -4303,7 +4385,7 @@ export function streamDailyMetricsByDate(fecha, onData, onError = null, onStatus
   };
 }
 
-export function streamIncapacitadosByDate(fecha, onData, onError = null, onStatus = null) {
+export function streamIncapacitadosByDate(fecha, onData) {
   const day = String(fecha || '').trim();
   if (!day) {
     onData([]);
@@ -4321,7 +4403,6 @@ export function streamIncapacitadosByDate(fecha, onData, onError = null, onStatu
     if (!active) return;
     if (error) {
       console.error('No se pudo cargar incapacitados por fecha:', error);
-      onError?.(error, 'LOAD_ERROR');
       onData([]);
       return;
     }
@@ -4329,15 +4410,13 @@ export function streamIncapacitadosByDate(fecha, onData, onError = null, onStatu
   };
   emit();
   const unregister = registerTableReloader('incapacitados', emit);
-  const realtime = subscribeToRealtime(
-    supabase.channel(nextRealtimeChannelName(`incapacitados-${day}`)).on('postgres_changes', { event: '*', schema: 'public', table: 'incapacitados' }, emit),
-    { label: `incapacitados:${day}`, onError, onStatus }
-  );
-  const channel = realtime.subscription;
+  const channel = supabase
+    .channel(nextRealtimeChannelName(`incapacitados-${day}`))
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'incapacitados' }, emit)
+    .subscribe();
   return () => {
     active = false;
     unregister();
-    realtime.cancel();
     supabase.removeChannel(channel);
   };
 }
@@ -4688,6 +4767,20 @@ function supervisorRegistryHasNovelty(row = {}) {
   return !['sin registro', 'trabajando', 'trabajado reemplazo', 'compensatorio', 'ok'].includes(state);
 }
 
+function mapSupervisorIncapacityRow(row = {}) {
+  const mapped = row?.fechaInicio ? row : mapIncapacidadRow(row);
+  return {
+    id: mapped.id || null,
+    employeeId: mapped.employeeId || null,
+    documento: mapped.documento || null,
+    nombre: mapped.nombre || null,
+    fechaInicio: mapped.fechaInicio || null,
+    fechaFin: mapped.fechaFin || null,
+    estado: mapped.estado || 'activo',
+    soporteCargado: Boolean(mapped.soporteUrl || mapped.soporteNombre || mapped.soporteStoragePath || mapped.soporteCargado)
+  };
+}
+
 export async function listSupervisorDailyRegistry(fecha, zoneCodes = []) {
   const day = String(fecha || '').trim();
   const zones = normalizeZoneCodeList(zoneCodes);
@@ -4792,7 +4885,7 @@ export async function listSupervisorDailyRegistry(fecha, zoneCodes = []) {
     });
 
   const scopedIncapacities = (incapacityRows || [])
-    .map(mapIncapacidadRow)
+    .map(mapSupervisorIncapacityRow)
     .filter((row) => {
       const employeeId = String(row.employeeId || '').trim();
       const documento = String(row.documento || '').trim();
@@ -4806,7 +4899,7 @@ export async function listSupervisorDailyRegistry(fecha, zoneCodes = []) {
         });
     });
   const incapacitiesById = new Map();
-  [...scopedIncapacities, ...(supernumerarioIncapacityRows || [])].forEach((row) => {
+  [...scopedIncapacities, ...((supernumerarioIncapacityRows || []).map(mapSupervisorIncapacityRow))].forEach((row) => {
     const key = String(row?.id || '').trim()
       || [
         String(row?.employeeId || '').trim(),

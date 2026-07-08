@@ -4,6 +4,7 @@ import { el, qs } from './utils/dom.js';
 
 const root = document.getElementById('employee-root');
 const SESSION_STORAGE_KEY = 'employee_portal_token';
+const EMPLOYEE_CERTIFICATES_VISIBLE = false;
 
 function apiUrl(path) {
   const base = String(EMPLOYEE_PORTAL_API_BASE || '').trim().replace(/\/+$/, '');
@@ -212,13 +213,13 @@ function renderDashboardCard(session) {
           ]),
           el('button', { className: 'btn', type: 'button' }, ['Cerrar sesion'])
         ]),
-        el('p', { className: 'text-muted' }, ['Gestiona tus incapacidades y descarga tus certificados laborales desde este portal.']),
+        el('p', { className: 'text-muted' }, ['Gestiona tus incapacidades desde este portal.']),
         el('div', { className: 'employee-session-meta' }, [
           sessionMetaItem('Documento', session?.documento || '-'),
           sessionMetaItem('Sesion vence', formatDate(session?.expiresAt))
         ])
       ]),
-      renderCertificateActions()
+      ...(EMPLOYEE_CERTIFICATES_VISIBLE ? [renderCertificateActions()] : [])
     ]),
   ]);
 
