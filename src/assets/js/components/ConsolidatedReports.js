@@ -985,12 +985,7 @@ export const ConsolidatedReports = (mount, deps = {}) => {
     }, dateFrom);
     const contextDays = buildAttendanceWithoutFsDays(contextStart || dateFrom, dateTo);
     const contextDayIndexByIso = new Map(contextDays.map((day, index) => [day.iso, index]));
-    const siteKeyDelimiter = '||';
-    const buildSiteKey = (sedeCode, dependencyCode = '', zoneCode = '') => [
-      String(sedeCode || '').trim(),
-      String(dependencyCode || '').trim(),
-      String(zoneCode || '').trim()
-    ].join(siteKeyDelimiter);
+    const buildSiteKey = (sedeCode) => String(sedeCode || '').trim();
     const bucketKey = (day, siteKey) => `${day}|${siteKey}`;
     const parseBucketKey = (key) => {
       const separatorIndex = String(key || '').indexOf('|');
@@ -1077,7 +1072,7 @@ export const ConsolidatedReports = (mount, deps = {}) => {
           zonaCodigo: String(row?.zonaCodigoSnapshot || sedeFallback?.zonaCodigo || '').trim(),
           nombre: String(row?.sedeNombreSnapshot || sedeFallback?.nombre || '').trim()
         };
-        const siteKey = buildSiteKey(sedeCode, snapshot.dependenciaCodigo || snapshot.dependenciaNombre, snapshot.zonaCodigo || snapshot.zonaNombre);
+        const siteKey = buildSiteKey(sedeCode);
         sedeCodeBySiteKey.set(siteKey, sedeCode);
         if (!contextSnapshotBySede.has(siteKey)) contextSnapshotBySede.set(siteKey, snapshot);
         if (visibleDaySet.has(day) && !visibleSnapshotBySede.has(siteKey)) visibleSnapshotBySede.set(siteKey, snapshot);
@@ -1091,7 +1086,7 @@ export const ConsolidatedReports = (mount, deps = {}) => {
       });
 
     Array.from(sedeByCode.entries()).forEach(([sedeCode, sede]) => {
-      const siteKey = buildSiteKey(sedeCode, sede?.dependenciaCodigo || sede?.dependenciaNombre, sede?.zonaCodigo || sede?.zonaNombre);
+      const siteKey = buildSiteKey(sedeCode);
       sedeCodeBySiteKey.set(siteKey, sedeCode);
       plannedBySede.set(siteKey, parseOperatorCount(sede?.numeroOperarios));
     });
@@ -1207,7 +1202,7 @@ export const ConsolidatedReports = (mount, deps = {}) => {
 
     Array.from(plannedBySede.keys()).forEach((siteKey) => {
       const slotCount = Math.max(0, Number(plannedBySede.get(siteKey) || 0));
-      const sedeCode = sedeCodeBySiteKey.get(siteKey) || String(siteKey).split(siteKeyDelimiter)[0] || '';
+      const sedeCode = sedeCodeBySiteKey.get(siteKey) || String(siteKey || '').trim();
       const sede = sedeByCode.get(sedeCode) || {};
       const isWeekdayOnlySede = String(sede?.jornada || 'lun_vie').trim().toLowerCase() === 'lun_vie';
       Array.from({ length: slotCount }, (_, slotIndex) => {
@@ -1276,7 +1271,7 @@ export const ConsolidatedReports = (mount, deps = {}) => {
         return String(sedeCodeBySiteKey.get(a[0]) || '').localeCompare(String(sedeCodeBySiteKey.get(b[0]) || ''));
       })
       .flatMap(([siteKey, plannedCount]) => {
-        const sedeCode = sedeCodeBySiteKey.get(siteKey) || String(siteKey).split(siteKeyDelimiter)[0] || '';
+        const sedeCode = sedeCodeBySiteKey.get(siteKey) || String(siteKey || '').trim();
         const sede = {
           ...(sedeByCode.get(sedeCode) || {}),
           ...(contextSnapshotBySede.get(siteKey) || {}),

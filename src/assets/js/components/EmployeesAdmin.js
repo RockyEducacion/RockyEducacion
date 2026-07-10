@@ -414,6 +414,25 @@ export const EmployeesAdmin=(mount,deps={})=>{
     });
     return future[0];
   }
+  function programmedAssignmentsAfterDate(e={},day=''){
+    const cleanDay=String(day||'').trim();
+    return historyRowsByEmployee(e)
+      .filter((row)=>{
+        const ingreso=toISODateValue(row?.fechaIngreso);
+        return ingreso && cleanDay && ingreso>cleanDay && !row?.fechaRetiro;
+      })
+      .sort((a,b)=>{
+        const ai=toISODateValue(a.fechaIngreso)||'';
+        const bi=toISODateValue(b.fechaIngreso)||'';
+        if(ai!==bi) return ai.localeCompare(bi);
+        return String(a.createdAt||'').localeCompare(String(b.createdAt||''));
+      });
+  }
+  function programmedAssignmentLine(row={}){
+    const cargo=row.cargoNombre||cargoNameByCode(row.cargoCodigo)||row.cargoCodigo||'-';
+    const sede=row.sedeNombre||sedeNameByCode(row.sedeCodigo)||row.sedeCodigo||'-';
+    return `${formatInputDate(row.fechaIngreso)} | Cargo: ${cargo} | Sede: ${sede}`;
+  }
   function formatDate(ts){
     try{
       const d=ts?.toDate? ts.toDate(): (ts? new Date(ts): null);
@@ -635,10 +654,30 @@ export const EmployeesAdmin=(mount,deps={})=>{
     if(!validInputDate(retiro)) return alert('Fecha invalida. Usa formato AAAA-MM-DD.');
     const ingreso=toInputDate(e.fechaIngreso);
     if(ingreso && retiro<ingreso) return alert('La fecha de retiro no puede ser anterior a la fecha de ingreso.');
+    const programmed=programmedAssignmentsAfterDate(e,retiro);
+    if(programmed.length){
+      const confirmCancel=await showActionModal({
+        title:'Cancelar cambios programados',
+        message:[
+          `El empleado tiene ${programmed.length} cambio(s) programado(s) posterior(es) al retiro ${formatInputDate(retiro)}.`,
+          ...programmed.map((row,idx)=>`${idx+1}. ${programmedAssignmentLine(row)}`),
+          'Si continuas, se cancelaran estos cambios y el empleado quedara retirado en su asignacion actual.'
+        ].join('\n'),
+        confirmText:'Cancelar y retirar',
+        fields:[
+          { id:'detail', label:'Detalle', type:'textarea', required:true, value:modal.values.detail||'', placeholder:'Confirma el motivo de la cancelacion y retiro' }
+        ]
+      });
+      if(!confirmCancel.confirmed) return;
+      modal.values.detail=confirmCancel.values.detail||modal.values.detail||'';
+    }
     try{
       const retiroDate=new Date(`${retiro}T00:00:00`);
-      await deps.setEmployeeStatus?.(e.id,'inactivo',{ fechaRetiro:retiroDate });
-      await deps.addAuditLog?.({ targetType:'employee', targetId:e.id, action:'retire_employee', before:{estado:e.estado, fechaRetiro:e.fechaRetiro||null}, after:{estado:'inactivo', fechaRetiro:retiro}, note:modal.values.detail||null });
+      for(const row of programmed){
+        if(row?.id) await deps.cancelProgrammedEmployeeAssignment?.(row.id);
+      }
+      await deps.setEmployeeStatus?.(e.id,'inactivo',{ fechaRetiro:retiroDate, cancelProgrammedAssignments:true });
+      await deps.addAuditLog?.({ targetType:'employee', targetId:e.id, action:'retire_employee', before:{estado:e.estado, fechaRetiro:e.fechaRetiro||null}, after:{estado:'inactivo', fechaRetiro:retiro, cancelledProgrammedAssignments:programmed.map((row)=>({ id:row.id, fechaIngreso:row.fechaIngreso, sedeCodigo:row.sedeCodigo, sedeNombre:row.sedeNombre, cargoCodigo:row.cargoCodigo, cargoNombre:row.cargoNombre }))}, note:modal.values.detail||null });
     }catch(err){ alert('Error: '+(err?.message||err)); }
   }
   async function openRehireEmployeeModal(e, defaults={}){

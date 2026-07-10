@@ -1280,6 +1280,60 @@ async function closeActiveEmployeeHistory(employeeId, fechaRetiro, notifyReload 
   }
 }
 
+async function cancelFutureEmployeeHistoryForRetirement(employeeId, fechaRetiro, { allowCancel = false } = {}) {
+  const empId = String(employeeId || '').trim();
+  const retiro = toISODate(fechaRetiro);
+  if (!empId || !retiro) return [];
+
+  const { data: rows, error } = await supabase
+    .from('employee_cargo_history')
+    .select('*')
+    .eq('employee_id', empId)
+    .order('fecha_ingreso', { ascending: true })
+    .order('created_at', { ascending: true });
+  if (error) throw error;
+
+  const futureRows = (rows || []).filter((row) => {
+    const ingreso = toISODate(row?.fecha_ingreso);
+    return ingreso && ingreso > retiro && !row?.fecha_retiro;
+  });
+  if (!futureRows.length) return [];
+  if (!allowCancel) {
+    throw new Error('El empleado tiene cambios programados posteriores al retiro. Confirma la cancelacion de esos cambios antes de retirar.');
+  }
+
+  const futureIds = futureRows.map((row) => row.id).filter(Boolean);
+  if (futureIds.length) {
+    const { error: deleteError } = await supabase
+      .from('employee_cargo_history')
+      .delete()
+      .in('id', futureIds);
+    if (deleteError) throw deleteError;
+  }
+
+  const previous = (rows || [])
+    .filter((row) => !futureIds.includes(row.id))
+    .filter((row) => {
+      const ingreso = toISODate(row?.fecha_ingreso);
+      return ingreso && ingreso <= retiro;
+    })
+    .sort((left, right) => {
+      const a = toISODate(left?.fecha_ingreso) || '';
+      const b = toISODate(right?.fecha_ingreso) || '';
+      if (a !== b) return b.localeCompare(a);
+      return String(right?.created_at || '').localeCompare(String(left?.created_at || ''));
+    })[0] || null;
+  if (previous?.id && previous.fecha_retiro) {
+    const { error: reopenError } = await supabase
+      .from('employee_cargo_history')
+      .update({ fecha_retiro: null })
+      .eq('id', previous.id);
+    if (reopenError) throw reopenError;
+  }
+
+  return futureRows.map(mapCargoHistoryRow);
+}
+
 async function patchActiveEmployeeHistory(employeeId, patch = {}, notifyReload = true) {
   const empId = String(employeeId || '').trim();
   const updates = Object.fromEntries(Object.entries(patch || {}).filter(([, value]) => value !== undefined));
@@ -1996,6 +2050,88 @@ async function assertNoEmployeeAttendanceTodayBeforeSedeTransfer(currentRow = {}
   if (matchingRegistration) {
     const sedeLabel = matchingRegistration.sede_nombre || matchingRegistration.sede_codigo || previousSede || 'la sede anterior';
     throw new Error(`El empleado ya se registro hoy en ${sedeLabel}. No se puede iniciar el cambio de sede hoy.`);
+  }
+}
+
+async function assertNoEmployeeOperationalRecordsAfterRetirement(currentRow = {}, fechaRetiro = null) {
+  const retiro = toISODate(fechaRetiro);
+  const employeeId = String(currentRow?.id || '').trim();
+  const documento = normalizeDailyDocument(currentRow?.documento);
+  if (!retiro || (!employeeId && !documento)) return;
+
+  const attendanceQueries = [];
+  if (employeeId) {
+    attendanceQueries.push(
+      supabase
+        .from('attendance')
+        .select('fecha, sede_codigo, sede_nombre')
+        .gt('fecha', retiro)
+        .eq('empleado_id', employeeId)
+        .order('fecha', { ascending: true })
+        .limit(5)
+    );
+  }
+  if (documento) {
+    attendanceQueries.push(
+      supabase
+        .from('attendance')
+        .select('fecha, sede_codigo, sede_nombre')
+        .gt('fecha', retiro)
+        .eq('documento', documento)
+        .order('fecha', { ascending: true })
+        .limit(5)
+    );
+  }
+
+  const attendanceResults = await Promise.all(attendanceQueries);
+  const attendanceRows = [];
+  for (const { data, error } of attendanceResults) {
+    if (error) throw error;
+    attendanceRows.push(...(data || []));
+  }
+  const attendance = attendanceRows
+    .sort((a, b) => String(a?.fecha || '').localeCompare(String(b?.fecha || '')))[0] || null;
+  if (attendance) {
+    const sedeLabel = attendance.sede_nombre || attendance.sede_codigo || 'una sede';
+    throw new Error(`No se puede retirar con fecha ${retiro}: el empleado tiene registro de asistencia posterior el ${attendance.fecha} en ${sedeLabel}.`);
+  }
+
+  const statusQueries = [];
+  if (employeeId) {
+    statusQueries.push(
+      supabase
+        .from('employee_daily_status')
+        .select('fecha, sede_codigo, sede_nombre_snapshot, estado_dia, asistio, source_attendance_id')
+        .gt('fecha', retiro)
+        .eq('employee_id', employeeId)
+        .order('fecha', { ascending: true })
+        .limit(10)
+    );
+  }
+  if (documento) {
+    statusQueries.push(
+      supabase
+        .from('employee_daily_status')
+        .select('fecha, sede_codigo, sede_nombre_snapshot, estado_dia, asistio, source_attendance_id')
+        .gt('fecha', retiro)
+        .eq('documento', documento)
+        .order('fecha', { ascending: true })
+        .limit(10)
+    );
+  }
+
+  const statusResults = await Promise.all(statusQueries);
+  const statusRows = [];
+  for (const { data, error } of statusResults) {
+    if (error) throw error;
+    statusRows.push(...(data || []));
+  }
+  const activeStatus = statusRows
+    .filter((row) => row?.asistio === true || row?.source_attendance_id)
+    .sort((a, b) => String(a?.fecha || '').localeCompare(String(b?.fecha || '')))[0] || null;
+  if (activeStatus) {
+    const sedeLabel = activeStatus.sede_nombre_snapshot || activeStatus.sede_codigo || 'una sede';
+    throw new Error(`No se puede retirar con fecha ${retiro}: el empleado tiene estado diario posterior el ${activeStatus.fecha} en ${sedeLabel}.`);
   }
 }
 
@@ -3798,6 +3934,7 @@ export async function setEmployeeStatus(id, estado, options = null) {
     : { fechaRetiro: options || null };
   const fechaRetiro = opts.fechaRetiro || null;
   const fechaIngreso = opts.fechaIngreso || null;
+  const cancelProgrammedAssignments = opts.cancelProgrammedAssignments === true;
   const audit = await getCurrentAuditFields();
   const patch = {
     estado,
@@ -3811,6 +3948,10 @@ export async function setEmployeeStatus(id, estado, options = null) {
     patch.fecha_retiro = null;
   }
   validateEmployeeDateRange(patch.fecha_ingreso !== undefined ? patch.fecha_ingreso : currentRow.fecha_ingreso, patch.fecha_retiro);
+  if (String(estado || '').trim().toLowerCase() === 'inactivo') {
+    await assertNoEmployeeOperationalRecordsAfterRetirement(currentRow, patch.fecha_retiro);
+    await cancelFutureEmployeeHistoryForRetirement(id, patch.fecha_retiro, { allowCancel: cancelProgrammedAssignments });
+  }
   const { data, error } = await supabase.from('employees').update(patch).eq('id', id).select('*').single();
   if (error) throw error;
   const previousEstado = String(currentRow.estado || '').trim().toLowerCase();
