@@ -129,6 +129,13 @@ export const ConsolidatedReports = (mount, deps = {}) => {
     });
   }
 
+  function labelReportLoad(label, promise) {
+    return Promise.resolve(promise).catch((error) => {
+      const message = error?.message || String(error || 'Error de consulta.');
+      throw new Error(`${label}: ${message}`);
+    });
+  }
+
   function isCurrentEmployee(emp, todayISO) {
     const estado = String(emp?.estado || 'activo').trim().toLowerCase();
     const retiro = toISODate(emp?.fechaRetiro);
@@ -1865,10 +1872,10 @@ export const ConsolidatedReports = (mount, deps = {}) => {
       }
       const contextFrom = shiftIsoDate(dateFrom, -31) || dateFrom;
       const [statusRows, rawSedes, rawHistory, replacementRows] = await Promise.all([
-        deps.listEmployeeDailyStatusRange?.(contextFrom, dateTo) || [],
-        streamOnce((ok, fail) => deps.streamSedes?.(ok, fail)),
-        deps.streamEmployeeCargoHistoryAll ? streamOnce((ok) => deps.streamEmployeeCargoHistoryAll?.(ok, 50000)) : [],
-        deps.listImportReplacementsRange?.(contextFrom, dateTo) || []
+        labelReportLoad('employee_daily_status', deps.listEmployeeDailyStatusRange?.(contextFrom, dateTo) || []),
+        labelReportLoad('sedes', streamOnce((ok, fail) => deps.streamSedes?.(ok, fail))),
+        labelReportLoad('employee_cargo_history', deps.streamEmployeeCargoHistoryAll ? streamOnce((ok) => deps.streamEmployeeCargoHistoryAll?.(ok, 50000)) : []),
+        labelReportLoad('import_replacements', deps.listImportReplacementsRange?.(contextFrom, dateTo) || [])
       ]);
       const normalized = normalizeServicesWithoutFsRows(dateFrom, dateTo, statusRows, rawSedes, rawHistory, replacementRows);
       generatedServicesWithoutFsRows = normalized.rows;

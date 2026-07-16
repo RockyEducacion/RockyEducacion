@@ -637,6 +637,12 @@ export function registerEmployeePortalRoutes(app) {
         query = query.eq('documento', documento);
       }
 
+      if (dateFrom && dateTo) {
+        query = query
+          .lte('fecha_inicio', dateTo)
+          .gte('fecha_fin', dateFrom);
+      }
+
       const { data, error } = await query;
       if (error) throw error;
 

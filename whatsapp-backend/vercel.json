@@ -3,7 +3,7 @@
   "functions": {
     "api/index.js": {
       "memory": 1024,
-      "maxDuration": 60,
+      "maxDuration": 300,
       "includeFiles": "src/certificates/**"
     }
   },

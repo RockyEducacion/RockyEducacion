@@ -18,6 +18,47 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
 });
 
 const POSTGREST_PAGE_SIZE = 1000;
+const EMPLOYEE_DAILY_STATUS_RANGE_CHUNK_DAYS = 7;
+const EMPLOYEE_DAILY_STATUS_SELECT = [
+  'id',
+  'fecha',
+  'employee_id',
+  'documento',
+  'nombre',
+  'tipo_personal',
+  'sede_codigo',
+  'sede_nombre_snapshot',
+  'zona_codigo_snapshot',
+  'zona_nombre_snapshot',
+  'dependencia_codigo_snapshot',
+  'dependencia_nombre_snapshot',
+  'estado_dia',
+  'asistio',
+  'novedad_codigo',
+  'novedad_nombre',
+  'requiere_reemplazo',
+  'decision_cobertura',
+  'reemplaza_a_employee_id',
+  'reemplaza_a_documento',
+  'reemplaza_a_nombre',
+  'reemplazado_por_employee_id',
+  'reemplazado_por_documento',
+  'reemplazado_por_nombre',
+  'servicio_programado',
+  'servicio_cubierto',
+  'cuenta_pago_servicio',
+  'cuenta_nomina',
+  'paga_nomina',
+  'motivo_nomina',
+  'source_attendance_id',
+  'source_replacement_id',
+  'source_absenteeism_id',
+  'source_incapacity_id',
+  'origen',
+  'closed',
+  'created_at',
+  'updated_at'
+].join(',');
 const tableReloaders = new Map();
 const REALTIME_SUBSCRIBE_TIMEOUT_MS = 12000;
 const INCAPACITY_SUPPORT_BUCKET = 'incapacidades-soportes';
@@ -1970,6 +2011,23 @@ function addDaysToIsoDate(value, days = 1) {
   const m = String(utc.getUTCMonth() + 1).padStart(2, '0');
   const d = String(utc.getUTCDate()).padStart(2, '0');
   return `${y}-${m}-${d}`;
+}
+
+function splitIsoDateRange(dateFrom, dateTo, chunkDays = EMPLOYEE_DAILY_STATUS_RANGE_CHUNK_DAYS) {
+  const start = String(dateFrom || '').trim();
+  const end = String(dateTo || '').trim();
+  const size = Math.max(1, Number(chunkDays || 1));
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(start) || !/^\d{4}-\d{2}-\d{2}$/.test(end) || start > end) return [];
+
+  const ranges = [];
+  let current = start;
+  while (current && current <= end) {
+    const nextEnd = addDaysToIsoDate(current, size - 1) || current;
+    const chunkEnd = nextEnd > end ? end : nextEnd;
+    ranges.push([current, chunkEnd]);
+    current = addDaysToIsoDate(chunkEnd, 1);
+  }
+  return ranges;
 }
 
 function collectEmployeeOperationalRefreshDays(before = {}, after = {}, extraHints = []) {
@@ -4817,27 +4875,40 @@ export async function listSupernumerarioIncapacitiesForCurrentSupervisor(fecha) 
 export async function listEmployeeDailyStatusRange(dateFrom, dateTo) {
   if (!dateFrom || !dateTo) return [];
   const rows = [];
-  let from = 0;
+  const ranges = splitIsoDateRange(dateFrom, dateTo);
+  if (!ranges.length) return [];
 
-  while (true) {
-    const { data, error } = await supabase
-      .from('employee_daily_status')
-      .select('*')
-      .gte('fecha', dateFrom)
-      .lte('fecha', dateTo)
-      .order('fecha', { ascending: true })
-      .order('sede_codigo', { ascending: true })
-      .order('nombre', { ascending: true })
-      .range(from, from + POSTGREST_PAGE_SIZE - 1);
-    if (error) throw error;
+  for (const [chunkFrom, chunkTo] of ranges) {
+    let from = 0;
 
-    const batch = Array.isArray(data) ? data : [];
-    rows.push(...batch);
-    if (batch.length < POSTGREST_PAGE_SIZE) break;
-    from += POSTGREST_PAGE_SIZE;
+    while (true) {
+      const { data, error } = await supabase
+        .from('employee_daily_status')
+        .select(EMPLOYEE_DAILY_STATUS_SELECT)
+        .gte('fecha', chunkFrom)
+        .lte('fecha', chunkTo)
+        .order('fecha', { ascending: true })
+        .order('sede_codigo', { ascending: true })
+        .order('nombre', { ascending: true })
+        .range(from, from + POSTGREST_PAGE_SIZE - 1);
+      if (error) throw error;
+
+      const batch = Array.isArray(data) ? data : [];
+      rows.push(...batch);
+      if (batch.length < POSTGREST_PAGE_SIZE) break;
+      from += POSTGREST_PAGE_SIZE;
+    }
   }
 
-  return rows.map(mapEmployeeDailyStatusRow);
+  return rows
+    .sort((a, b) => {
+      const byDate = String(a?.fecha || '').localeCompare(String(b?.fecha || ''));
+      if (byDate !== 0) return byDate;
+      const bySede = String(a?.sede_codigo || '').localeCompare(String(b?.sede_codigo || ''));
+      if (bySede !== 0) return bySede;
+      return String(a?.nombre || '').localeCompare(String(b?.nombre || ''));
+    })
+    .map(mapEmployeeDailyStatusRow);
 }
 
 export async function listDailyMetricsRange(dateFrom, dateTo) {
