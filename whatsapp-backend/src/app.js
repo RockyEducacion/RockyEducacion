@@ -3646,24 +3646,32 @@ async function findEmployeeByPhone(phone) {
   const last10 = normalized.slice(-10);
   const variants = [...new Set([normalized, last10, `57${last10}`])];
   const orQuery = variants.map((value) => `telefono.eq.${value}`).join(',');
-  let query = supabaseAdmin.from('employees').select('*').eq('estado', 'activo');
+  let query = supabaseAdmin.from('employees').select('*');
   if (orQuery) query = query.or(orQuery);
-  const { data, error } = await query.limit(5);
+  const { data, error } = await query.limit(20);
   if (error) throw error;
 
-  let employee = (data || []).find((row) => normalizePhone(row.telefono) === normalized);
+  let employee = await findEffectiveEmployeeForDate(
+    (data || []).filter((row) => normalizePhone(row.telefono) === normalized),
+    currentDate()
+  );
   if (!employee) {
-    const { data: fallback, error: fallbackError } = await supabaseAdmin.from('employees').select('*').eq('estado', 'activo').ilike('telefono', `%${last10}%`).limit(20);
+    const { data: fallback, error: fallbackError } = await supabaseAdmin.from('employees').select('*').ilike('telefono', `%${last10}%`).limit(50);
     if (fallbackError) throw fallbackError;
-    employee = (fallback || []).find((row) => normalizePhone(row.telefono) === normalized) || null;
+    employee = await findEffectiveEmployeeForDate(
+      (fallback || []).filter((row) => normalizePhone(row.telefono) === normalized),
+      currentDate()
+    );
   }
-  return employee ? hydrateEmployee(employee) : null;
+  return employee || null;
 }
 
 async function findEmployeeByDocument(document) {
-  const { data, error } = await supabaseAdmin.from('employees').select('*').eq('documento', document).eq('estado', 'activo').maybeSingle();
+  const { data, error } = await supabaseAdmin.from('employees').select('*').eq('documento', document).maybeSingle();
   if (error) throw error;
-  return data ? hydrateEmployee(data) : null;
+  if (!data) return null;
+  const employee = await hydrateEmployee(data);
+  return isEmployeeEffectiveForDate(employee, currentDate()) ? employee : null;
 }
 
 async function hydrateEmployee(row) {
@@ -3672,6 +3680,26 @@ async function hydrateEmployee(row) {
   await applyEmployeeAssignmentForDate(employee, currentDate());
   employee.isSupernumerario = await isEmployeeSupernumerario(employee);
   return employee;
+}
+
+async function findEffectiveEmployeeForDate(rows = [], date = currentDate()) {
+  for (const row of rows || []) {
+    const employee = await hydrateEmployee(row);
+    if (isEmployeeEffectiveForDate(employee, date)) return employee;
+  }
+  return null;
+}
+
+function isEmployeeEffectiveForDate(employee = {}, date = currentDate()) {
+  const day = String(date || '').trim();
+  if (!day) return false;
+  const estado = String(employee?.estado || 'activo').trim().toLowerCase();
+  if (estado === 'eliminado') return false;
+  const ingreso = toISODate(employee?.fecha_ingreso || employee?.fechaIngreso);
+  if (ingreso && ingreso > day) return false;
+  const retiro = toISODate(employee?.fecha_retiro || employee?.fechaRetiro);
+  if (estado === 'inactivo') return Boolean(retiro && retiro >= day);
+  return !retiro || retiro >= day;
 }
 
 async function applyEmployeeAssignmentForDate(employee, date) {

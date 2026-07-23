@@ -275,10 +275,10 @@ export const SupernumerariosAdmin=(mount,deps={})=>{
   function isActiveForDay(person,day){
     const estado=String(person?.estado||'activo').trim().toLowerCase();
     if(estado==='eliminado') return false;
-    if(estado==='inactivo') return false;
     const ingreso=toIsoDate(person?.fechaIngreso);
     if(ingreso && ingreso>day) return false;
     const retiro=toIsoDate(person?.fechaRetiro);
+    if(estado==='inactivo') return Boolean(retiro && retiro>=day);
     return !retiro || retiro>=day;
   }
   function normalizeIsoDate(value){ const v=String(value||'').trim(); return /^\d{4}-\d{2}-\d{2}$/.test(v)?v:null; }
@@ -443,7 +443,7 @@ export const SupernumerariosAdmin=(mount,deps={})=>{
       unReplacements=deps.streamImportReplacementsByDate(today,()=>scheduleOccupancyRefresh(),()=>scheduleOccupancyRefresh()) || (()=>{});
     }
     refreshOccupancy();
-    un=deps.streamSupernumerarios?.((arr)=>{ snapshot=arr||[]; render(); }) || (()=>{});
+    un=deps.streamSupernumerarios?.((arr)=>{ snapshot=arr||[]; render(); }, today) || (()=>{});
   }catch(e){
     const msg=qs('#msg',ui); if(msg) msg.textContent='Error cargando supernumerarios: '+(e?.message||e);
   }

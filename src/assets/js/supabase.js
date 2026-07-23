@@ -4121,9 +4121,20 @@ export function streamEmployeeCargoHistoryAll(onData, max = 5000) {
   };
 }
 
-export function streamSupernumerarios(onData) {
+export function streamSupernumerarios(onData, fecha = null) {
   let active = true;
+  const day = toISODate(fecha);
   const emit = async () => {
+    if (day) {
+      try {
+        const rows = await listSupervisorAvailableSupernumerarios(day);
+        if (active) onData(rows || []);
+      } catch (error) {
+        console.error('No se pudieron cargar supernumerarios por fecha:', error);
+        if (active) onData([]);
+      }
+      return;
+    }
     const [employeesResult, { data: cargos, error: cargoError }] = await Promise.all([
       selectAllRows('employees', { select: '*', order: 'created_at', ascending: false }).then((value) => ({ status: 'fulfilled', value })).catch((error) => ({ status: 'rejected', reason: error })),
       supabase.from('cargos').select('codigo, nombre, alineacion_crud')
@@ -4149,19 +4160,38 @@ export function streamSupernumerarios(onData) {
   emit();
   const unA = registerTableReloader('employees', emit);
   const unB = registerTableReloader('cargos', emit);
+  const unC = day ? registerTableReloader('employee_cargo_history', emit) : (() => {});
   const channelA = supabase.channel(nextRealtimeChannelName('supernumerarios-employees-watch')).on('postgres_changes', { event: '*', schema: 'public', table: 'employees' }, emit).subscribe();
   const channelB = supabase.channel(nextRealtimeChannelName('supernumerarios-cargos-watch')).on('postgres_changes', { event: '*', schema: 'public', table: 'cargos' }, emit).subscribe();
+  const channelC = day
+    ? supabase.channel(nextRealtimeChannelName('supernumerarios-history-watch')).on('postgres_changes', { event: '*', schema: 'public', table: 'employee_cargo_history' }, emit).subscribe()
+    : null;
   return () => {
     active = false;
     unA();
     unB();
+    unC();
     supabase.removeChannel(channelA);
     supabase.removeChannel(channelB);
+    if (channelC) supabase.removeChannel(channelC);
   };
 }
 
-export async function listSupervisorAvailableSupernumerarios() {
-  const { data, error } = await supabase.rpc('list_supernumerarios_for_current_supervisor');
+function isMissingRpcFunctionError(error) {
+  const text = String(error?.message || error?.details || error?.hint || '').toLowerCase();
+  return text.includes('could not find the function')
+    || text.includes('schema cache');
+}
+
+export async function listSupervisorAvailableSupernumerarios(fecha = null) {
+  const day = toISODate(fecha);
+  let response = day
+    ? await supabase.rpc('list_supernumerarios_for_current_supervisor', { p_fecha: day })
+    : await supabase.rpc('list_supernumerarios_for_current_supervisor');
+  if (response.error && day && isMissingRpcFunctionError(response.error)) {
+    response = await supabase.rpc('list_supernumerarios_for_current_supervisor');
+  }
+  const { data, error } = response;
   if (error) throw error;
   return (data || []).map((row) => ({
     id: row.id,
@@ -4993,10 +5023,11 @@ function mapSupervisorIncapacityRow(row = {}) {
   };
 }
 
-export async function listSupervisorDailyRegistry(fecha, zoneCodes = []) {
+export async function listSupervisorDailyRegistry(fecha, zoneCodes = [], options = {}) {
   const day = String(fecha || '').trim();
   const zones = normalizeZoneCodeList(zoneCodes);
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(day) || !zones.length) {
+  const allZones = options?.allZones === true;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(day) || (!allZones && !zones.length)) {
     return {
       fecha: day || null,
       zones,
@@ -5010,11 +5041,14 @@ export async function listSupervisorDailyRegistry(fecha, zoneCodes = []) {
       closures: []
     };
   }
+  const scopeByZones = (query, column) => allZones ? query : query.in(column, zones);
 
-  const sedeRows = await selectPagedRows(() => supabase
-    .from('sedes')
-    .select('*')
-    .in('zona_codigo', zones)
+  const sedeRows = await selectPagedRows(() => scopeByZones(
+    supabase
+      .from('sedes')
+      .select('*'),
+    'zona_codigo'
+  )
     .order('nombre', { ascending: true }));
 
   const sedes = (sedeRows || []).map(mapSedeRow);
@@ -5030,24 +5064,29 @@ export async function listSupervisorDailyRegistry(fecha, zoneCodes = []) {
     incapacityRows,
     supernumerarioIncapacityRows
   ] = await Promise.all([
-    selectPagedRows(() => supabase
-      .from('employee_daily_status')
-      .select('*')
-      .eq('fecha', day)
-      .in('zona_codigo_snapshot', zones)
+    selectPagedRows(() => scopeByZones(
+      supabase
+        .from('employee_daily_status')
+        .select('*')
+        .eq('fecha', day),
+      'zona_codigo_snapshot'
+    )
       .order('sede_codigo', { ascending: true })
       .order('nombre', { ascending: true })),
-    selectPagedRows(() => supabase
-      .from('employees')
-      .select('*')
-      .eq('estado', 'activo')
-      .in('zona_codigo', zones)
+    selectPagedRows(() => scopeByZones(
+      supabase
+        .from('employees')
+        .select('*'),
+      'zona_codigo'
+    )
       .order('nombre', { ascending: true })),
-    selectPagedRows(() => supabase
-      .from('daily_sede_closures')
-      .select('*')
-      .eq('fecha', day)
-      .in('zona_codigo', zones)
+    selectPagedRows(() => scopeByZones(
+      supabase
+        .from('daily_sede_closures')
+        .select('*')
+        .eq('fecha', day),
+      'zona_codigo'
+    )
       .order('sede_codigo', { ascending: true })),
     sedeCodes.length
       ? selectPagedRows(() => supabase

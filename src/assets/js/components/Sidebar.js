@@ -297,7 +297,7 @@ function bindPendingNoveltyBadge(container, deps = {}) {
     unsubs.push(deps.streamSedes((rows) => { sedes = rows || []; scheduleRefresh(); }));
   }
   if (typeof deps.streamSupernumerarios === 'function') {
-    unsubs.push(deps.streamSupernumerarios((rows) => { supernumerarios = rows || []; scheduleRefresh(); }));
+    unsubs.push(deps.streamSupernumerarios((rows) => { supernumerarios = rows || []; scheduleRefresh(); }, todayBogota()));
   }
   if (typeof deps.streamNovedades === 'function') {
     unsubs.push(deps.streamNovedades((rows) => { novedades = rows || []; scheduleRefresh(); }));
@@ -378,7 +378,7 @@ function bindFreeSupernumerariosBadge(container, deps = {}) {
   unsubs.push(deps.streamSupernumerarios((rows) => {
     supernumerarios = rows || [];
     refreshCount();
-  }));
+  }, todayBogota()));
   if (typeof deps.streamIncapacitadosByDate === 'function') {
     unsubs.push(deps.streamIncapacitadosByDate(todayBogota(), (rows) => {
       incapacitados = rows || [];
@@ -399,8 +399,8 @@ function bindFreeSupernumerariosBadge(container, deps = {}) {
 
 function isAvailableSupernumerarioForBadge(row = {}, day = '') {
   const estado = String(row?.estado || 'activo').trim().toLowerCase();
-  if (estado === 'inactivo' || estado === 'eliminado') return false;
-  return isPersonActiveForBadgeDate(row, day);
+  if (estado === 'eliminado') return false;
+  return isPersonActiveForBadgeDate(row, day, { allowMissingIngreso: true });
 }
 
 function supernumerarioPersonKeys(row = {}) {
@@ -534,7 +534,7 @@ function isSupernumerarioAttendanceForBadge(row = {}, supernumerarios = [], day 
   if (!doc) return false;
   return (supernumerarios || []).some((item) => {
     if (String(item?.documento || '').trim() !== doc) return false;
-    return isPersonActiveForBadgeDate(item, day);
+    return isPersonActiveForBadgeDate(item, day, { allowMissingIngreso: true });
   });
 }
 
@@ -546,14 +546,16 @@ function isEmployeeExpectedForBadgeDate(employee = {}, day = '', sedes = []) {
   return isSedeScheduledForBadgeDate(sede, day);
 }
 
-function isPersonActiveForBadgeDate(person = {}, day = '') {
+function isPersonActiveForBadgeDate(person = {}, day = '', options = {}) {
   const ingreso = toBadgeIsoDate(person?.fechaIngreso);
-  if (!ingreso || ingreso > day) return false;
+  if (ingreso && ingreso > day) return false;
+  if (!ingreso && options?.allowMissingIngreso !== true) return false;
   const retiro = toBadgeIsoDate(person?.fechaRetiro);
   const estado = String(person?.estado || 'activo').trim().toLowerCase();
   if (estado === 'inactivo') return Boolean(retiro && retiro >= day);
   if (estado === 'eliminado') return false;
-  return !retiro || retiro >= day;
+  if (retiro && retiro < day) return false;
+  return true;
 }
 
 function isSedeScheduledForBadgeDate(sede = null, day = '') {

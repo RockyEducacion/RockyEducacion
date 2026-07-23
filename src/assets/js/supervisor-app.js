@@ -113,7 +113,7 @@ function startSupernumerariosStream() {
   if (!deps.streamSupernumerarios) return;
   unSupernumerarios = deps.streamSupernumerarios((rows = []) => {
     setSupervisorSupernumerarios(rows);
-  });
+  }, selectedDate);
 }
 
 function stopSupernumerariosStream() {
@@ -125,23 +125,37 @@ function stopSupernumerariosStream() {
 
 async function loadSupervisorSupernumerarios() {
   try {
-    const rows = await deps.listSupervisorAvailableSupernumerarios?.();
+    const rows = await deps.listSupervisorAvailableSupernumerarios?.(selectedDate);
     setSupervisorSupernumerarios(rows || []);
   } catch (error) {
     console.error('No se pudieron cargar supernumerarios para supervisor:', error);
     if (deps.streamSupernumerarios && !unSupernumerarios) {
       unSupernumerarios = deps.streamSupernumerarios((rows = []) => {
         setSupervisorSupernumerarios(rows);
-      });
+      }, selectedDate);
     }
   }
 }
 
 function setSupervisorSupernumerarios(rows = []) {
   supernumerarios = (rows || [])
-    .filter((row) => String(row?.estado || 'activo').trim().toLowerCase() !== 'inactivo')
+    .filter((row) => isSupernumerarioEffectiveForDate(row, selectedDate, { allowMissingIngreso: true }))
     .sort((a, b) => String(a.nombre || '').localeCompare(String(b.nombre || '')));
   if (currentUser && currentProfile) renderApp();
+}
+
+function isSupernumerarioEffectiveForDate(row = {}, day = '', options = {}) {
+  const selected = normalizeIsoDate(day);
+  if (!selected) return false;
+  const estado = String(row?.estado || 'activo').trim().toLowerCase();
+  if (estado === 'eliminado') return false;
+  const ingreso = normalizeIsoDate(row?.fechaIngreso);
+  if (ingreso && ingreso > selected) return false;
+  if (!ingreso && options?.allowMissingIngreso !== true) return false;
+  const retiro = normalizeIsoDate(row?.fechaRetiro);
+  if (estado === 'inactivo') return Boolean(retiro && retiro >= selected);
+  if (retiro && retiro < selected) return false;
+  return true;
 }
 
 function canUseSupervisorApp(profile = {}) {
@@ -150,7 +164,13 @@ function canUseSupervisorApp(profile = {}) {
   return role === ROLES.SUPERVISOR && profile?.supervisorEligible === true;
 }
 
+function hasGlobalSupervisorAccess(profile = currentProfile) {
+  const role = String(profile?.role || '').toLowerCase();
+  return role === ROLES.SUPERADMIN || role === ROLES.ADMIN;
+}
+
 function supervisorZones(profile = currentProfile) {
+  if (hasGlobalSupervisorAccess(profile)) return [];
   const zones = [
     ...(Array.isArray(profile?.zonasPermitidas) ? profile.zonasPermitidas : []),
     profile?.zonaCodigo
@@ -165,7 +185,7 @@ async function loadRegistry() {
   renderApp();
   try {
     const zones = supervisorZones();
-    currentRegistry = await deps.listSupervisorDailyRegistry?.(selectedDate, zones) || emptyRegistry(selectedDate);
+    currentRegistry = await deps.listSupervisorDailyRegistry?.(selectedDate, zones, { allZones: hasGlobalSupervisorAccess() }) || emptyRegistry(selectedDate);
     lastLoadedAt = new Date();
   } catch (error) {
     currentRegistry = { ...emptyRegistry(selectedDate), error: error?.message || String(error) };
@@ -196,7 +216,7 @@ function renderDenied(profile = {}) {
   root.replaceChildren(el('section', { className: 'supervisor-denied' }, [
     el('article', { className: 'supervisor-denied__card' }, [
       el('h1', {}, ['Acceso de supervisores']),
-      el('p', {}, ['Este ingreso esta reservado para usuarios supervisores activos y habilitados.']),
+      el('p', {}, ['Este ingreso esta reservado para supervisores habilitados y administradores activos.']),
       el('p', {}, [`Usuario: ${profile?.email || currentUser?.email || '-'}`]),
       el('div', { className: 'supervisor-card__actions' }, [
         actionButton('Administrativo', () => { window.location.href = 'app.html#/login'; }),
@@ -226,7 +246,7 @@ function renderApp() {
   const supernumerarioRows = filterSupernumerarioRows(allSupernumerarioRows);
   const availableSupernumerarios = allSupernumerarioRows.filter((row) => !row.ocupado).length;
   const summary = summarizeRows(rows);
-  const zoneLabel = supervisorZones().join(', ') || 'Sin zona';
+  const zoneLabel = supervisorScopeLabel();
 
   const app = el('div', { className: 'supervisor-app' }, [
     el('header', { className: 'supervisor-topbar' }, [
@@ -299,6 +319,7 @@ function hero(summary, section = 'home') {
         el('input', { id: 'supervisorDate', className: 'input', type: 'date', value: selectedDate, onchange: (event) => {
           selectedDate = event.target.value || todayBogota();
           resetAllPages();
+          loadSupervisorSupernumerarios();
           loadRegistry();
         } })
       ])
@@ -315,6 +336,7 @@ function sectionTitle(section) {
   if (section === 'novelties') return 'Novedades';
   if (section === 'supernumerarios') return 'Supernumerarios';
   if (section === 'profile') return 'Perfil';
+  if (hasGlobalSupervisorAccess()) return 'Hoy en la operacion';
   return 'Hoy en tu zona';
 }
 
@@ -751,13 +773,14 @@ function navButton(item = {}) {
 
 function profilePanel(summary) {
   const zones = supervisorZones();
+  const zoneLabel = hasGlobalSupervisorAccess() ? 'Todas las zonas' : (zones.join(', ') || 'Sin zonas asignadas');
   return el('section', { className: 'supervisor-hero' }, [
     el('h1', { className: 'supervisor-title' }, ['Perfil']),
     el('p', { className: 'supervisor-subtitle' }, [currentProfile?.email || currentUser?.email || '-']),
     kpiGrid(summary),
     el('div', { className: 'supervisor-card__details' }, [
       detail('Rol', currentProfile?.role || '-'),
-      detail('Zonas', zones.join(', ') || 'Sin zonas asignadas'),
+      detail('Zonas', zoneLabel),
       detail('Estado', currentProfile?.estado || 'activo'),
       detail('Fecha', selectedDate)
     ]),
@@ -1141,6 +1164,9 @@ function pendingRows(rows) {
 }
 
 function summaryLabel(summary) {
+  if (hasGlobalSupervisorAccess() && !summary.expected) return 'No hay registros cargados para esta fecha.';
+  if (hasGlobalSupervisorAccess() && summary.pending > 0) return `Hay ${summary.pending} personas pendientes por revisar.`;
+  if (hasGlobalSupervisorAccess()) return 'El registro diario de todas las zonas esta al dia.';
   if (!supervisorZones().length) return 'No tienes zonas asignadas todavia.';
   if (!summary.expected) return 'No hay registros cargados para esta fecha.';
   if (summary.pending > 0) return `Hay ${summary.pending} personas pendientes por revisar.`;
@@ -1148,9 +1174,17 @@ function summaryLabel(summary) {
 }
 
 function summaryTone(summary) {
+  if (hasGlobalSupervisorAccess() && !summary.expected) return 'neutral';
+  if (hasGlobalSupervisorAccess() && summary.pending > 0) return 'warn';
+  if (hasGlobalSupervisorAccess()) return 'ok';
   if (!supervisorZones().length || !summary.expected) return 'neutral';
   if (summary.pending > 0) return 'warn';
   return 'ok';
+}
+
+function supervisorScopeLabel() {
+  if (hasGlobalSupervisorAccess()) return 'Todas las zonas';
+  return supervisorZones().join(', ') || 'Sin zona';
 }
 
 function displayName() {
