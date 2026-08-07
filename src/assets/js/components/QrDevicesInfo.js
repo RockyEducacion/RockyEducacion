@@ -34,28 +34,33 @@ export const QrDevicesInfo = (mount, deps = {}) => {
         ])
       ])
     ]),
-    el('div', { className: 'mt-2 table-wrap' }, [
-      el('table', { id: 'qrDevicesTable', className: 'table wa-live-table' }, [
-        el('thead', {}, [
-          el('tr', {}, [
-            th('deviceName', 'Tablet'),
-            th('estado', 'Estado'),
-            th('sedes', 'Sedes que atiende'),
-            th('lastSeenAt', 'Ultima actividad'),
-            th('createdAt', 'Creada'),
-            th('createdByEmail', 'Creada por'),
-            el('th', {}, ['Acciones'])
+    el('div', { className: 'responsive-records mt-2' }, [
+      el('div', { className: 'table-wrap responsive-table-view' }, [
+        el('table', { id: 'qrDevicesTable', className: 'table wa-live-table' }, [
+          el('thead', {}, [
+            el('tr', {}, [
+              th('deviceName', 'Tablet'),
+              th('estado', 'Estado'),
+              th('sedes', 'Sedes que atiende'),
+              th('lastSeenAt', 'Ultima actividad'),
+              th('createdAt', 'Creada'),
+              th('createdByEmail', 'Creada por'),
+              el('th', {}, ['Acciones'])
+            ])
+          ]),
+          el('tbody', { id: 'qrDevicesTbody' }, [
+            el('tr', {}, [el('td', { colSpan: 7, className: 'text-muted' }, ['Cargando tablets QR...'])])
           ])
-        ]),
-        el('tbody', { id: 'qrDevicesTbody' }, [
-          el('tr', {}, [el('td', { colSpan: 7, className: 'text-muted' }, ['Cargando tablets QR...'])])
         ])
+      ]),
+      el('div', { id: 'qrDevicesCards', className: 'record-card-list' }, [
+        el('p', { className: 'text-muted record-card__empty' }, ['Cargando tablets QR...'])
       ])
     ]),
     el('p', { id: 'qrDevicesMsg', className: 'text-muted mt-2' }, [' '])
   ]);
 
-  const paginator = createTablePagination(ui, { id: 'qrDevices', after: '#qrDevicesTable', onChange: render });
+  const paginator = createTablePagination(ui, { id: 'qrDevices', after: '#qrDevicesCards', onChange: render });
 
   function statCard(label, id, value) {
     return el('article', { className: 'wa-stat card' }, [
@@ -151,8 +156,10 @@ export const QrDevicesInfo = (mount, deps = {}) => {
     });
     const pageRows = paginator.slice(sorted);
     const tbody = qs('#qrDevicesTbody', ui);
+    const cards = qs('#qrDevicesCards', ui);
     if (!pageRows.length) {
       tbody.replaceChildren(el('tr', {}, [el('td', { colSpan: 7, className: 'text-muted' }, ['Sin tablets QR para los filtros actuales.'])]));
+      cards.replaceChildren(el('p', { className: 'text-muted record-card__empty' }, ['Sin tablets QR para los filtros actuales.']));
     } else {
       tbody.replaceChildren(...pageRows.map((row) => el('tr', {}, [
         el('td', {}, [row.deviceName || '-']),
@@ -163,6 +170,7 @@ export const QrDevicesInfo = (mount, deps = {}) => {
         el('td', {}, [row.createdByEmail || '-']),
         el('td', {}, [actionsCell(row)])
       ])));
+      cards.replaceChildren(...pageRows.map((row) => deviceCard(row)));
     }
     qs('#qrDevicesMsg', ui).textContent = `Tablets filtradas: ${data.length}.`;
     renderStats();
@@ -179,6 +187,27 @@ export const QrDevicesInfo = (mount, deps = {}) => {
     return el('div', { style: 'display:flex;gap:.35rem;flex-wrap:wrap;' }, sites.map((site) => (
       el('span', { className: 'badge' }, [siteLabel(site)])
     )));
+  }
+
+  function deviceCard(row = {}) {
+    return el('article', { className: 'record-card' }, [
+      el('div', { className: 'record-card__header' }, [
+        el('div', { className: 'record-card__identity' }, [
+          el('strong', { className: 'record-card__title' }, [row.deviceName || '-']),
+          el('span', { className: 'record-card__subtitle' }, [row.createdByEmail || '-'])
+        ]),
+        statusBadge(row)
+      ]),
+      el('dl', { className: 'record-card__meta' }, [
+        ['Sedes que atiende', siteBadges(row.sedes || [])],
+        ['Ultima actividad', formatDateTime(row.lastSeenAt)],
+        ['Creada', formatDateTime(row.createdAt)]
+      ].map(([label, value]) => el('div', { className: 'record-card__meta-item' }, [
+        el('dt', {}, [label]),
+        el('dd', {}, Array.isArray(value) ? value : [value || '-'])
+      ]))),
+      el('div', { className: 'record-card__actions' }, [actionsCell(row)])
+    ]);
   }
 
   function actionsCell(row = {}) {

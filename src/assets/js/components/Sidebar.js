@@ -33,9 +33,12 @@ export const Sidebar = (deps = {}) => {
 
   if (user && userProfile) {
     const govLinks = [];
-    if (isSuperAdmin()) govLinks.push(navLink('Centro de Permisos', '/permissions'));
+    if (isSuperAdmin()) {
+      govLinks.push(navLink('Centro de Permisos', '/permissions'));
+      govLinks.push(navLink('Auditoria', '/permissions-audit'));
+    }
     if (can(PERMS.VIEW_USERS)) govLinks.push(navLink('Usuarios', '/users'));
-    if (govLinks.length) sections.push(section('Gobierno', govLinks, 'gobierno'));
+    if (govLinks.length) sections.push(section('Gobierno', govLinks, 'gobierno', '/gobierno-dashboard'));
 
     const adminLinks = [];
     if (can(PERMS.VIEW_ZONES)) adminLinks.push(navLink('Zonas', '/zones'));
@@ -45,14 +48,14 @@ export const Sidebar = (deps = {}) => {
     if (can(PERMS.MANAGE_QR_DEVICES)) adminLinks.push(navLink('Tablets QR', '/tablets-qr'));
     if (can(PERMS.VIEW_CARGOS)) adminLinks.push(navLink('Cargos', '/cargos'));
     if (can(PERMS.VIEW_NOVEDADES)) adminLinks.push(navLink('Novedades', '/novedades'));
-    if (adminLinks.length) sections.push(section('Administracion', adminLinks, 'administracion'));
+    if (adminLinks.length) sections.push(section('Administracion', adminLinks, 'administracion', '/administracion-dashboard'));
 
     const employeeLinks = [];
     if (can(PERMS.VIEW_EMPLOYEES)) employeeLinks.push(navLink('Empleados', '/employees'));
     if (can(PERMS.VIEW_EMPLOYEES)) employeeLinks.push(navLink('Novedades empleados', '/employee-novelties'));
     if (can(PERMS.VIEW_SUPERVISORS)) employeeLinks.push(navLink('Supervisores', '/supervisors'));
     if (can(PERMS.UPLOAD_DATA)) employeeLinks.push(navLink('Incapacidades', '/upload'));
-    if (employeeLinks.length) sections.push(section('Empleados', employeeLinks, 'empleados'));
+    if (employeeLinks.length) sections.push(section('Empleados', employeeLinks, 'empleados', '/empleados-dashboard'));
 
     const opLinks = [];
     if (can(PERMS.IMPORT_DATA)) opLinks.push(navLink('Registro Diario', '/registros-vivo', { badgeId: 'sidebarRegistroDiarioBadge' }));
@@ -60,7 +63,7 @@ export const Sidebar = (deps = {}) => {
     if (can(PERMS.VIEW_SUPERNUMERARIOS)) opLinks.push(navLink('Supernumerarios', '/supernumerarios', { badgeId: 'sidebarSupernumerariosFreeBadge', badgeAlwaysVisible: true, badgeAriaLabel: '0 supernumerarios libres hoy' }));
     if (can(PERMS.IMPORT_DATA)) opLinks.push(navLink('Registro Sede', '/registro-sede'));
     if (can(PERMS.VIEW_IMPORT_HISTORY)) opLinks.push(navLink('Historial', '/import-history'));
-    if (opLinks.length) sections.push(section('Operacion', opLinks, 'operacion'));
+    if (opLinks.length) sections.push(section('Operacion', opLinks, 'operacion', '/operacion-dashboard'));
 
     const reportLinks = [];
     const dailyReportLinks = [];
@@ -69,13 +72,13 @@ export const Sidebar = (deps = {}) => {
     if (dailyReportLinks.length) reportLinks.push(subSection('Reportes diarios', dailyReportLinks, 'reportes_diarios'));
     if (can(PERMS.VIEW_REPORTS_COMPANY)) reportLinks.push(navLink('Reportes consolidados', '/reports-consolidated'));
     if (reportLinks.length) {
-      sections.push(section('Reportes', reportLinks, 'reportes'));
+      sections.push(section('Reportes', reportLinks, 'reportes', '/reportes-dashboard'));
     }
 
     const bulkLinks = [];
     if (can(PERMS.EDIT_SEDES)) bulkLinks.push(navLink('Cargue sedes', '/bulk-upload-sedes'));
     if (can(PERMS.EDIT_EMPLOYEES)) bulkLinks.push(navLink('Cargue empleados', '/bulk-upload'));
-    if (bulkLinks.length) sections.push(section('Cargue masivo', bulkLinks, 'cargue_masivo'));
+    if (bulkLinks.length) sections.push(section('Cargue masivo', bulkLinks, 'cargue_masivo', '/cargue-masivo-dashboard'));
 
   }
 
@@ -120,28 +123,75 @@ export const Sidebar = (deps = {}) => {
   return container;
 };
 
-function section(title, links, key) {
+function section(title, links, key, dashboardRoute = '') {
   const pref = getSectionPref(key);
   const meta = getSectionIconMeta(key);
-  const sec = el('div', { className: `sidebar__section${pref ? ' is-collapsed' : ''}` }, []);
-  const titleBtn = el('button', {
-    className: 'sidebar__section-title sidebar__section-toggle',
+  const currentRoute = getCurrentRoute();
+  const sec = el('div', { className: `sidebar__section${pref ? ' is-collapsed' : ''}`, dataset: { sectionKey: key } }, []);
+  const titleLink = el('button', {
+    className: `sidebar__section-link${dashboardRoute && currentRoute === dashboardRoute ? ' is-active' : ''}`,
     type: 'button',
-    'aria-expanded': pref ? 'false' : 'true'
+    title: `Abrir dashboard de ${title}`,
+    'aria-label': `Abrir dashboard de ${title}`
   }, [
     el('span', { className: 'sidebar__section-title-content' }, [
       lucideIcon(meta.icon, meta.fallback, 'sidebar__section-icon'),
       el('span', {}, [title])
     ])
   ]);
+  const toggleBtn = el('button', {
+    className: 'sidebar__section-toggle',
+    type: 'button',
+    title: pref ? `Expandir ${title}` : `Contraer ${title}`,
+    'aria-label': pref ? `Expandir ${title}` : `Contraer ${title}`,
+    'aria-expanded': pref ? 'false' : 'true',
+    dataset: { sectionTitle: title }
+  }, [
+    el('span', { className: 'sidebar__section-toggle-glyph', 'aria-hidden': 'true' }, ['▾'])
+  ]);
+  const header = el('div', { className: 'sidebar__section-title sidebar__section-heading' }, [titleLink, toggleBtn]);
   const nav = el('nav', { className: 'sidebar__nav' }, links);
-  titleBtn.addEventListener('click', () => {
-    const collapsed = sec.classList.toggle('is-collapsed');
-    titleBtn.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+  const setCollapsed = (collapsed) => {
+    sec.classList.toggle('is-collapsed', collapsed);
+    toggleBtn.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+    toggleBtn.title = collapsed ? `Expandir ${title}` : `Contraer ${title}`;
+    toggleBtn.setAttribute('aria-label', toggleBtn.title);
     setSectionPref(key, collapsed);
+  };
+  titleLink.addEventListener('click', () => {
+    if (!dashboardRoute) return;
+    const wasCollapsed = sec.classList.contains('is-collapsed');
+    collapseSiblingSections(sec);
+    setCollapsed(!wasCollapsed);
+    navigate(dashboardRoute);
+    document.querySelectorAll('.sidebar__nav-link,.sidebar__section-link').forEach((n) => n.classList.remove('is-active'));
+    titleLink.classList.add('is-active');
+    closeMobileSidebar();
   });
-  sec.append(titleBtn, nav);
+  toggleBtn.addEventListener('click', () => {
+    const collapsed = sec.classList.toggle('is-collapsed');
+    setCollapsed(collapsed);
+  });
+  sec.append(header, nav);
   return sec;
+}
+
+function collapseSiblingSections(currentSection) {
+  const parent = currentSection?.parentElement;
+  if (!parent) return;
+  Array.from(parent.querySelectorAll(':scope > .sidebar__section')).forEach((sectionNode) => {
+    if (sectionNode === currentSection) return;
+    const toggle = sectionNode.querySelector(':scope > .sidebar__section-heading .sidebar__section-toggle');
+    const key = sectionNode.getAttribute('data-section-key') || '';
+    sectionNode.classList.add('is-collapsed');
+    toggle?.setAttribute('aria-expanded', 'false');
+    if (toggle) {
+      const label = toggle.getAttribute('data-section-title') || 'seccion';
+      toggle.title = `Expandir ${label}`;
+      toggle.setAttribute('aria-label', toggle.title);
+    }
+    if (key) setSectionPref(key, true);
+  });
 }
 
 function subSection(title, links, key) {
@@ -615,6 +665,10 @@ function setSectionPref(key, collapsed) {
   } catch (_) {}
 }
 
+function getCurrentRoute() {
+  return (window.location.hash || '#/login').replace('#', '').split('?')[0];
+}
+
 function getSectionIconMeta(key) {
   const map = {
     gobierno: { icon: 'shield-check', fallback: 'GO' },
@@ -637,6 +691,7 @@ function getSubsectionIconMeta(key) {
 function getNavIconMeta(route) {
   const map = {
     '/permissions': { icon: 'shield-check', fallback: 'CP' },
+    '/permissions-audit': { icon: 'clipboard-list', fallback: 'AU' },
     '/users': { icon: 'settings', fallback: 'US' },
     '/zones': { icon: 'map', fallback: 'ZN' },
     '/dependencies': { icon: 'network', fallback: 'DP' },

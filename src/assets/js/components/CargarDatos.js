@@ -4,15 +4,16 @@ import { showInfoModal } from '../utils/infoModal.js';
 import { showActionModal } from '../utils/actionModal.js';
 import { createTablePagination } from '../utils/pagination.js';
 
-const SOURCE_OPTIONS = [
-  'Enfermedad General',
-  'Accidente Laboral',
-  'Calamidad',
-  'Licencia No Remunerada',
-  'Licencia Remunerada',
-  'Vacaciones',
-  'Incapacidad'
+const SOURCE_CODE_OPTIONS = [
+  { code: '3', value: 'Enfermedad General' },
+  { code: '2', value: 'Accidente Laboral' },
+  { code: '4', value: 'Calamidad' },
+  { code: '5', value: 'Licencia No Remunerada' },
+  { code: '6', value: 'Licencia Remunerada' },
+  { code: '9', value: 'Vacaciones' }
 ];
+const SOURCE_OPTIONS = SOURCE_CODE_OPTIONS.map((option) => option.value);
+const SOURCE_CODE_TO_VALUE = new Map(SOURCE_CODE_OPTIONS.map((option) => [option.code, option.value]));
 
 const CHANNEL_LABELS = {
   whatsapp: 'WhatsApp',
@@ -32,10 +33,12 @@ export const CargarDatos = (mount, deps = {}) => {
 
   let employees = [];
   let sedes = [];
+  let novedades = [];
   let incapRows = [];
   let editingId = null;
   let unEmployees = () => {};
   let unSedes = () => {};
+  let unNovedades = () => {};
   let hasQueried = false;
   let queryError = '';
 
@@ -99,28 +102,31 @@ export const CargarDatos = (mount, deps = {}) => {
         el('button', { id: 'incQueryBtn', className: 'btn btn--primary', type: 'button' }, ['Buscar']),
         el('span', { id: 'incListMeta', className: 'right text-muted' }, ['Cargando incapacidades...'])
       ]),
-      el('div', { className: 'mt-2 table-wrap' }, [
-        el('table', { className: 'table', id: 'incTable' }, [
-          el('thead', {}, [
-            el('tr', {}, [
-              el('th', { 'data-sort': 'documento', style: 'cursor:pointer' }, ['Documento']),
-              el('th', { 'data-sort': 'nombre', style: 'cursor:pointer' }, ['Nombre']),
-              el('th', { 'data-sort': 'source', style: 'cursor:pointer' }, ['Tipo']),
-              el('th', { 'data-sort': 'fechaInicio', style: 'cursor:pointer' }, ['Inicio']),
-              el('th', { 'data-sort': 'fechaFin', style: 'cursor:pointer' }, ['Fin']),
-              el('th', { 'data-sort': 'canalRegistro', style: 'cursor:pointer' }, ['Canal']),
-              el('th', { 'data-sort': 'soporte', style: 'cursor:pointer' }, ['Soporte']),
-              el('th', { 'data-sort': 'estado', style: 'cursor:pointer' }, ['Estado']),
-              el('th', {}, ['Acciones'])
-            ])
-          ]),
-          el('tbody', {})
-        ])
+      el('div', { className: 'responsive-records mt-2' }, [
+        el('div', { className: 'table-wrap responsive-table-view' }, [
+          el('table', { className: 'table', id: 'incTable' }, [
+            el('thead', {}, [
+              el('tr', {}, [
+                el('th', { 'data-sort': 'documento', style: 'cursor:pointer' }, ['Documento']),
+                el('th', { 'data-sort': 'nombre', style: 'cursor:pointer' }, ['Nombre']),
+                el('th', { 'data-sort': 'source', style: 'cursor:pointer' }, ['Tipo']),
+                el('th', { 'data-sort': 'fechaInicio', style: 'cursor:pointer' }, ['Inicio']),
+                el('th', { 'data-sort': 'fechaFin', style: 'cursor:pointer' }, ['Fin']),
+                el('th', { 'data-sort': 'canalRegistro', style: 'cursor:pointer' }, ['Canal']),
+                el('th', { 'data-sort': 'soporte', style: 'cursor:pointer' }, ['Soporte']),
+                el('th', { 'data-sort': 'estado', style: 'cursor:pointer' }, ['Estado']),
+                el('th', {}, ['Acciones'])
+              ])
+            ]),
+            el('tbody', {})
+          ])
+        ]),
+        el('div', { id: 'incCards', className: 'record-card-list' }, [])
       ])
     ])
   ]);
 
-  const paginator = createTablePagination(ui, { id: 'incapacidades', after: '#incTabList .table-wrap', onChange: renderList });
+  const paginator = createTablePagination(ui, { id: 'incapacidades', after: '#incTabList .responsive-records', onChange: renderList });
 
   mount.replaceChildren(ui);
 
@@ -147,6 +153,7 @@ export const CargarDatos = (mount, deps = {}) => {
   const supportFilter = qs('#incSupportFilter', ui);
   const listMeta = qs('#incListMeta', ui);
   const tbody = ui.querySelector('tbody');
+  const cards = qs('#incCards', ui);
   let sortKey = 'fechaInicio';
   let sortDir = -1;
 
@@ -193,7 +200,14 @@ export const CargarDatos = (mount, deps = {}) => {
       renderList();
     });
   }
+  if (!portalMode && typeof deps.streamNovedades === 'function') {
+    unNovedades = deps.streamNovedades((rows) => {
+      novedades = rows || [];
+      renderSourceOptions();
+    });
+  }
 
+  renderSourceOptions();
   refreshIdentityHint();
   renderList();
   Promise.resolve().then(() => runQuery());
@@ -201,6 +215,7 @@ export const CargarDatos = (mount, deps = {}) => {
   return () => {
     unEmployees?.();
     unSedes?.();
+    unNovedades?.();
   };
 
   async function runQuery() {
@@ -243,6 +258,26 @@ export const CargarDatos = (mount, deps = {}) => {
       .filter((value, index, all) => value && all.indexOf(value) === index)
       .map((value) => el('option', { value }));
     employeeList.replaceChildren(...items);
+  }
+
+  function getSourceOptions() {
+    return buildSourceOptions(novedades);
+  }
+
+  function defaultSource() {
+    return getSourceOptions()[0]?.value || SOURCE_OPTIONS[0];
+  }
+
+  function renderSourceOptions() {
+    if (!sourceSelect) return;
+    const current = String(sourceSelect.value || '').trim();
+    const options = getSourceOptions();
+    sourceSelect.replaceChildren(...options.map((option, index) =>
+      el('option', { value: option.value, selected: current ? option.value === current : index === 0 }, [option.label || option.value])
+    ));
+    sourceSelect.value = current && options.some((option) => option.value === current)
+      ? current
+      : defaultSource();
   }
 
   function currentFixedEmployee() {
@@ -298,7 +333,7 @@ export const CargarDatos = (mount, deps = {}) => {
     const fechaInicio = String(startInput?.value || '').trim();
     const fechaFin = String(endInput?.value || '').trim();
     const supportFile = fileInput?.files?.[0] || null;
-    const source = String(sourceSelect?.value || 'Enfermedad General').trim() || 'Enfermedad General';
+    const source = String(sourceSelect?.value || defaultSource()).trim() || defaultSource();
 
     setMessage(createMsg, ' ');
     refreshIdentityHint();
@@ -407,7 +442,7 @@ export const CargarDatos = (mount, deps = {}) => {
   function resetForm() {
     editingId = null;
     if (employeeInput) employeeInput.value = '';
-    if (sourceSelect) sourceSelect.value = SOURCE_OPTIONS[0];
+    if (sourceSelect) sourceSelect.value = defaultSource();
     if (startInput) startInput.value = '';
     if (endInput) endInput.value = '';
     if (fileInput) fileInput.value = '';
@@ -435,14 +470,19 @@ export const CargarDatos = (mount, deps = {}) => {
         value: row ? employeeLabel({ documento: row.documento, nombre: row.nombre }) : ''
       });
     }
+    const sourceOptions = getSourceOptions();
+    const currentSource = String(row?.source || '').trim();
+    const selectedSource = sourceOptions.some((option) => option.value === currentSource)
+      ? currentSource
+      : sourceOptions[0]?.value || SOURCE_OPTIONS[0];
     fields.push(
       {
         id: 'source',
         label: 'Tipo',
         type: 'select',
         required: true,
-        value: SOURCE_OPTIONS.includes(row?.source) ? row.source : SOURCE_OPTIONS[0],
-        options: SOURCE_OPTIONS.map((value) => ({ value, label: value }))
+        value: selectedSource,
+        options: sourceOptions.map((option) => ({ value: option.value, label: option.label || option.value }))
       },
       { id: 'fechaInicio', label: 'Fecha inicio', type: 'date', required: true, value: normalizeInputDate(row?.fechaInicio) },
       { id: 'fechaFin', label: 'Fecha terminacion', type: 'date', required: true, value: normalizeInputDate(row?.fechaFin) },
@@ -473,7 +513,7 @@ export const CargarDatos = (mount, deps = {}) => {
       : currentFixedEmployee();
     const fechaInicio = String(values.fechaInicio || '').trim();
     const fechaFin = String(values.fechaFin || '').trim();
-    const source = String(values.source || SOURCE_OPTIONS[0]).trim() || SOURCE_OPTIONS[0];
+    const source = String(values.source || defaultSource()).trim() || defaultSource();
     const supportFile = values.support || null;
 
     if (!target?.documento) return showInfoModal('Dato faltante', ['Selecciona un empleado valido.']);
@@ -580,6 +620,7 @@ export const CargarDatos = (mount, deps = {}) => {
       tbody.replaceChildren(el('tr', {}, [
         el('td', { colSpan: 9, className: 'text-muted' }, ['Aun no se ha ejecutado ninguna consulta.'])
       ]));
+      cards.replaceChildren(el('p', { className: 'text-muted record-card__empty' }, ['Aun no se ha ejecutado ninguna consulta.']));
       return;
     }
     const rows = visibleRows();
@@ -589,10 +630,12 @@ export const CargarDatos = (mount, deps = {}) => {
       tbody.replaceChildren(el('tr', {}, [
         el('td', { colSpan: 9, className: 'text-muted' }, ['No hay incapacidades para mostrar.'])
       ]));
+      cards.replaceChildren(el('p', { className: 'text-muted record-card__empty' }, ['No hay incapacidades para mostrar.']));
       return;
     }
     const pageRows = paginator.slice(rows);
     tbody.replaceChildren(...pageRows.map((row) => renderRow(row)));
+    cards.replaceChildren(...pageRows.map((row) => renderCard(row)));
     updateSortIndicators();
   }
 
@@ -656,6 +699,38 @@ export const CargarDatos = (mount, deps = {}) => {
       el('td', {}, [row?.soporteUrl ? supportLink(row) : el('span', { className: 'text-muted' }, ['Sin soporte'])]),
       el('td', {}, [statusBadge(row?.estado)]),
       el('td', {}, [actionsCell(row)])
+    ]);
+  }
+
+  function renderCard(row) {
+    return recordCard(row, {
+      title: row?.nombre || '-',
+      subtitle: `Documento: ${row?.documento || '-'}`,
+      meta: [
+        ['Tipo', row?.source || '-'],
+        ['Inicio', formatDate(row?.fechaInicio)],
+        ['Fin', formatDate(row?.fechaFin)],
+        ['Canal', channelLabel(row)],
+        ['Soporte', row?.soporteUrl ? supportLink(row) : el('span', { className: 'text-muted' }, ['Sin soporte'])]
+      ],
+      actions: actionsCell(row)
+    });
+  }
+
+  function recordCard(item, { title, subtitle, meta = [], actions }) {
+    return el('article', { className: 'record-card' }, [
+      el('div', { className: 'record-card__header' }, [
+        el('div', { className: 'record-card__identity' }, [
+          el('strong', { className: 'record-card__title' }, [title]),
+          el('span', { className: 'record-card__subtitle' }, [subtitle])
+        ]),
+        statusBadge(item?.estado)
+      ]),
+      el('dl', { className: 'record-card__meta' }, meta.map(([label, value]) => el('div', { className: 'record-card__meta-item' }, [
+        el('dt', {}, [label]),
+        el('dd', {}, Array.isArray(value) ? value : [value || '-'])
+      ]))),
+      el('div', { className: 'record-card__actions' }, [actions])
     ]);
   }
 
@@ -835,6 +910,27 @@ function buildCreateFields(portalMode, canManageAll) {
     el('button', { id: 'incResetBtn', className: 'btn', type: 'button' }, ['Limpiar'])
   );
   return fields;
+}
+
+function buildSourceOptions(novedades = []) {
+  const byCode = new Map();
+  for (const row of novedades || []) {
+    const estado = String(row?.estado || 'activo').trim().toLowerCase();
+    const code = normalizeNoveltyCode(row?.codigoNovedad);
+    if (estado !== 'activo' || !SOURCE_CODE_TO_VALUE.has(code) || byCode.has(code)) continue;
+    const value = SOURCE_CODE_TO_VALUE.get(code);
+    const label = String(row?.nombre || '').trim() || value;
+    byCode.set(code, { code, value, label });
+  }
+  const fromNovedades = SOURCE_CODE_OPTIONS
+    .map((option) => byCode.get(option.code))
+    .filter(Boolean);
+  if (fromNovedades.length) return fromNovedades;
+  return SOURCE_CODE_OPTIONS.map((option) => ({ ...option, label: option.value }));
+}
+
+function normalizeNoveltyCode(value) {
+  return String(value || '').trim().replace(/^0+(?=\d)/, '');
 }
 
 function sanitizeDocument(value) {

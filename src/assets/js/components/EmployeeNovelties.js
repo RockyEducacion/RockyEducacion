@@ -45,20 +45,23 @@ export const EmployeeNovelties = (mount, deps = {}) => {
       ]),
       el('span', { id: 'novMeta', className: 'right text-muted' }, ['Cargando novedades...'])
     ]),
-    el('div', { className: 'mt-2 table-wrap' }, [
-      el('table', { className: 'table', id: 'novTable' }, [
-        el('thead', {}, [el('tr', {}, [
-          el('th', { 'data-sort': 'date', style: 'cursor:pointer' }, ['Fecha']),
-          el('th', { 'data-sort': 'typeLabel', style: 'cursor:pointer' }, ['Tipo']),
-          el('th', { 'data-sort': 'documento', style: 'cursor:pointer' }, ['Documento']),
-          el('th', { 'data-sort': 'nombre', style: 'cursor:pointer' }, ['Nombre']),
-          el('th', { 'data-sort': 'fromLabel', style: 'cursor:pointer' }, ['Anterior']),
-          el('th', { 'data-sort': 'toLabel', style: 'cursor:pointer' }, ['Nuevo']),
-          el('th', { 'data-sort': 'actorEmail', style: 'cursor:pointer' }, ['Usuario']),
-          el('th', {}, ['Acciones'])
-        ])]),
-        el('tbody', {})
-      ])
+    el('div', { className: 'responsive-records mt-2' }, [
+      el('div', { className: 'table-wrap responsive-table-view' }, [
+        el('table', { className: 'table', id: 'novTable' }, [
+          el('thead', {}, [el('tr', {}, [
+            el('th', { 'data-sort': 'date', style: 'cursor:pointer' }, ['Fecha']),
+            el('th', { 'data-sort': 'typeLabel', style: 'cursor:pointer' }, ['Tipo']),
+            el('th', { 'data-sort': 'documento', style: 'cursor:pointer' }, ['Documento']),
+            el('th', { 'data-sort': 'nombre', style: 'cursor:pointer' }, ['Nombre']),
+            el('th', { 'data-sort': 'fromLabel', style: 'cursor:pointer' }, ['Anterior']),
+            el('th', { 'data-sort': 'toLabel', style: 'cursor:pointer' }, ['Nuevo']),
+            el('th', { 'data-sort': 'actorEmail', style: 'cursor:pointer' }, ['Usuario']),
+            el('th', {}, ['Acciones'])
+          ])]),
+          el('tbody', {})
+        ])
+      ]),
+      el('div', { id: 'novCards', className: 'record-card-list' }, [])
     ])
   ]);
 
@@ -68,7 +71,8 @@ export const EmployeeNovelties = (mount, deps = {}) => {
   const searchInput = qs('#novSearch', ui);
   const meta = qs('#novMeta', ui);
   const tbody = qs('#novTable tbody', ui);
-  const paginator = createTablePagination(ui, { id: 'employeeNovelties', after: '.table-wrap', onChange: render });
+  const cards = qs('#novCards', ui);
+  const paginator = createTablePagination(ui, { id: 'employeeNovelties', after: '.responsive-records', onChange: render });
 
   let auditRows = [];
   let historyRows = [];
@@ -133,6 +137,7 @@ export const EmployeeNovelties = (mount, deps = {}) => {
     const rows = filteredRows();
     const pageRows = paginator.slice(rows);
     tbody.replaceChildren(...pageRows.map((row) => renderRow(row)));
+    cards.replaceChildren(...(pageRows.length ? pageRows.map((row) => renderCard(row)) : [el('p', { className: 'text-muted record-card__empty' }, ['No hay novedades para mostrar.'])]));
     meta.textContent = `${rows.length} novedad(es) visibles.`;
     updateSortIndicators();
   }
@@ -339,6 +344,28 @@ export const EmployeeNovelties = (mount, deps = {}) => {
       el('td', {}, [row.toLabel || '-']),
       el('td', {}, [row.actorEmail || '-']),
       el('td', {}, [actionsCell(row)])
+    ]);
+  }
+
+  function renderCard(row) {
+    return el('article', { className: 'record-card' }, [
+      el('div', { className: 'record-card__header' }, [
+        el('div', { className: 'record-card__identity' }, [
+          el('strong', { className: 'record-card__title' }, [row.nombre || '-']),
+          el('span', { className: 'record-card__subtitle' }, [`${row.date || '-'} - ${row.documento || '-'}`])
+        ]),
+        typeBadge(row.type, row.typeLabel)
+      ]),
+      el('dl', { className: 'record-card__meta' }, [
+        ['Anterior', row.fromLabel || '-'],
+        ['Nuevo', row.toLabel || '-'],
+        ['Usuario', row.actorEmail || '-'],
+        ['Detalle', row.note || '-']
+      ].map(([label, value]) => el('div', { className: 'record-card__meta-item' }, [
+        el('dt', {}, [label]),
+        el('dd', {}, [value || '-'])
+      ]))),
+      el('div', { className: 'record-card__actions' }, [actionsCell(row)])
     ]);
   }
 

@@ -32,20 +32,23 @@ export const SupernumerariosAdmin=(mount,deps={})=>{
           el('option',{value:'inactivo'},['Inactivos'])
         ]) ])
       ]),
-      el('div',{className:'mt-2 table-wrap'},[
-        el('table',{className:'table',id:'tbl'},[
-          el('thead',{},[ el('tr',{},[
-            el('th',{'data-sort':'codigo',style:'cursor:pointer'},['Codigo']),
-            el('th',{'data-sort':'documento',style:'cursor:pointer'},['Documento']),
-            el('th',{'data-sort':'nombre',style:'cursor:pointer'},['Nombre']),
-            el('th',{'data-sort':'telefono',style:'cursor:pointer'},['Telefono']),
-            el('th',{'data-sort':'cargoNombre',style:'cursor:pointer'},['Cargo']),
-            el('th',{'data-sort':'estadoOperativo',style:'cursor:pointer'},['Estado']),
-            el('th',{'data-sort':'sedeHoy',style:'cursor:pointer'},['Sede hoy']),
-            el('th',{},['Acciones'])
-          ]) ]),
-          el('tbody',{})
-        ])
+      el('div',{className:'responsive-records mt-2'},[
+        el('div',{className:'table-wrap responsive-table-view'},[
+          el('table',{className:'table',id:'tbl'},[
+            el('thead',{},[ el('tr',{},[
+              el('th',{'data-sort':'codigo',style:'cursor:pointer'},['Codigo']),
+              el('th',{'data-sort':'documento',style:'cursor:pointer'},['Documento']),
+              el('th',{'data-sort':'nombre',style:'cursor:pointer'},['Nombre']),
+              el('th',{'data-sort':'telefono',style:'cursor:pointer'},['Telefono']),
+              el('th',{'data-sort':'cargoNombre',style:'cursor:pointer'},['Cargo']),
+              el('th',{'data-sort':'estadoOperativo',style:'cursor:pointer'},['Estado']),
+              el('th',{'data-sort':'sedeHoy',style:'cursor:pointer'},['Sede hoy']),
+              el('th',{},['Acciones'])
+            ]) ]),
+            el('tbody',{})
+          ])
+        ]),
+        el('div',{id:'supernumerarioCards',className:'record-card-list'},[])
       ]),
       el('p',{id:'msg',className:'text-muted mt-2'},[' '])
     ])
@@ -107,9 +110,9 @@ export const SupernumerariosAdmin=(mount,deps={})=>{
     const cur=cargoSelect.value;
     cargoSelect.replaceChildren(...buildOptions(cargoList,cur));
   }
-  let snapshot=[]; const tbody=ui.querySelector('tbody');
+  let snapshot=[]; const tbody=ui.querySelector('tbody'); const cards=qs('#supernumerarioCards',ui);
   let sortKey=''; let sortDir=1;
-  const paginator=createTablePagination(ui,{id:'supernumerarios',after:'#tabList .table-wrap',onChange:render});
+  const paginator=createTablePagination(ui,{id:'supernumerarios',after:'#tabList .responsive-records',onChange:render});
   const today=todayBogota();
   let unSedes=()=>{};
   let unCargos=()=>{};
@@ -193,6 +196,7 @@ export const SupernumerariosAdmin=(mount,deps={})=>{
     const sorted=sortData(data);
     const pageRows=paginator.slice(sorted);
     tbody.replaceChildren(...pageRows.map(e=> row(e)));
+    cards.replaceChildren(...(pageRows.length?pageRows.map(e=> supernumerarioCard(e)):[el('p',{className:'text-muted record-card__empty'},['Sin supernumerarios para mostrar.'])]));
     const msg=qs('#msg',ui); if(msg) msg.textContent=`Total registros filtrados: ${data.length}`;
     updateSortIndicators();
   }
@@ -352,6 +356,39 @@ export const SupernumerariosAdmin=(mount,deps={})=>{
     const btnInfo=el('button',{className:'btn btn--icon',title:'Ver informacion','aria-label':'Ver informacion'},['\u24D8']);
     btnInfo.addEventListener('click',()=>{ const info=auditInfoData(e); showInfoModal('Informacion del registro',[`Evento: ${info.action}`,`Usuario: ${info.user}`,`Fecha: ${info.date}`]); });
     box.append(btnInfo); return box;
+  }
+  function supernumerarioCard(e){
+    const linked=isLinkedByDoc(e.documento);
+    const docValue=linked ? [e.documento||'-',' ',el('span',{className:'badge'},['Vinculado'])] : [e.documento||'-'];
+    const op=operationalInfo(e);
+    return recordCard(e,{
+      title:e.nombre||'-',
+      subtitle:`Codigo: ${e.codigo||'-'}`,
+      status:operationalBadge(op),
+      meta:[
+        ['Documento',docValue],
+        ['Telefono',e.telefono||'-'],
+        ['Cargo',e.cargoNombre||cargoNameByCode(e.cargoCodigo)],
+        ['Sede hoy',op.sedeLabel||'-']
+      ],
+      actions:actionsCell(e)
+    });
+  }
+  function recordCard(item,{title,subtitle,status=null,meta=[],actions}){
+    return el('article',{className:'record-card'},[
+      el('div',{className:'record-card__header'},[
+        el('div',{className:'record-card__identity'},[
+          el('strong',{className:'record-card__title'},[title]),
+          el('span',{className:'record-card__subtitle'},[subtitle])
+        ]),
+        status||statusBadge(item.estado)
+      ]),
+      el('dl',{className:'record-card__meta'},meta.map(([label,value])=> el('div',{className:'record-card__meta-item'},[
+        el('dt',{},[label]),
+        el('dd',{},Array.isArray(value)?value:[value||'-'])
+      ]))),
+      el('div',{className:'record-card__actions'},[actions])
+    ]);
   }
   function startEdit(tr,e){
     const cur={

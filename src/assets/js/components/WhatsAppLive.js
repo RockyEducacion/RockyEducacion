@@ -61,7 +61,8 @@ export const WhatsAppLive = (mount, deps = {}) => {
         statCard('Gestionadas', 'waNoveltyHandled', '0', 'statNoveltyHandled'),
         statCard('Pendientes', 'waNoveltyPending', '0', 'statNoveltyPending')
       ]),
-      el('div', { className: 'mt-2 table-wrap' }, [
+      el('div', { className: 'responsive-records mt-2' }, [
+        el('div', { className: 'table-wrap responsive-table-view' }, [
           el('table', { className: 'table wa-live-table' }, [
             el('colgroup', {}, [
               el('col', { style: 'width:90px' }),
@@ -87,6 +88,10 @@ export const WhatsAppLive = (mount, deps = {}) => {
               ])
             ]),
           el('tbody', {})
+        ])
+        ]),
+        el('div', { id: 'waCards', className: 'record-card-list' }, [
+          el('p', { className: 'text-muted record-card__empty' }, ['Conectando...'])
         ])
       ]),
       el('div', { id: 'waPagination', className: 'mt-2', style: 'display:flex;justify-content:space-between;gap:.75rem;align-items:center;flex-wrap:wrap;' }, [
@@ -126,26 +131,30 @@ export const WhatsAppLive = (mount, deps = {}) => {
         ])
       ]),
       el('div', { id: 'waPendingEmpty', className: 'text-muted mt-1', style: 'display:none;' }, ['Todos los empleados esperados para hoy ya realizaron su registro.']),
-      el('div', { id: 'waPendingWrap', className: 'mt-1 table-wrap' }, [
-        el('table', { className: 'table wa-live-table' }, [
-          el('thead', {}, [
-            el('tr', {}, [
-              el('th', { 'data-pending-sort': 'documento', style: 'cursor:pointer' }, ['Cedula']),
-              el('th', { 'data-pending-sort': 'nombre', style: 'cursor:pointer' }, ['Nombre']),
-              el('th', { 'data-pending-sort': 'telefono', style: 'cursor:pointer' }, ['Telefono']),
-              el('th', { 'data-pending-sort': 'sede', style: 'cursor:pointer' }, ['Sede']),
-              el('th', { 'data-pending-sort': 'dependencia', style: 'cursor:pointer' }, ['Dependencia']),
-              el('th', { 'data-pending-sort': 'zona', style: 'cursor:pointer' }, ['Zona']),
-              el('th', {}, ['Info'])
-            ])
-          ]),
-          el('tbody', { id: 'waPendingBody' })
-        ])
+      el('div', { id: 'waPendingWrap', className: 'responsive-records mt-1' }, [
+        el('div', { className: 'table-wrap responsive-table-view' }, [
+          el('table', { className: 'table wa-live-table' }, [
+            el('thead', {}, [
+              el('tr', {}, [
+                el('th', { 'data-pending-sort': 'documento', style: 'cursor:pointer' }, ['Cedula']),
+                el('th', { 'data-pending-sort': 'nombre', style: 'cursor:pointer' }, ['Nombre']),
+                el('th', { 'data-pending-sort': 'telefono', style: 'cursor:pointer' }, ['Telefono']),
+                el('th', { 'data-pending-sort': 'sede', style: 'cursor:pointer' }, ['Sede']),
+                el('th', { 'data-pending-sort': 'dependencia', style: 'cursor:pointer' }, ['Dependencia']),
+                el('th', { 'data-pending-sort': 'zona', style: 'cursor:pointer' }, ['Zona']),
+                el('th', {}, ['Info'])
+              ])
+            ]),
+            el('tbody', { id: 'waPendingBody' })
+          ])
+        ]),
+        el('div', { id: 'waPendingCards', className: 'record-card-list' }, [])
       ])
     ])
   ]);
 
   const tbody = qs('tbody', ui);
+  const cards = qs('#waCards', ui);
   const msg = qs('#waMsg', ui);
   const searchInput = qs('#waSearch', ui);
   const noveltyFilter = qs('#waNoveltyFilter', ui);
@@ -159,6 +168,7 @@ export const WhatsAppLive = (mount, deps = {}) => {
   const btnManualRefresh = qs('#btnManualRefresh', ui);
   const btnManualClose = qs('#btnManualClose', ui);
   const pendingBody = qs('#waPendingBody', ui);
+  const pendingCards = qs('#waPendingCards', ui);
   const pendingSummary = qs('#waPendingSummary', ui);
   const pendingZoneFilter = qs('#waPendingZoneFilter', ui);
   const pendingEmpty = qs('#waPendingEmpty', ui);
@@ -931,143 +941,10 @@ export const WhatsAppLive = (mount, deps = {}) => {
     const visibleFrom = totalRows ? startIndex + 1 : 0;
     const visibleTo = totalRows ? startIndex + pageRows.length : 0;
 
-    tbody.replaceChildren(
-      ...pageRows.map((r) => {
-        const key = replacementRowKey(r);
-        const repl = replMap.get(key) || null;
-        const rowClass = classifyRow(r);
-        const canAssign = canAssignReplacement(r);
-        const opts = canAssign ? optionsForRow(r) : [];
-        const isSuperRow = rowClass === 'super_replacement';
-        const isReportOnly = !isSuperRow && rowClass === 'replace_yes' && !rowHasScheduledService(r);
-        const baseNovedadText = String(displayNovedad(r) || r.novedadNombre || '-').trim() || '-';
-        const novedadText = isSuperRow
-          ? `${baseNovedadText} · SUPERNUMERARIO`
-          : isReportOnly
-            ? `${baseNovedadText} · SOLO REPORTE`
-            : baseNovedadText;
-        const novedadStyle = novedadTextStyleByClass(rowClass);
-        const diasVal = incapacidadDaysForRow(r);
-        const diasTxt = diasVal != null ? String(diasVal) : '-';
-        const diasTitle = incapacidadTooltipForRow(r);
-        const diasNode = el('span', diasTitle ? { title: diasTitle, style: 'cursor:help;' } : {}, [diasTxt]);
-        const replacementText = isReportOnly ? 'Solo reporte' : displayReplacementText(r, repl, rowClass, opts);
-
-        if (isSuperRow) {
-          return el('tr', { style: rowStyleByClass(rowClass) }, [
-            el('td', {}, [r.fecha || '-']),
-            el('td', {}, [r.hora || '-']),
-            el('td', {}, [r.documento || '-']),
-            el('td', {}, [r.nombre || '-']),
-            el('td', {}, [el('span', { style: novedadStyle }, [novedadText])]),
-            el('td', {}, [diasNode]),
-            el('td', {}, [el('span', { style: 'color:#1d4ed8;' }, [replacementText])]),
-            el('td', {}, [infoButtonForRow(r)])
-          ]);
-        }
-
-        if (!canAssign) {
-          return el('tr', { style: rowStyleByClass(rowClass) }, [
-            el('td', {}, [r.fecha || '-']),
-            el('td', {}, [r.hora || '-']),
-            el('td', {}, [r.documento || '-']),
-            el('td', {}, [r.nombre || '-']),
-            el('td', {}, [el('span', { style: novedadStyle }, [novedadText])]),
-            el('td', {}, [diasNode]),
-            el('td', {}, [el('span', { className: 'text-muted' }, [replacementText])]),
-            el('td', {}, [infoButtonForRow(r)])
-          ]);
-        }
-
-        if (repl && String(repl.decision || '').trim() === 'ausentismo') {
-          return el('tr', { style: rowStyleByClass(rowClass) }, [
-            el('td', {}, [r.fecha || '-']),
-            el('td', {}, [r.hora || '-']),
-            el('td', {}, [r.documento || '-']),
-            el('td', {}, [r.nombre || '-']),
-            el('td', {}, [el('span', { style: novedadStyle }, [novedadText])]),
-            el('td', {}, [diasNode]),
-            el('td', {}, [el('span', { style: 'color:#b91c1c;' }, [replacementText])]),
-            el('td', {}, [infoButtonForRow(r)])
-          ]);
-        }
-
-        if (repl && String(repl.decision || '').trim() === 'reemplazo') {
-          return el('tr', { style: rowStyleByClass(rowClass) }, [
-            el('td', {}, [r.fecha || '-']),
-            el('td', {}, [r.hora || '-']),
-            el('td', {}, [r.documento || '-']),
-            el('td', {}, [r.nombre || '-']),
-            el('td', {}, [el('span', { style: novedadStyle }, [novedadText])]),
-            el('td', {}, [diasNode]),
-            el('td', {}, [el('span', { style: 'color:#15803d;' }, [replacementText])]),
-            el('td', {}, [infoButtonForRow(r)])
-          ]);
-        }
-
-        const select = el(
-          'select',
-          {
-            className: 'input wa-repl-select',
-            style: 'width:170px;min-width:170px;max-width:170px;padding:.42rem .5rem;font-size:.78rem;',
-            disabled: !canAssign
-          },
-          [
-            el('option', { value: '__ausentismo__' }, ['Confirmar ausentismo']),
-            ...opts.map((o) => el('option', { value: o.documento }, [`${o.nombre} (${o.documento || '-'})`]))
-          ]
-        );
-        const pendingSelection = pendingReplacementSelectionFor(r);
-        if (pendingSelection && [...select.options].some((option) => String(option.value || '').trim() === pendingSelection)) {
-          select.value = pendingSelection;
-        } else if (repl?.decision === 'ausentismo') {
-          select.value = '__ausentismo__';
-        } else if (repl?.supernumerarioDocumento) {
-          select.value = String(repl.supernumerarioDocumento);
-        }
-        const selectedLabel = () => select.options[select.selectedIndex]?.text || '';
-        select.title = selectedLabel();
-        const selectedPreview = el(
-          'span',
-          { className: 'text-muted', style: 'font-size:.78rem;line-height:1.25;white-space:normal;word-break:break-word;' },
-          [selectedLabel()]
-        );
-
-        const saveBtn = el(
-          'button',
-          {
-            className: 'btn',
-            type: 'button',
-            disabled: !canAssign,
-            style: 'padding:3px 7px;font-size:.74rem;line-height:1.05;min-height:24px;'
-          },
-          ['Confirmar']
-        );
-        saveBtn.addEventListener('click', () => saveReplacement(r, select.value, saveBtn, select));
-        select.addEventListener('change', () => {
-          const label = selectedLabel();
-          setPendingReplacementSelection(r, select.value);
-          select.title = label;
-          selectedPreview.textContent = label;
-        });
-
-        const replacementCell = el('div', { style: 'display:grid;gap:4px;min-width:0;' }, [
-          el('div', { style: 'display:flex;align-items:center;gap:6px;flex-wrap:nowrap;min-width:0;' }, [select, saveBtn]),
-          selectedPreview
-        ]);
-
-        return el('tr', { style: rowStyleByClass(rowClass) }, [
-          el('td', {}, [r.fecha || '-']),
-          el('td', {}, [r.hora || '-']),
-          el('td', {}, [r.documento || '-']),
-          el('td', {}, [r.nombre || '-']),
-          el('td', {}, [el('span', { style: novedadStyle }, [novedadText])]),
-          el('td', {}, [diasNode]),
-          el('td', {}, [replacementCell]),
-          el('td', {}, [infoButtonForRow(r)])
-        ]);
-      })
-    );
+    tbody.replaceChildren(...pageRows.map((r) => attendanceTableRow(r, replMap)));
+    cards.replaceChildren(...(pageRows.length
+      ? pageRows.map((r) => attendanceCard(r, replMap))
+      : [el('p', { className: 'text-muted record-card__empty' }, ['No hay registros para mostrar.'])]));
 
     qs('#waPlanned', ui).textContent = String(stats.planned);
     qs('#waExpected', ui).textContent = String(stats.expected);
@@ -1091,6 +968,9 @@ export const WhatsAppLive = (mount, deps = {}) => {
         ]);
       })
     );
+    pendingCards.replaceChildren(...(filteredPendingRows.length
+      ? filteredPendingRows.map(({ row, info }) => pendingRecordCard(row, info))
+      : []));
     if (pendingSummary) {
       const totalPending = pendingEmployees.length;
       const visiblePending = filteredPendingRows.length;
@@ -1118,6 +998,161 @@ export const WhatsAppLive = (mount, deps = {}) => {
     updateCardFilterUI();
     updateSortIndicators();
     updatePendingSortIndicators();
+  }
+
+  function attendanceView(row, replMap) {
+    const key = replacementRowKey(row);
+    const repl = replMap.get(key) || null;
+    const rowClass = classifyRow(row);
+    const canAssign = canAssignReplacement(row);
+    const opts = canAssign ? optionsForRow(row) : [];
+    const isSuperRow = rowClass === 'super_replacement';
+    const isReportOnly = !isSuperRow && rowClass === 'replace_yes' && !rowHasScheduledService(row);
+    const baseNovedadText = String(displayNovedad(row) || row.novedadNombre || '-').trim() || '-';
+    const novedadText = isSuperRow
+      ? `${baseNovedadText} - SUPERNUMERARIO`
+      : isReportOnly
+        ? `${baseNovedadText} - SOLO REPORTE`
+        : baseNovedadText;
+    const diasVal = incapacidadDaysForRow(row);
+    return {
+      row,
+      repl,
+      rowClass,
+      canAssign,
+      opts,
+      isSuperRow,
+      isReportOnly,
+      novedadText,
+      novedadStyle: novedadTextStyleByClass(rowClass),
+      diasTxt: diasVal != null ? String(diasVal) : '-',
+      diasTitle: incapacidadTooltipForRow(row),
+      replacementText: isReportOnly ? 'Solo reporte' : displayReplacementText(row, repl, rowClass, opts)
+    };
+  }
+
+  function diasNode(view) {
+    return el('span', view.diasTitle ? { title: view.diasTitle, style: 'cursor:help;' } : {}, [view.diasTxt]);
+  }
+
+  function replacementStaticNode(view) {
+    if (view.isSuperRow) return el('span', { style: 'color:#1d4ed8;' }, [view.replacementText]);
+    if (!view.canAssign) return el('span', { className: 'text-muted' }, [view.replacementText]);
+    const decision = String(view.repl?.decision || '').trim();
+    if (decision === 'ausentismo') return el('span', { style: 'color:#b91c1c;' }, [view.replacementText]);
+    if (decision === 'reemplazo') return el('span', { style: 'color:#15803d;' }, [view.replacementText]);
+    return null;
+  }
+
+  function replacementNode(row, view) {
+    const staticNode = replacementStaticNode(view);
+    if (staticNode) return staticNode;
+    const select = el(
+      'select',
+      {
+        className: 'input wa-repl-select',
+        style: 'width:170px;min-width:170px;max-width:100%;padding:.42rem .5rem;font-size:.78rem;',
+        disabled: !view.canAssign
+      },
+      [
+        el('option', { value: '__ausentismo__' }, ['Confirmar ausentismo']),
+        ...view.opts.map((o) => el('option', { value: o.documento }, [`${o.nombre} (${o.documento || '-'})`]))
+      ]
+    );
+    const pendingSelection = pendingReplacementSelectionFor(row);
+    if (pendingSelection && [...select.options].some((option) => String(option.value || '').trim() === pendingSelection)) {
+      select.value = pendingSelection;
+    } else if (view.repl?.decision === 'ausentismo') {
+      select.value = '__ausentismo__';
+    } else if (view.repl?.supernumerarioDocumento) {
+      select.value = String(view.repl.supernumerarioDocumento);
+    }
+    const selectedLabel = () => select.options[select.selectedIndex]?.text || '';
+    select.title = selectedLabel();
+    const selectedPreview = el(
+      'span',
+      { className: 'text-muted', style: 'font-size:.78rem;line-height:1.25;white-space:normal;word-break:break-word;' },
+      [selectedLabel()]
+    );
+    const saveBtn = el(
+      'button',
+      {
+        className: 'btn',
+        type: 'button',
+        disabled: !view.canAssign,
+        style: 'padding:3px 7px;font-size:.74rem;line-height:1.05;min-height:24px;'
+      },
+      ['Confirmar']
+    );
+    saveBtn.addEventListener('click', () => saveReplacement(row, select.value, saveBtn, select));
+    select.addEventListener('change', () => {
+      const label = selectedLabel();
+      setPendingReplacementSelection(row, select.value);
+      select.title = label;
+      selectedPreview.textContent = label;
+    });
+    return el('div', { style: 'display:grid;gap:4px;min-width:0;' }, [
+      el('div', { style: 'display:flex;align-items:center;gap:6px;flex-wrap:wrap;min-width:0;' }, [select, saveBtn]),
+      selectedPreview
+    ]);
+  }
+
+  function attendanceTableRow(row, replMap) {
+    const view = attendanceView(row, replMap);
+    return el('tr', { style: rowStyleByClass(view.rowClass) }, [
+      el('td', {}, [row.fecha || '-']),
+      el('td', {}, [row.hora || '-']),
+      el('td', {}, [row.documento || '-']),
+      el('td', {}, [row.nombre || '-']),
+      el('td', {}, [el('span', { style: view.novedadStyle }, [view.novedadText])]),
+      el('td', {}, [diasNode(view)]),
+      el('td', {}, [replacementNode(row, view)]),
+      el('td', {}, [infoButtonForRow(row)])
+    ]);
+  }
+
+  function attendanceCard(row, replMap) {
+    const view = attendanceView(row, replMap);
+    return el('article', { className: 'record-card' }, [
+      el('div', { className: 'record-card__header' }, [
+        el('div', { className: 'record-card__identity' }, [
+          el('strong', { className: 'record-card__title' }, [row.nombre || '-']),
+          el('span', { className: 'record-card__subtitle' }, [`${row.fecha || '-'} ${row.hora || '-'} - ${row.documento || '-'}`])
+        ]),
+        el('span', { className: `badge ${view.rowClass === 'replace_yes' ? 'badge--off' : 'badge--ok'}` }, [view.isSuperRow ? 'Supernumerario' : 'Registro'])
+      ]),
+      el('dl', { className: 'record-card__meta' }, [
+        ['Novedad', el('span', { style: view.novedadStyle }, [view.novedadText])],
+        ['Dias', diasNode(view)],
+        ['Reemplazo', replacementNode(row, view)]
+      ].map(([label, value]) => el('div', { className: 'record-card__meta-item' }, [
+        el('dt', {}, [label]),
+        el('dd', {}, Array.isArray(value) ? value : [value || '-'])
+      ]))),
+      el('div', { className: 'record-card__actions' }, [infoButtonForRow(row)])
+    ]);
+  }
+
+  function pendingRecordCard(row, info) {
+    return el('article', { className: 'record-card' }, [
+      el('div', { className: 'record-card__header' }, [
+        el('div', { className: 'record-card__identity' }, [
+          el('strong', { className: 'record-card__title' }, [info.nombre || '-']),
+          el('span', { className: 'record-card__subtitle' }, [`Cedula: ${info.documento || '-'}`])
+        ]),
+        el('span', { className: 'badge' }, [info.zona || 'Pendiente'])
+      ]),
+      el('dl', { className: 'record-card__meta' }, [
+        ['Telefono', info.telefono || '-'],
+        ['Sede', info.sede || '-'],
+        ['Dependencia', info.dependencia || '-'],
+        ['Zona', info.zona || '-']
+      ].map(([label, value]) => el('div', { className: 'record-card__meta-item' }, [
+        el('dt', {}, [label]),
+        el('dd', {}, [value || '-'])
+      ]))),
+      el('div', { className: 'record-card__actions' }, [infoButtonForRow(row)])
+    ]);
   }
 
   function setCardFilter(next) {
@@ -1597,6 +1632,7 @@ function getColombiaHolidaySet(year) {
     formatUtcDate(moveToFollowingMondayUtc(makeUtcDate(year, 1, 6))),
     formatUtcDate(moveToFollowingMondayUtc(makeUtcDate(year, 3, 19))),
     formatUtcDate(moveToFollowingMondayUtc(makeUtcDate(year, 6, 29))),
+    formatUtcDate(moveToFollowingMondayUtc(makeUtcDate(year, 7, 9))),
     formatUtcDate(moveToFollowingMondayUtc(makeUtcDate(year, 8, 15))),
     formatUtcDate(moveToFollowingMondayUtc(makeUtcDate(year, 10, 12))),
     formatUtcDate(moveToFollowingMondayUtc(makeUtcDate(year, 11, 1))),

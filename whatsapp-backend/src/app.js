@@ -3970,7 +3970,7 @@ function buildSupportMessage(novelty, incapacity) {
     ? '\n\nRECUERDA: Si es mayor a tres días debes cargar la historia clínica o Epicrisis.'
     : '';
 
-  return `Por favor cargue el soporte ingresando al siguiente link:\n${EMPLOYEE_PORTAL_URL}${reminder}`;
+  return `Por favor envie el soporte por WhatsApp seleccionando este enlace:\nhttps://wa.me/573332922319${reminder}`;
 }
 
 function resolveSedeSelection(session, parsed, prefix) {

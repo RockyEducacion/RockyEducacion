@@ -116,6 +116,7 @@ begin
     public.move_to_following_monday_sql(make_date(v_year, 1, 6)),
     public.move_to_following_monday_sql(make_date(v_year, 3, 19)),
     public.move_to_following_monday_sql(make_date(v_year, 6, 29)),
+    public.move_to_following_monday_sql(make_date(v_year, 7, 9)),
     public.move_to_following_monday_sql(make_date(v_year, 8, 15)),
     public.move_to_following_monday_sql(make_date(v_year, 10, 12)),
     public.move_to_following_monday_sql(make_date(v_year, 11, 1)),

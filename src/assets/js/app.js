@@ -8,6 +8,12 @@ import { DataTreatment } from './components/DataTreatment.js';
 import { About } from './components/About.js';
 import { ForgotPassword, Login, ResetPassword } from './components/Login.js';
 import { Notes } from './components/Notes.js';
+import { AdministracionDashboard } from './components/dashboards/AdministracionDashboard.js';
+import { CargueMasivoDashboard } from './components/dashboards/CargueMasivoDashboard.js';
+import { EmpleadosDashboard } from './components/dashboards/EmpleadosDashboard.js';
+import { GobiernoDashboard } from './components/dashboards/GobiernoDashboard.js';
+import { OperacionDashboard } from './components/dashboards/OperacionDashboard.js';
+import { ReportesDashboard } from './components/dashboards/ReportesDashboard.js';
 
 import { UsersAdmin } from './components/UsersAdmin.js';
 import { ZonesAdmin } from './components/ZonesAdmin.js';
@@ -28,6 +34,7 @@ import { ConsolidatedReports } from './components/ConsolidatedReports.js';
 import { ImportReplacements } from './components/ImportReplacements.js';
 import { CargarDatos } from './components/CargarDatos.js';
 import { PermissionsCenter } from './components/PermissionsCenter.js';
+import { PermissionsAudit } from './components/PermissionsAudit.js';
 import { WhatsAppLive } from './components/WhatsAppLive.js';
 import { RegistroSede } from './components/RegistroSede.js';
 import { QrTabletScanner } from './components/QrTabletScanner.js';
@@ -77,7 +84,7 @@ const guardWrite=(perm,fn)=> async (...args)=>{
         streamRoleMatrix:fb.streamRoleMatrix, setRolePermissions:fb.setRolePermissions, streamUserOverrides:fb.streamUserOverrides,
         getUserOverrides:fb.getUserOverrides, setUserOverrides:fb.setUserOverrides, clearUserOverrides:fb.clearUserOverrides,
         addAuditLog:fb.addAuditLog, streamAuditLogs:(cb,max)=>{ if(unsubAudit)unsubAudit(); unsubAudit=fb.streamAuditLogs(cb,max); return unsubAudit; },
-        streamUsers:fb.streamUsers, setUserRole:guardWrite(PERMS.EDIT_USERS,fb.setUserRole), syncSupervisorAccessForUser:guardWrite(PERMS.EDIT_USERS,fb.syncSupervisorAccessForUser), setUserStatus:guardWrite(PERMS.EDIT_USERS,fb.setUserStatus), softDeleteUser:guardWrite(PERMS.EDIT_USERS,fb.softDeleteUser), findUserByEmail:fb.findUserByEmail,
+        streamUsers:fb.streamUsers, setUserRole:guardWrite(PERMS.EDIT_USERS,fb.setUserRole), syncSupervisorAccessForUser:guardWrite(PERMS.EDIT_USERS,fb.syncSupervisorAccessForUser), setUserStatus:guardWrite(PERMS.EDIT_USERS,fb.setUserStatus), findUserByEmail:fb.findUserByEmail,
         streamZones:fb.streamZones, createZone:guardWrite(PERMS.EDIT_ZONES,fb.createZone), updateZone:guardWrite(PERMS.EDIT_ZONES,fb.updateZone), setZoneStatus:guardWrite(PERMS.EDIT_ZONES,fb.setZoneStatus), findZoneByCode:fb.findZoneByCode, getNextZoneCode:fb.getNextZoneCode,
         streamDependencies:fb.streamDependencies, createDependency:guardWrite(PERMS.EDIT_DEPENDENCIES,fb.createDependency), updateDependency:guardWrite(PERMS.EDIT_DEPENDENCIES,fb.updateDependency), setDependencyStatus:guardWrite(PERMS.EDIT_DEPENDENCIES,fb.setDependencyStatus), findDependencyByCode:fb.findDependencyByCode, getNextDependencyCode:fb.getNextDependencyCode,
         streamSedes:fb.streamSedes, createSede:guardWrite(PERMS.EDIT_SEDES,fb.createSede), updateSede:guardWrite(PERMS.EDIT_SEDES,fb.updateSede), setSedeStatus:guardWrite(PERMS.EDIT_SEDES,fb.setSedeStatus), findSedeByCode:fb.findSedeByCode, getNextSedeCode:fb.getNextSedeCode,
@@ -168,14 +175,18 @@ const guardWrite=(perm,fn)=> async (...args)=>{
   addRoute('/notes', ()=> requireAuth(()=> Notes(root)));
 
   // Gobierno
+  addRoute('/gobierno-dashboard', ()=> requireAuth(()=> guardAny([PERMS.VIEW_USERS], ()=> GobiernoDashboard(root, deps), { allowSuperAdmin: true })));
   addRoute('/permissions', ()=> requireAuth(()=> { if(!isSuperAdmin()) return block('Solo SuperAdmin puede ver esto.'); return PermissionsCenter(root, deps); }));
+  addRoute('/permissions-audit', ()=> requireAuth(()=> { if(!isSuperAdmin()) return block('Solo SuperAdmin puede ver esto.'); return PermissionsAudit(root, deps); }));
 
   // Administración
+  addRoute('/administracion-dashboard', ()=> requireAuth(()=> guardAny([PERMS.VIEW_ZONES, PERMS.VIEW_DEPENDENCIES, PERMS.VIEW_SEDES, PERMS.VIEW_QR_SCANNER, PERMS.MANAGE_QR_DEVICES, PERMS.VIEW_CARGOS, PERMS.VIEW_NOVEDADES], ()=> AdministracionDashboard(root, deps))));
   addRoute('/users', ()=> requireAuth(()=> guard(PERMS.VIEW_USERS, ()=> UsersAdmin(root, deps))));
   addRoute('/zones', ()=> requireAuth(()=> guard(PERMS.VIEW_ZONES, ()=> ZonesAdmin(root, deps))));
   addRoute('/dependencies', ()=> requireAuth(()=> guard(PERMS.VIEW_DEPENDENCIES, ()=> DependenciesAdmin(root, deps))));
   addRoute('/sedes', ()=> requireAuth(()=> guard(PERMS.VIEW_SEDES, ()=> SedesAdmin(root, deps))));
   addRoute('/bulk-upload-sedes', ()=> requireAuth(()=> guard(PERMS.EDIT_SEDES, ()=> CargueMasivoSedesAdmin(root, deps))));
+  addRoute('/empleados-dashboard', ()=> requireAuth(()=> guardAny([PERMS.VIEW_EMPLOYEES, PERMS.VIEW_SUPERVISORS, PERMS.UPLOAD_DATA], ()=> EmpleadosDashboard(root, deps))));
   addRoute('/employees', ()=> requireAuth(()=> guard(PERMS.VIEW_EMPLOYEES, ()=> EmployeesAdmin(root, deps))));
   addRoute('/employee-novelties', ()=> requireAuth(()=> guard(PERMS.VIEW_EMPLOYEES, ()=> EmployeeNovelties(root, deps))));
   addRoute('/supernumerarios', ()=> requireAuth(()=> guard(PERMS.VIEW_SUPERNUMERARIOS, ()=> SupernumerariosAdmin(root, deps))));
@@ -185,6 +196,7 @@ const guardWrite=(perm,fn)=> async (...args)=>{
   addRoute('/supervisors', ()=> requireAuth(()=> guard(PERMS.VIEW_SUPERVISORS, ()=> SupervisorsAdmin(root, deps))));
 
   // Operación
+  addRoute('/operacion-dashboard', ()=> requireAuth(()=> guardAny([PERMS.IMPORT_DATA, PERMS.VIEW_QR_DAILY_REGISTRY, PERMS.VIEW_SUPERNUMERARIOS, PERMS.VIEW_IMPORT_HISTORY], ()=> OperacionDashboard(root, deps))));
   addRoute('/imports', ()=> { navigate('/registros-vivo'); return null; });
   addRoute('/whatsapp-live', ()=> { navigate('/registros-vivo'); return null; });
   addRoute('/registros-vivo', ()=> requireAuth(()=> guard(PERMS.IMPORT_DATA, ()=> WhatsAppLive(root, deps))));
@@ -197,6 +209,7 @@ const guardWrite=(perm,fn)=> async (...args)=>{
   addRoute('/absenteeism', ()=> requireAuth(()=> guard(PERMS.MANAGE_ABSENTEEISM, ()=> Absenteeism(root, deps))));
 
   // Consultor
+  addRoute('/reportes-dashboard', ()=> requireAuth(()=> guardAny([PERMS.VIEW_REPORTS_CLIENT, PERMS.MANAGE_ABSENTEEISM, PERMS.VIEW_REPORTS_COMPANY], ()=> ReportesDashboard(root, deps))));
   addRoute('/reports', ()=> requireAuth(()=> {
     if (can(PERMS.VIEW_REPORTS_CLIENT)) { navigate('/reports-daily-history'); return null; }
     if (can(PERMS.VIEW_REPORTS_COMPANY)) { navigate('/reports-consolidated'); return null; }
@@ -209,6 +222,7 @@ const guardWrite=(perm,fn)=> async (...args)=>{
   addRoute('/reports-consolidated', ()=> requireAuth(()=> guard(PERMS.VIEW_REPORTS_COMPANY, ()=> ConsolidatedReports(root, deps))));
 
   // Supervisor/Empleado
+  addRoute('/cargue-masivo-dashboard', ()=> requireAuth(()=> guardAny([PERMS.EDIT_SEDES, PERMS.EDIT_EMPLOYEES], ()=> CargueMasivoDashboard(root, deps))));
   addRoute('/upload', ()=> requireAuth(()=> guard(PERMS.UPLOAD_DATA, ()=> CargarDatos(root, deps))));
 })();
 function getRoutePath(){ return (window.location.hash || '#/login').replace('#', '').split('?')[0]; }
@@ -219,4 +233,9 @@ function isRecoveryHash(){
 }
 function requireAuth(ok){ const { user }=getState(); if(!user){ navigate('/login'); return; } return ok?.(); }
 function guard(perm, ok){ if(!can(perm)) return block('No tienes permiso para acceder a esta sección.'); return ok?.(); }
+function guardAny(perms, ok, options = {}) {
+  if (options?.allowSuperAdmin && isSuperAdmin()) return ok?.();
+  if (!(perms || []).some((perm) => can(perm))) return block('No tienes permiso para acceder a esta sección.');
+  return ok?.();
+}
 function block(text){ const div=document.createElement('div'); div.className='main-card'; div.innerHTML=`<h2 style="margin:0 0 .5rem 0;">RockyDEMO</h2><p>${text}</p>`; root.replaceChildren(div); return null; }

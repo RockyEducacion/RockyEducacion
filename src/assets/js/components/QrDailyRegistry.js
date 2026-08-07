@@ -39,25 +39,30 @@ export const QrDailyRegistry = (mount, deps = {}) => {
         statCard('Pendientes ingreso', 'qrPending', '0'),
         statCard('Alertas celular', 'qrPhoneAlerts', '0')
       ]),
-      el('div', { className: 'mt-2 table-wrap' }, [
-        el('table', { id: 'qrDailyTable', className: 'table wa-live-table' }, [
-          el('thead', {}, [
-            el('tr', {}, [
-              el('th', { 'data-sort': 'documento', style: 'cursor:pointer' }, ['Cedula']),
-              el('th', { 'data-sort': 'nombre', style: 'cursor:pointer' }, ['Nombre']),
-              el('th', { 'data-sort': 'sede', style: 'cursor:pointer' }, ['Sede']),
-              el('th', { 'data-sort': 'entryAt', style: 'cursor:pointer' }, ['Ingreso']),
-              el('th', { 'data-sort': 'exitAt', style: 'cursor:pointer' }, ['Salida']),
-              el('th', { 'data-sort': 'employeePhone', style: 'cursor:pointer' }, ['Celular empleado']),
-              el('th', { 'data-sort': 'entryPhone', style: 'cursor:pointer' }, ['Celular ingreso']),
-              el('th', { 'data-sort': 'exitPhone', style: 'cursor:pointer' }, ['Celular salida']),
-              el('th', { 'data-sort': 'distance', style: 'cursor:pointer' }, ['Distancia']),
-              el('th', { 'data-sort': 'alert', style: 'cursor:pointer' }, ['Alerta'])
+      el('div', { className: 'responsive-records mt-2' }, [
+        el('div', { className: 'table-wrap responsive-table-view' }, [
+          el('table', { id: 'qrDailyTable', className: 'table wa-live-table' }, [
+            el('thead', {}, [
+              el('tr', {}, [
+                el('th', { 'data-sort': 'documento', style: 'cursor:pointer' }, ['Cedula']),
+                el('th', { 'data-sort': 'nombre', style: 'cursor:pointer' }, ['Nombre']),
+                el('th', { 'data-sort': 'sede', style: 'cursor:pointer' }, ['Sede']),
+                el('th', { 'data-sort': 'entryAt', style: 'cursor:pointer' }, ['Ingreso']),
+                el('th', { 'data-sort': 'exitAt', style: 'cursor:pointer' }, ['Salida']),
+                el('th', { 'data-sort': 'employeePhone', style: 'cursor:pointer' }, ['Celular empleado']),
+                el('th', { 'data-sort': 'entryPhone', style: 'cursor:pointer' }, ['Celular ingreso']),
+                el('th', { 'data-sort': 'exitPhone', style: 'cursor:pointer' }, ['Celular salida']),
+                el('th', { 'data-sort': 'distance', style: 'cursor:pointer' }, ['Distancia']),
+                el('th', { 'data-sort': 'alert', style: 'cursor:pointer' }, ['Alerta'])
+              ])
+            ]),
+            el('tbody', { id: 'qrDailyTbody' }, [
+              el('tr', {}, [el('td', { colSpan: 10, className: 'text-muted' }, ['Consulta una fecha para ver registros QR.'])])
             ])
-          ]),
-          el('tbody', { id: 'qrDailyTbody' }, [
-            el('tr', {}, [el('td', { colSpan: 10, className: 'text-muted' }, ['Consulta una fecha para ver registros QR.'])])
           ])
+        ]),
+        el('div', { id: 'qrDailyCards', className: 'record-card-list' }, [
+          el('p', { className: 'text-muted record-card__empty' }, ['Consulta una fecha para ver registros QR.'])
         ])
       ]),
       el('p', { id: 'qrDailyMsg', className: 'text-muted mt-2' }, [' '])
@@ -74,26 +79,29 @@ export const QrDailyRegistry = (mount, deps = {}) => {
         ])
       ]),
       el('div', { id: 'qrPendingEmpty', className: 'text-muted mt-1', style: 'display:none;' }, ['Todos los empleados programados en sedes QR ya registraron ingreso.']),
-      el('div', { id: 'qrPendingWrap', className: 'mt-1 table-wrap' }, [
-        el('table', { id: 'qrPendingTable', className: 'table wa-live-table' }, [
-          el('thead', {}, [
-            el('tr', {}, [
-              el('th', { 'data-pending-sort': 'documento', style: 'cursor:pointer' }, ['Cedula']),
-              el('th', { 'data-pending-sort': 'nombre', style: 'cursor:pointer' }, ['Nombre']),
-              el('th', { 'data-pending-sort': 'telefono', style: 'cursor:pointer' }, ['Telefono']),
-              el('th', { 'data-pending-sort': 'sede', style: 'cursor:pointer' }, ['Sede']),
-              el('th', { 'data-pending-sort': 'dependencia', style: 'cursor:pointer' }, ['Dependencia']),
-              el('th', { 'data-pending-sort': 'zona', style: 'cursor:pointer' }, ['Zona'])
-            ])
-          ]),
-          el('tbody', { id: 'qrPendingTbody' })
-        ])
+      el('div', { id: 'qrPendingWrap', className: 'responsive-records mt-1' }, [
+        el('div', { className: 'table-wrap responsive-table-view' }, [
+          el('table', { id: 'qrPendingTable', className: 'table wa-live-table' }, [
+            el('thead', {}, [
+              el('tr', {}, [
+                el('th', { 'data-pending-sort': 'documento', style: 'cursor:pointer' }, ['Cedula']),
+                el('th', { 'data-pending-sort': 'nombre', style: 'cursor:pointer' }, ['Nombre']),
+                el('th', { 'data-pending-sort': 'telefono', style: 'cursor:pointer' }, ['Telefono']),
+                el('th', { 'data-pending-sort': 'sede', style: 'cursor:pointer' }, ['Sede']),
+                el('th', { 'data-pending-sort': 'dependencia', style: 'cursor:pointer' }, ['Dependencia']),
+                el('th', { 'data-pending-sort': 'zona', style: 'cursor:pointer' }, ['Zona'])
+              ])
+            ]),
+            el('tbody', { id: 'qrPendingTbody' })
+          ])
+        ]),
+        el('div', { id: 'qrPendingCards', className: 'record-card-list' }, [])
       ])
     ])
   ]);
 
-  const recordsPaginator = createTablePagination(ui, { id: 'qrDailyRecords', after: '#qrDailyTable', onChange: render });
-  const pendingPaginator = createTablePagination(ui, { id: 'qrDailyPending', after: '#qrPendingTable', onChange: render });
+  const recordsPaginator = createTablePagination(ui, { id: 'qrDailyRecords', after: '#qrDailyCards', onChange: render });
+  const pendingPaginator = createTablePagination(ui, { id: 'qrDailyPending', after: '#qrPendingCards', onChange: render });
 
   function statCard(label, id, value) {
     return el('article', { className: 'wa-stat card' }, [
@@ -230,9 +238,11 @@ export const QrDailyRegistry = (mount, deps = {}) => {
 
   function renderRecords(filteredRecords) {
     const tbody = qs('#qrDailyTbody', ui);
+    const cards = qs('#qrDailyCards', ui);
     const pageRows = recordsPaginator.slice(filteredRecords);
     if (!pageRows.length) {
       tbody.replaceChildren(el('tr', {}, [el('td', { colSpan: 10, className: 'text-muted' }, ['Sin registros QR para los filtros actuales.'])]));
+      cards.replaceChildren(el('p', { className: 'text-muted record-card__empty' }, ['Sin registros QR para los filtros actuales.']));
       return;
     }
     tbody.replaceChildren(...pageRows.map((row) => el('tr', { className: row.phoneDifferent ? 'table-row-warning' : '' }, [
@@ -247,15 +257,32 @@ export const QrDailyRegistry = (mount, deps = {}) => {
       el('td', {}, [distanceLabel(row)]),
       el('td', {}, [alertBadge(row)])
     ])));
+    cards.replaceChildren(...pageRows.map((row) => recordCard(row, {
+      title: row.nombre || '-',
+      subtitle: `Cedula: ${row.documento || '-'}`,
+      badge: alertBadge(row),
+      warning: row.phoneDifferent,
+      meta: [
+        ['Sede', row.sedeNombre || row.sedeCodigo || '-'],
+        ['Ingreso', formatEntry(row)],
+        ['Salida', formatHour(row.exitAt)],
+        ['Celular empleado', phone(row.employeePhone)],
+        ['Celular ingreso', phone(row.entryPhone)],
+        ['Celular salida', phone(row.exitPhone)],
+        ['Distancia', distanceLabel(row)]
+      ]
+    })));
   }
 
   function renderPending(filteredPending) {
     const tbody = qs('#qrPendingTbody', ui);
+    const cards = qs('#qrPendingCards', ui);
     const pageRows = pendingPaginator.slice(filteredPending);
     const empty = qs('#qrPendingEmpty', ui);
     const wrap = qs('#qrPendingWrap', ui);
     if (!pageRows.length) {
       tbody.replaceChildren();
+      cards.replaceChildren();
       if (empty) {
         empty.textContent = pendingZone === 'all'
           ? 'Todos los empleados programados en sedes QR ya registraron ingreso.'
@@ -274,12 +301,39 @@ export const QrDailyRegistry = (mount, deps = {}) => {
         el('td', {}, [row.dependenciaNombre || row.dependenciaCodigo || '-']),
         el('td', {}, [row.zonaNombre || row.zonaCodigo || '-'])
       ])));
+      cards.replaceChildren(...pageRows.map((row) => recordCard(row, {
+        title: row.nombre || '-',
+        subtitle: `Cedula: ${row.documento || '-'}`,
+        badge: el('span', { className: 'badge' }, [row.zonaNombre || row.zonaCodigo || 'Pendiente']),
+        meta: [
+          ['Telefono', phone(row.telefono)],
+          ['Sede', row.sedeNombre || row.sedeCodigo || '-'],
+          ['Dependencia', row.dependenciaNombre || row.dependenciaCodigo || '-'],
+          ['Zona', row.zonaNombre || row.zonaCodigo || '-']
+        ]
+      })));
     }
     const total = pendingRows.length;
     const visible = filteredPending.length;
     qs('#qrPendingSummary', ui).textContent = pendingZone === 'all'
       ? `${total} empleado${total === 1 ? '' : 's'} pendiente${total === 1 ? '' : 's'}`
       : `${visible} de ${total} empleado${total === 1 ? '' : 's'} pendiente${total === 1 ? '' : 's'}`;
+  }
+
+  function recordCard(row, { title, subtitle, badge, meta = [], warning = false }) {
+    return el('article', { className: `record-card ${warning ? 'table-row-warning' : ''}`.trim() }, [
+      el('div', { className: 'record-card__header' }, [
+        el('div', { className: 'record-card__identity' }, [
+          el('strong', { className: 'record-card__title' }, [title]),
+          el('span', { className: 'record-card__subtitle' }, [subtitle])
+        ]),
+        badge || el('span', { className: 'badge' }, ['QR'])
+      ]),
+      el('dl', { className: 'record-card__meta' }, meta.map(([label, value]) => el('div', { className: 'record-card__meta-item' }, [
+        el('dt', {}, [label]),
+        el('dd', {}, Array.isArray(value) ? value : [value || '-'])
+      ])))
+    ]);
   }
 
   function render() {

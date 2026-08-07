@@ -27,19 +27,22 @@ export const NovedadesAdmin=(mount,deps={})=>{
         el('div',{},[ el('label',{className:'label'},['Reemplazo']), el('select',{id:'selReemp',className:'select'},[ el('option',{value:''},['Todos']), el('option',{value:'si'},['SI']), el('option',{value:'no'},['NO']) ]) ]),
         el('div',{},[ el('label',{className:'label'},['Nomina']), el('select',{id:'selNomina',className:'select'},[ el('option',{value:''},['Todos']), el('option',{value:'si'},['SI']), el('option',{value:'no'},['NO']) ]) ]),
       ]),
-      el('div',{className:'mt-2 table-wrap'},[
-        el('table',{className:'table',id:'tbl'},[
-          el('thead',{},[ el('tr',{},[
-            el('th',{'data-sort':'codigo',style:'cursor:pointer'},['Codigo']),
-            el('th',{'data-sort':'codigoNovedad',style:'cursor:pointer'},['Codigo novedad']),
-            el('th',{'data-sort':'nombre',style:'cursor:pointer'},['Nombre']),
-            el('th',{'data-sort':'reemplazo',style:'cursor:pointer'},['Reemplazo']),
-            el('th',{'data-sort':'nomina',style:'cursor:pointer'},['Nomina']),
-            el('th',{'data-sort':'estado',style:'cursor:pointer'},['Estado']),
-            el('th',{},['Acciones'])
-          ]) ]),
-          el('tbody',{})
-        ])
+      el('div',{className:'responsive-records mt-2'},[
+        el('div',{className:'table-wrap responsive-table-view'},[
+          el('table',{className:'table',id:'tbl'},[
+            el('thead',{},[ el('tr',{},[
+              el('th',{'data-sort':'codigo',style:'cursor:pointer'},['Codigo']),
+              el('th',{'data-sort':'codigoNovedad',style:'cursor:pointer'},['Codigo novedad']),
+              el('th',{'data-sort':'nombre',style:'cursor:pointer'},['Nombre']),
+              el('th',{'data-sort':'reemplazo',style:'cursor:pointer'},['Reemplazo']),
+              el('th',{'data-sort':'nomina',style:'cursor:pointer'},['Nomina']),
+              el('th',{'data-sort':'estado',style:'cursor:pointer'},['Estado']),
+              el('th',{},['Acciones'])
+            ]) ]),
+            el('tbody',{})
+          ])
+        ]),
+        el('div',{id:'novedadCards',className:'record-card-list'},[])
       ]),
       el('p',{id:'msg',className:'text-muted mt-2'},[' '])
     ])
@@ -116,9 +119,9 @@ export const NovedadesAdmin=(mount,deps={})=>{
     }catch(e){ msg.textContent='Error: '+(e?.message||e); }
   });
 
-  let snapshot=[]; const tbody=ui.querySelector('tbody');
+  let snapshot=[]; const tbody=ui.querySelector('tbody'); const cards=qs('#novedadCards',ui);
   let sortKey=''; let sortDir=1;
-  const paginator=createTablePagination(ui,{id:'novedades',after:'#tabList .table-wrap',onChange:render});
+  const paginator=createTablePagination(ui,{id:'novedades',after:'#tabList .responsive-records',onChange:render});
   const search=()=> qs('#txtSearch',ui).value.trim().toLowerCase();
   const filterStatus=()=> qs('#selStatus',ui).value;
   const filterReemp=()=> qs('#selReemp',ui).value;
@@ -139,6 +142,7 @@ export const NovedadesAdmin=(mount,deps={})=>{
     const sorted=sortData(data);
     const pageRows=paginator.slice(sorted);
     tbody.replaceChildren(...pageRows.map(n=> row(n)));
+    cards.replaceChildren(...(pageRows.length?pageRows.map(n=> recordCard(n,{title:n.nombre||'-',subtitle:`Codigo novedad: ${n.codigoNovedad||'-'}`,meta:[['Codigo',n.codigo||'-'],['Reemplazo',(n.reemplazo||'').toUpperCase()||'-'],['Nomina',(n.nomina||'').toUpperCase()||'-']],actions:actionsCell(n)})):[el('p',{className:'text-muted record-card__empty'},['Sin novedades para mostrar.'])]));
     const msg=qs('#msg',ui); if(msg) msg.textContent=`Total registros filtrados: ${data.length}`;
     updateSortIndicators();
   }
@@ -167,7 +171,7 @@ export const NovedadesAdmin=(mount,deps={})=>{
   function actionsCell(n){
     const box=el('div',{className:'row-actions'},[]);
     const btnEdit=el('button',{className:'btn btn--icon',title:'Editar'},['\u270E']);
-    btnEdit.addEventListener('click',()=>{ const tr=tbody.querySelector(`tr[data-id="${n.id}"]`); if(tr) startEdit(tr,n); });
+    btnEdit.addEventListener('click',()=> openEditModal(n));
     const btnToggle=el('button',{className:'btn btn--icon '+(n.estado==='activo'?'btn--danger':'' ),title:n.estado==='activo'?'Desactivar':'Activar','aria-label':n.estado==='activo'?'Desactivar':'Activar'},[ n.estado==='activo'?'\u23FB':'\u21BA' ]);
     btnToggle.addEventListener('click',async()=>{
       const target=n.estado==='activo'?'inactivo':'activo';
@@ -184,6 +188,37 @@ export const NovedadesAdmin=(mount,deps={})=>{
     btnInfo.addEventListener('click',()=>{ const info=auditInfoData(n); showInfoModal('Informacion del registro',[`Evento: ${info.action}`,`Usuario: ${info.user}`,`Fecha: ${info.date}`]); });
     box.append(btnEdit,btnToggle,btnInfo); return box;
   }
+  async function openEditModal(n){
+    const modal=await showActionModal({
+      title:'Editar novedad',
+      message:`Novedad: ${n.nombre||'-'}`,
+      confirmText:'Guardar cambios',
+      fields:[
+        {id:'code',label:'Codigo',type:'text',required:true,value:n.codigo||''},
+        {id:'codeRef',label:'Codigo novedad',type:'text',required:true,value:n.codigoNovedad||''},
+        {id:'name',label:'Nombre',type:'text',required:true,value:n.nombre||''},
+        {id:'reemplazo',label:'Reemplazo',type:'select',required:true,value:n.reemplazo||'',options:[{value:'si',label:'SI'},{value:'no',label:'NO'}]},
+        {id:'nomina',label:'Nomina',type:'select',required:true,value:n.nomina||'',options:[{value:'si',label:'SI'},{value:'no',label:'NO'}]},
+        { id:'detail', label:'Detalle de la modificacion', type:'textarea', required:true, placeholder:'Describe brevemente el cambio realizado' }
+      ]
+    });
+    if(!modal.confirmed) return;
+    const newCode=String(modal.values.code||'').trim();
+    const newCodeRef=String(modal.values.codeRef||'').trim();
+    const newName=String(modal.values.name||'').trim();
+    const newReemp=String(modal.values.reemplazo||'').trim();
+    const newNomina=String(modal.values.nomina||'').trim();
+    if(!newCode||!newCodeRef||!newName) return alert('Completa codigo, codigo novedad y nombre.');
+    if(!newReemp) return alert('Selecciona reemplazo.');
+    if(!newNomina) return alert('Selecciona nomina.');
+    try{
+      if(newCode!==n.codigo){ const dup=await deps.findNovedadByCode?.(newCode); if(dup && dup.id!==n.id) return alert('Ya existe una novedad con ese codigo.'); }
+      if(newCodeRef!==n.codigoNovedad){ const dupRef=await deps.findNovedadByCodigoNovedad?.(newCodeRef); if(dupRef && dupRef.id!==n.id) return alert('Ya existe una novedad con ese codigo de novedad.'); }
+      await deps.updateNovedad?.(n.id,{ codigo:newCode, codigoNovedad:newCodeRef, nombre:newName, reemplazo:newReemp, nomina:newNomina });
+      await deps.addAuditLog?.({ targetType:'novedad', targetId:n.id, action:'update_novedad', before:{ codigo:n.codigo||null, codigoNovedad:n.codigoNovedad||null, nombre:n.nombre||null, reemplazo:n.reemplazo||null, nomina:n.nomina||null }, after:{ codigo:newCode||null, codigoNovedad:newCodeRef||null, nombre:newName||null, reemplazo:newReemp||null, nomina:newNomina||null }, note: modal.values.detail||null });
+    }catch(e){ alert('Error: '+(e?.message||e)); }
+  }
+  function recordCard(item,{title,subtitle,meta=[],actions}){ return el('article',{className:'record-card'},[ el('div',{className:'record-card__header'},[ el('div',{className:'record-card__identity'},[ el('strong',{className:'record-card__title'},[title]), el('span',{className:'record-card__subtitle'},[subtitle]) ]), statusBadge(item.estado) ]), el('dl',{className:'record-card__meta'},meta.map(([label,value])=> el('div',{className:'record-card__meta-item'},[el('dt',{},[label]),el('dd',{},[value||'-'])]))), el('div',{className:'record-card__actions'},[actions]) ]); }
   function startEdit(tr,n){
     const cur={ codigo:n.codigo||'', codigoNovedad:n.codigoNovedad||'', nombre:n.nombre||'', reemplazo:n.reemplazo||'', nomina:n.nomina||'' };
     const tds=tr.querySelectorAll('td');

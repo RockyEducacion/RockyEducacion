@@ -1,8 +1,7 @@
-import { el, qs } from '../utils/dom.js';
+import { el } from '../utils/dom.js';
 import { isSuperAdmin } from '../permissions.js';
 import { ALL_ROLES, ROLE_LABELS, ROLES, PERMS, permsForRole } from '../roles.js';
 import { getState } from '../state.js';
-import { createTablePagination } from '../utils/pagination.js';
 
 const PERM_KEYS = [
   PERMS.MANAGE_PERMISSIONS,
@@ -118,55 +117,15 @@ export const PermissionsCenter = (mount, deps = {}) => {
     return;
   }
 
-  let unAudit = null;
-  let currentTab = 'roles';
   let selectedRole = ROLES.ADMIN;
-  let userTarget = null;
-  let userOverrides = {};
-  let originalOverrides = {};
-  let auditItems = [];
-  let auditPaginator = null;
 
   const ui = el('section', { className: 'main-card' }, [
     el('h2', {}, ['Centro de Permisos']),
-    el('div', { className: 'tabs' }, [tabBtn('Por rol', 'roles'), tabBtn('Por usuario', 'users'), tabBtn('Auditoria', 'audit')]),
-    el('div', { id: 'tabContent', className: 'mt-2' }, [])
+    renderRolesTab()
   ]);
 
-  function tabBtn(text, key) {
-    const b = el('button', { className: 'tab' + (currentTab === key ? ' is-active' : '') }, [text]);
-    b.addEventListener('click', () => {
-      currentTab = key;
-      renderTab();
-    });
-    return b;
-  }
-
-  function clearAuditStream() {
-    if (typeof unAudit === 'function') {
-      try {
-        unAudit();
-      } catch {}
-      unAudit = null;
-    }
-  }
-
-  function updateTabUi() {
-    const idx = { roles: 0, users: 1, audit: 2 }[currentTab];
-    ui.querySelectorAll('.tab').forEach((b) => b.classList.remove('is-active'));
-    ui.querySelectorAll('.tab')[idx]?.classList.add('is-active');
-  }
-
-  function renderTab() {
-    if (currentTab !== 'audit') clearAuditStream();
-    const c = qs('#tabContent', ui);
-    if (currentTab === 'roles') c.replaceChildren(renderRolesTab());
-    else if (currentTab === 'users') c.replaceChildren(renderUsersTab());
-    else c.replaceChildren(renderAuditTab());
-    updateTabUi();
-  }
-
   function renderRolesTab() {
+    const panel = el('div', {}, []);
     const roleSel = el(
       'select',
       { className: 'select', style: 'max-width:260px' },
@@ -174,7 +133,7 @@ export const PermissionsCenter = (mount, deps = {}) => {
     );
     roleSel.addEventListener('change', () => {
       selectedRole = roleSel.value;
-      renderTab();
+      panel.replaceWith(renderRolesTab());
     });
 
     const s = getState();
@@ -222,7 +181,8 @@ export const PermissionsCenter = (mount, deps = {}) => {
       )
     ]);
 
-    return el('div', {}, [el('label', { className: 'label' }, ['Selecciona un rol']), roleSel, warnSA, grid, actions].filter(Boolean));
+    panel.replaceChildren(el('label', { className: 'label' }, ['Selecciona un rol']), roleSel, ...[warnSA, grid, actions].filter(Boolean));
+    return panel;
   }
 
   function permCheckbox(key, val, onChange, disabled) {
@@ -238,160 +198,6 @@ export const PermissionsCenter = (mount, deps = {}) => {
     return w;
   }
 
-  function renderUsersTab() {
-    const emailInput = el('input', { className: 'input', placeholder: 'Correo del usuario' });
-    const btn = el('button', { className: 'btn mt-1' }, ['Cargar usuario']);
-    const box = el('div', { className: 'mt-2' }, []);
-    btn.addEventListener('click', async () => {
-      try {
-        const res = await deps.findUserByEmail?.(emailInput.value.trim());
-        if (!res) {
-          box.replaceChildren(el('p', { className: 'error' }, ['Usuario no encontrado']));
-          return;
-        }
-        userTarget = res;
-        const ov = (await deps.getUserOverrides?.(userTarget.uid)) || {};
-        userOverrides = normalizePermissionRecord(ov, null);
-        originalOverrides = JSON.parse(JSON.stringify(userOverrides));
-        box.replaceChildren(renderUserOverrides());
-      } catch (e) {
-        box.replaceChildren(el('p', { className: 'error' }, ['Error: ', e?.message || e]));
-      }
-    });
-    return el('div', {}, [el('label', { className: 'label' }, ['Buscar usuario por correo']), emailInput, btn, box]);
-  }
-
-  function renderUserOverrides() {
-    const current = JSON.parse(JSON.stringify(userOverrides));
-    const grid = el(
-      'div',
-      { className: 'perms-grid mt-2' },
-      PERM_KEYS.map((k) => permCheckbox(k, current[k] === true, (ch) => (current[k] = ch), false))
-    );
-    const info = el('p', { className: 'text-muted mt-1' }, [`Usuario: ${userTarget.email} (${userTarget.displayName || '-'})`]);
-    const actions = el('div', { className: 'mt-2' }, [
-      el(
-        'button',
-        {
-          className: 'btn btn--primary',
-          onclick: async () => {
-            if (!window.confirm(`Guardar overrides para ${userTarget.email}?`)) return;
-            try {
-              const before = originalOverrides;
-              const after = current;
-              await deps.setUserOverrides?.(userTarget.uid, after);
-              await deps.addAuditLog?.({
-                targetType: 'user',
-                targetId: userTarget.uid,
-                action: 'update_user_overrides',
-                before,
-                after
-              });
-              originalOverrides = JSON.parse(JSON.stringify(after));
-              userOverrides = JSON.parse(JSON.stringify(after));
-              alert('Overrides guardados.');
-            } catch (e) {
-              alert('Error: ' + (e?.message || e));
-            }
-          }
-        },
-        ['Guardar overrides']
-      ),
-      el(
-        'button',
-        {
-          className: 'btn btn--danger',
-          style: 'margin-left:.5rem',
-          onclick: async () => {
-            if (!window.confirm(`Quitar TODOS los overrides de ${userTarget.email}?`)) return;
-            try {
-              const before = originalOverrides;
-              await deps.clearUserOverrides?.(userTarget.uid);
-              await deps.addAuditLog?.({
-                targetType: 'user',
-                targetId: userTarget.uid,
-                action: 'clear_user_overrides',
-                before
-              });
-              originalOverrides = {};
-              userOverrides = {};
-              alert('Overrides eliminados.');
-            } catch (e) {
-              alert('Error: ' + (e?.message || e));
-            }
-          }
-        },
-        ['Quitar overrides']
-      )
-    ]);
-    return el('div', {}, [info, grid, actions]);
-  }
-
-  function renderAuditTab() {
-    const box = el('div', { className: 'mt-1' }, [el('p', { className: 'text-muted' }, ['Ultimos cambios de permisos'])]);
-    const list = el('div', { id: 'auditList', className: 'mt-1' }, []);
-    box.append(list);
-    clearAuditStream();
-    auditPaginator = null;
-    unAudit =
-      deps.streamAuditLogs?.((items) => {
-        auditItems = items || [];
-        renderAuditPage();
-      }) || null;
-    return box;
-  }
-
-  function renderAuditPage() {
-    const list = qs('#auditList', ui);
-    if (!list) return;
-    if (!auditPaginator || !ui.contains(auditPaginator.controls)) {
-      auditPaginator = createTablePagination(ui, { id: 'permissionsAudit', after: '#auditList', onChange: renderAuditPage });
-    }
-    const pageItems = auditPaginator.slice(auditItems);
-    list.replaceChildren(...pageItems.map((it) => renderAuditItem(it)));
-  }
-
-  function renderAuditItem(it) {
-    const date = it.ts?.toDate ? it.ts.toDate() : it.ts || new Date();
-    const note = String(it.note || '').trim();
-    const beforeText = formatAuditValue(it.before);
-    const afterText = formatAuditValue(it.after);
-    return el('div', { className: 'card', style: 'margin-top:.5rem' }, [
-      el('div', {}, [el('strong', {}, [it.action || 'accion']), ' - ', new Date(date).toLocaleString()]),
-      el('div', { className: 'mt-1 text-muted' }, [`Actor: ${it.actorEmail || it.actorUid || '-'}`]),
-      el('div', { className: 'mt-1' }, [`Target: ${it.targetType}/${it.targetId}`]),
-      el('div', { className: 'mt-1' }, [`Observacion: ${note || '-'}`]),
-      el('details', { className: 'mt-1' }, [
-        el('summary', {}, ['Ver cambios (Antes / Despues)']),
-        el('div', { className: 'mt-1' }, [
-          el('div', {}, [el('strong', {}, ['Antes'])]),
-          el(
-            'pre',
-            { className: 'mt-1', style: 'white-space:pre-wrap;word-break:break-word;background:#f7f7f7;padding:.5rem;border-radius:.375rem' },
-            [beforeText]
-          ),
-          el('div', { className: 'mt-1' }, [el('strong', {}, ['Despues'])]),
-          el(
-            'pre',
-            { className: 'mt-1', style: 'white-space:pre-wrap;word-break:break-word;background:#f7f7f7;padding:.5rem;border-radius:.375rem' },
-            [afterText]
-          )
-        ])
-      ])
-    ]);
-  }
-
-  function formatAuditValue(value) {
-    if (value == null) return '-';
-    if (typeof value === 'string') return value.trim() || '-';
-    try {
-      return JSON.stringify(value, null, 2);
-    } catch {
-      return String(value);
-    }
-  }
-
-  renderTab();
   mount.replaceChildren(ui);
-  return () => clearAuditStream();
+  return () => {};
 };

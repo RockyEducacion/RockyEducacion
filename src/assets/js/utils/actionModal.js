@@ -7,7 +7,8 @@ export async function showActionModal({
   message = '',
   confirmText = 'Confirmar',
   cancelText = 'Cancelar',
-  fields = []
+  fields = [],
+  closeOnBackdrop = false
 } = {}) {
   closeActionModal();
 
@@ -140,7 +141,7 @@ export async function showActionModal({
     };
 
     const onBackdrop = (ev) => {
-      if (ev.target === overlay) onCancel();
+      if (closeOnBackdrop && ev.target === overlay) onCancel();
     };
     const onEsc = (ev) => {
       if (ev.key === 'Escape') onCancel();

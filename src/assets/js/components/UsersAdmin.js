@@ -27,11 +27,14 @@ export const UsersAdmin = (mount, deps = {}) => {
       el('div', {}, [el('label', { className: 'label' }, ['Estado']), el('select', { id: 'statusFilter', className: 'select' }, [])]),
       el('span', { className: 'right text-muted' }, [canEditUsers ? 'Administra rol y estado de acceso.' : 'Modo consulta: sin permisos de edicion.'])
     ]),
-    el('div', { className: 'mt-2 table-wrap' }, [
-      el('table', { className: 'table', id: 'tbl' }, [
-        el('thead', {}, [el('tr', {}, [el('th', {}, ['Usuario']), el('th', {}, ['Correo']), el('th', {}, ['Rol']), el('th', {}, ['Estado']), el('th', {}, ['Acciones'])])]),
-        el('tbody', {})
-      ])
+    el('div', { className: 'users-results mt-2' }, [
+      el('div', { className: 'table-wrap users-table-view' }, [
+        el('table', { className: 'table', id: 'tbl' }, [
+          el('thead', {}, [el('tr', {}, [el('th', {}, ['Usuario']), el('th', {}, ['Correo']), el('th', {}, ['Rol']), el('th', {}, ['Estado']), el('th', {}, ['Acciones'])])]),
+          el('tbody', {})
+        ])
+      ]),
+      el('div', { id: 'userCards', className: 'users-card-list' }, [])
     ]),
     el('p', { id: 'msg', className: 'mt-2 text-muted' }, [' '])
   ]);
@@ -43,7 +46,8 @@ export const UsersAdmin = (mount, deps = {}) => {
 
   const msg = qs('#msg', ui);
   const tbody = qs('tbody', ui);
-  const paginator = createTablePagination(ui, { id: 'users', after: '.table-wrap', onChange: renderRows });
+  const cards = qs('#userCards', ui);
+  const paginator = createTablePagination(ui, { id: 'users', after: '.users-results', onChange: renderRows });
   let data = [];
 
   function statusOf(u) {
@@ -96,6 +100,37 @@ export const UsersAdmin = (mount, deps = {}) => {
     const next = String(sel.value || '').trim();
     if (!next || next === prev) return;
     try {
+      await updateUserRole(user, prev, next);
+    } catch {
+      sel.value = prev;
+    }
+  }
+
+  async function changeRole(user) {
+    const prev = user.role || 'empleado';
+    const modal = await showActionModal({
+      title: 'Cambiar rol',
+      message: `Usuario: ${user.email || user.uid}`,
+      confirmText: 'Guardar rol',
+      fields: [{
+        id: 'role',
+        label: 'Rol',
+        type: 'select',
+        required: true,
+        value: prev,
+        options: ALL_ROLES.map((role) => ({ value: role, label: roleLabel(role) }))
+      }]
+    });
+    if (!modal?.confirmed) return;
+    const next = String(modal.values.role || '').trim();
+    if (!next || next === prev) return;
+    try {
+      await updateUserRole(user, prev, next);
+    } catch {}
+  }
+
+  async function updateUserRole(user, prev, next) {
+    try {
       await deps.setUserRole?.(user.uid, next);
       await deps.addAuditLog?.({
         targetType: 'user',
@@ -106,8 +141,8 @@ export const UsersAdmin = (mount, deps = {}) => {
       });
       setMsg(`Rol actualizado para ${user.email || user.uid}: ${next}`);
     } catch (e) {
-      sel.value = prev;
       setMsg(`Error al actualizar rol: ${e?.message || e}`);
+      throw e;
     }
   }
 
@@ -133,103 +168,91 @@ export const UsersAdmin = (mount, deps = {}) => {
     setMsg(`Usuario ${target === 'inactivo' ? 'desactivado' : 'activado'}: ${user.email || user.uid}`);
   }
 
-  async function deleteUser(user) {
-    const modal = await showActionModal({
-      title: 'Eliminar usuario',
-      message: `Esta accion marca el usuario como eliminado y bloquea su acceso. Usuario: ${user.email || user.uid}`,
-      confirmText: 'Eliminar',
-      fields: [{ id: 'detail', label: 'Motivo', type: 'textarea', required: true, placeholder: 'Explica por que se elimina este usuario' }]
-    });
-    if (!modal.confirmed) return;
-    await deps.softDeleteUser?.(user.uid);
-    await deps.addAuditLog?.({
-      targetType: 'user',
-      targetId: user.uid,
-      action: 'soft_delete_user',
-      before: { estado: statusOf(user), role: user.role || 'empleado' },
-      after: { estado: 'eliminado', role: 'empleado' },
-      note: modal.values.detail || null
-    });
-    setMsg(`Usuario eliminado: ${user.email || user.uid}`);
-  }
-
   function actionsCell(u) {
     const box = el('div', { className: 'row-actions' }, []);
-    const currentUid = getState()?.user?.uid || '';
-    const isSelf = String(currentUid || '') === String(u.uid || '');
-    const st = statusOf(u);
-    const isSupervisor = String(u.role || '').trim().toLowerCase() === 'supervisor';
+    const btnMore = el('button', { className: 'btn btn--icon', type: 'button', title: 'Mas opciones', 'aria-label': 'Mas opciones' }, ['\u22EF']);
+    btnMore.addEventListener('click', () => openMoreOptionsModal(u));
+    box.append(btnMore);
 
-    if (st !== 'eliminado' && canEditUsers && isSupervisor) {
-      const btnSyncSupervisor = el('button', {
-        className: 'btn btn--icon',
-        title: 'Sincronizar acceso supervisor',
-        'aria-label': 'Sincronizar acceso supervisor'
-      }, ['S']);
-      btnSyncSupervisor.addEventListener('click', async () => {
-        try {
-          await deps.syncSupervisorAccessForUser?.(u.uid);
-          await deps.addAuditLog?.({
-            targetType: 'user',
-            targetId: u.uid,
-            action: 'sync_supervisor_access',
-            before: {
-              supervisorEligible: u.supervisorEligible === true,
-              zonaCodigo: u.zonaCodigo || null,
-              zonasPermitidas: u.zonasPermitidas || []
-            }
-          });
-          setMsg(`Acceso supervisor sincronizado: ${u.email || u.uid}`);
-        } catch (e) {
-          setMsg(`Error al sincronizar supervisor: ${e?.message || e}`);
-        }
-      });
-      box.append(btnSyncSupervisor);
-    }
-
-    if (st !== 'eliminado' && canEditUsers) {
-      const btnToggle = el(
-        'button',
-        { className: `btn btn--icon ${st === 'activo' ? 'btn--danger' : ''}`, title: st === 'activo' ? 'Desactivar' : 'Activar', 'aria-label': st === 'activo' ? 'Desactivar' : 'Activar' },
-        [st === 'activo' ? '\u23FB' : '\u21BA']
-      );
-      btnToggle.disabled = isSelf;
-      btnToggle.addEventListener('click', async () => {
-        try {
-          await changeStatus(u, st === 'activo' ? 'inactivo' : 'activo');
-        } catch (e) {
-          setMsg(`Error al actualizar estado: ${e?.message || e}`);
-        }
-      });
-      box.append(btnToggle);
-    }
-
-    const btnDelete = el('button', { className: 'btn btn--icon btn--danger', title: 'Eliminar', 'aria-label': 'Eliminar' }, ['\u2716']);
-    btnDelete.disabled = isSelf || st === 'eliminado' || !canEditUsers;
-    if (canEditUsers) {
-      btnDelete.addEventListener('click', async () => {
-        try {
-          await deleteUser(u);
-        } catch (e) {
-          setMsg(`Error al eliminar usuario: ${e?.message || e}`);
-        }
-      });
-    }
-    box.append(btnDelete);
-
-    const btnInfo = el('button', { className: 'btn btn--icon', title: 'Ver informacion', 'aria-label': 'Ver informacion' }, ['\u24D8']);
+    const btnInfo = el('button', { className: 'btn btn--icon', type: 'button', title: 'Ver informacion', 'aria-label': 'Ver informacion' }, ['\u24D8']);
     btnInfo.addEventListener('click', () => showInfoModal('Informacion del usuario', infoData(u)));
     box.append(btnInfo);
 
     return box;
   }
 
-  function roleSelect(u) {
+  async function openMoreOptionsModal(u) {
+    const currentUid = getState()?.user?.uid || '';
+    const isSelf = String(currentUid || '') === String(u.uid || '');
     const st = statusOf(u);
+    const isSupervisor = String(u.role || '').trim().toLowerCase() === 'supervisor';
+    const options = [{ value: '', label: 'Seleccione...' }];
+    if (canEditUsers) {
+      options.push({ value: 'change_role', label: 'Cambiar rol' });
+    }
+    if (st !== 'eliminado' && canEditUsers && isSupervisor) {
+      options.push({ value: 'sync_supervisor', label: 'Sincronizar acceso supervisor' });
+    }
+    if (st !== 'eliminado' && canEditUsers && !isSelf) {
+      options.push({ value: 'toggle_status', label: st === 'activo' ? 'Desactivar usuario' : 'Activar usuario' });
+    } else if (st === 'eliminado' && canEditUsers && !isSelf) {
+      options.push({ value: 'toggle_status', label: 'Activar usuario' });
+    }
+    if (options.length === 1) {
+      showInfoModal('Mas opciones', ['No hay acciones disponibles para este usuario.']);
+      return;
+    }
+
+    const modal = await showActionModal({
+      title: 'Mas opciones',
+      message: `Usuario: ${u.email || u.uid || '-'}`,
+      confirmText: 'Continuar',
+      fields: [{
+        id: 'action',
+        label: 'Accion',
+        type: 'select',
+        required: true,
+        options
+      }]
+    });
+    if (!modal?.confirmed) return;
+    if (modal.values.action === 'change_role') return changeRole(u);
+    if (modal.values.action === 'sync_supervisor') return syncSupervisorAccess(u);
+    if (modal.values.action === 'toggle_status') return toggleUserStatus(u, st);
+  }
+
+  async function syncSupervisorAccess(u) {
+    try {
+      await deps.syncSupervisorAccessForUser?.(u.uid);
+      await deps.addAuditLog?.({
+        targetType: 'user',
+        targetId: u.uid,
+        action: 'sync_supervisor_access',
+        before: {
+          supervisorEligible: u.supervisorEligible === true,
+          zonaCodigo: u.zonaCodigo || null,
+          zonasPermitidas: u.zonasPermitidas || []
+        }
+      });
+      setMsg(`Acceso supervisor sincronizado: ${u.email || u.uid}`);
+    } catch (e) {
+      setMsg(`Error al sincronizar supervisor: ${e?.message || e}`);
+    }
+  }
+
+  async function toggleUserStatus(u, st) {
+    try {
+      await changeStatus(u, st === 'activo' ? 'inactivo' : 'activo');
+    } catch (e) {
+      setMsg(`Error al actualizar estado: ${e?.message || e}`);
+    }
+  }
+
+  function roleSelect(u) {
     const currentRole = u.role || 'empleado';
     const sel = el(
       'select',
-      { className: 'select', disabled: st === 'eliminado' || !canEditUsers },
+      { className: 'select', disabled: !canEditUsers },
       ALL_ROLES.map((r) => el('option', { value: r, selected: currentRole === r }, [roleLabel(r)]))
     );
     if (canEditUsers) sel.addEventListener('change', () => handleRoleChange(u, sel));
@@ -249,6 +272,34 @@ export const UsersAdmin = (mount, deps = {}) => {
     return tr;
   }
 
+  function renderUserCard(u) {
+    const st = statusOf(u);
+    const role = u.role || 'empleado';
+    const lastChange = formatDate(u.lastModifiedAt || u.createdAt);
+    return el('article', { className: 'user-card' }, [
+      el('div', { className: 'user-card__header' }, [
+        el('div', { className: 'user-card__identity' }, [
+          el('strong', { className: 'user-card__name' }, [u.displayName || '-']),
+          el('span', { className: 'user-card__email' }, [u.email || '-'])
+        ]),
+        statusBadge(st)
+      ]),
+      el('dl', { className: 'user-card__meta' }, [
+        metaItem('Rol', roleLabel(role)),
+        metaItem('Documento', u.documento || '-'),
+        metaItem('Ultimo cambio', lastChange)
+      ]),
+      el('div', { className: 'user-card__actions' }, [actionsCell(u)])
+    ]);
+  }
+
+  function metaItem(label, value) {
+    return el('div', { className: 'user-card__meta-item' }, [
+      el('dt', {}, [label]),
+      el('dd', {}, [value || '-'])
+    ]);
+  }
+
   function renderRows() {
     const term = String(qs('#search', ui).value || '').trim().toLowerCase();
     const rf = String(qs('#roleFilter', ui).value || '').trim();
@@ -262,6 +313,9 @@ export const UsersAdmin = (mount, deps = {}) => {
     const pageRows = paginator.slice(rows);
 
     tbody.replaceChildren(...pageRows.map((u) => renderRow(u)));
+    cards.replaceChildren(...(pageRows.length
+      ? pageRows.map((u) => renderUserCard(u))
+      : [el('p', { className: 'text-muted user-card__empty' }, ['Sin usuarios para mostrar.'])]));
     setMsg(`Total registros filtrados: ${rows.length}`);
   }
 

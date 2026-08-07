@@ -272,15 +272,16 @@ function normalizeUser(user) {
 }
 
 function normalizeProfileRow(uid, data = {}) {
-  return {
+  const row = {
     id: uid,
     email: String(data.email || '').trim().toLowerCase() || null,
     display_name: data.nombre || data.displayName || null,
     documento: data.documento || null,
-    role: data.role || 'empleado',
-    estado: data.estado || 'activo',
     updated_at: new Date().toISOString()
   };
+  if (data.role !== undefined) row.role = data.role || 'empleado';
+  if (data.estado !== undefined) row.estado = data.estado || 'activo';
+  return row;
 }
 
 function mapUserProfileRow(row = {}) {
@@ -328,11 +329,12 @@ function mapAuditLogRow(row = {}) {
   };
 }
 
-async function upsertProfile(uid, data = {}) {
+async function insertProfileIfMissing(uid, data = {}) {
   const payload = normalizeProfileRow(uid, data);
   const { error } = await supabase
     .from(SUPABASE_PROFILES_TABLE)
-    .upsert(payload, { onConflict: 'id' });
+    .insert(payload);
+  if (error?.code === '23505') return;
   if (error) throw error;
 }
 
@@ -934,6 +936,7 @@ function getColombiaHolidaySet(year) {
     formatUtcDate(moveToFollowingMondayUtc(makeUtcDate(year, 1, 6))),
     formatUtcDate(moveToFollowingMondayUtc(makeUtcDate(year, 3, 19))),
     formatUtcDate(moveToFollowingMondayUtc(makeUtcDate(year, 6, 29))),
+    formatUtcDate(moveToFollowingMondayUtc(makeUtcDate(year, 7, 9))),
     formatUtcDate(moveToFollowingMondayUtc(makeUtcDate(year, 8, 15))),
     formatUtcDate(moveToFollowingMondayUtc(makeUtcDate(year, 10, 12))),
     formatUtcDate(moveToFollowingMondayUtc(makeUtcDate(year, 11, 1))),
@@ -2212,6 +2215,8 @@ function incapacitySourceToNoveltyCode(source) {
   if (raw.includes('enfermedad general')) return '3';
   if (raw.includes('calamidad')) return '4';
   if (raw.includes('licencia no remunerada')) return '5';
+  if (raw.includes('licencia remunerada')) return '6';
+  if (raw.includes('vacaciones')) return '9';
   return '3';
 }
 
@@ -2502,18 +2507,21 @@ export async function logout() {
 }
 
 export async function createUserProfile(uid, data) {
-  await upsertProfile(uid, data);
+  if (!uid) return;
+  const existing = await loadUserProfile(uid);
+  if (existing) return existing;
+  await insertProfileIfMissing(uid, data);
+  return loadUserProfile(uid);
 }
 
 export async function ensureUserProfile(user) {
   if (!user?.uid) return;
   const existing = await loadUserProfile(user.uid);
   if (existing) return;
-  await upsertProfile(user.uid, {
+  await insertProfileIfMissing(user.uid, {
     email: user.email,
     displayName: user.displayName,
-    documento: user.documento,
-    estado: 'activo'
+    documento: user.documento
   });
 }
 
@@ -3093,7 +3101,7 @@ export async function getNextSedeCode(prefix = 'SED', width = 4) {
   return getNextPrefixedCode('sedes', prefix, width);
 }
 
-export async function createSede({ codigo, nombre, dependenciaCodigo, dependenciaNombre, zonaCodigo, zonaNombre, numeroOperarios, jornada, qrEnabled = false, qrLatitude = null, qrLongitude = null, qrRadiusMeters = 500 }) {
+export async function createSede({ codigo, nombre, dependenciaCodigo, dependenciaNombre, zonaCodigo, zonaNombre, numeroOperarios, jornada, qrEnabled = false, qrLatitude = null, qrLongitude = null, qrRadiusMeters = 500 }, options = {}) {
   const audit = await getCurrentAuditFields();
   const { data, error } = await supabase
     .from('sedes')
@@ -3117,6 +3125,7 @@ export async function createSede({ codigo, nombre, dependenciaCodigo, dependenci
     .single();
   if (error) throw error;
   await notifyTableReload('sedes');
+  if (options.refreshOperational !== false) await refreshOperationalState(todayBogotaISO());
   return data.id;
 }
 
@@ -3138,9 +3147,10 @@ export async function createSedesBulk(rows = []) {
       qrLatitude: row.qrLatitude,
       qrLongitude: row.qrLongitude,
       qrRadiusMeters: typeof row.qrRadiusMeters === 'number' ? row.qrRadiusMeters : Number(row.qrRadiusMeters || 500)
-    });
+    }, { refreshOperational: false });
     created += 1;
   }
+  if (created > 0) await refreshOperationalState(todayBogotaISO());
   return { created };
 }
 
@@ -3161,12 +3171,14 @@ export async function updateSede(id, { codigo, nombre, dependenciaCodigo, depend
   const { error } = await supabase.from('sedes').update(patch).eq('id', id);
   if (error) throw error;
   await notifyTableReload('sedes');
+  await refreshOperationalState(todayBogotaISO());
 }
 
 export async function setSedeStatus(id, estado) {
   const { error } = await supabase.from('sedes').update({ estado }).eq('id', id);
   if (error) throw error;
   await notifyTableReload('sedes');
+  await refreshOperationalState(todayBogotaISO());
 }
 
 function backendApiBase() {
@@ -4681,7 +4693,7 @@ export async function createIncapacidad({
   fechaInicio,
   fechaFin,
   estado = 'activo',
-  source = 'Incapacidad',
+  source = 'Enfermedad General',
   canalRegistro = 'portal_web',
   soporteUrl = null,
   soporteNombre = null,
@@ -4696,7 +4708,7 @@ export async function createIncapacidad({
     fecha_inicio: fechaInicio || null,
     fecha_fin: fechaFin || null,
     estado: estado || 'activo',
-    source: source || 'Incapacidad',
+    source: source || 'Enfermedad General',
     canal_registro: canalRegistro || 'portal_web',
     soporte_url: soporteUrl || null,
     soporte_nombre: soporteNombre || null,

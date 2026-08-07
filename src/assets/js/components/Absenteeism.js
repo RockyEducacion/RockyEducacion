@@ -14,63 +14,75 @@ export const Absenteeism = (mount, deps = {}) => {
     ]),
     el('div', { className: 'section-block mt-2' }, [
       el('h3', { className: 'section-title' }, ['Resumen por dependencia']),
-      el('div', { className: 'table-wrap' }, [
-        el('table', { className: 'table', id: 'tblDependency' }, [
-          el('thead', {}, [el('tr', {}, [
-            el('th', { 'data-sort-dep': 'dependenciaNombre', style: 'cursor:pointer' }, ['Dependencia']),
-            el('th', { 'data-sort-dep': 'planeados', style: 'cursor:pointer' }, ['Planeados']),
-            el('th', { 'data-sort-dep': 'contratados', style: 'cursor:pointer' }, ['Contratados']),
-            el('th', { 'data-sort-dep': 'noContratado', style: 'cursor:pointer' }, ['No contratado']),
-            el('th', { 'data-sort-dep': 'novSinReemplazo', style: 'cursor:pointer' }, ['Novedad sin reemplazo']),
-            el('th', { 'data-sort-dep': 'ausentismoTotal', style: 'cursor:pointer' }, ['Total ausentismo']),
-            el('th', { 'data-sort-dep': 'totalPagar', style: 'cursor:pointer' }, ['Total a pagar']),
-            el('th', {}, ['Detalle'])
-          ])]),
-          el('tbody', {})
-        ])
+      el('div', { className: 'responsive-records' }, [
+        el('div', { className: 'table-wrap responsive-table-view' }, [
+          el('table', { className: 'table', id: 'tblDependency' }, [
+            el('thead', {}, [el('tr', {}, [
+              el('th', { 'data-sort-dep': 'dependenciaNombre', style: 'cursor:pointer' }, ['Dependencia']),
+              el('th', { 'data-sort-dep': 'planeados', style: 'cursor:pointer' }, ['Planeados']),
+              el('th', { 'data-sort-dep': 'contratados', style: 'cursor:pointer' }, ['Contratados']),
+              el('th', { 'data-sort-dep': 'noContratado', style: 'cursor:pointer' }, ['No contratado']),
+              el('th', { 'data-sort-dep': 'novSinReemplazo', style: 'cursor:pointer' }, ['Novedad sin reemplazo']),
+              el('th', { 'data-sort-dep': 'ausentismoTotal', style: 'cursor:pointer' }, ['Total ausentismo']),
+              el('th', { 'data-sort-dep': 'totalPagar', style: 'cursor:pointer' }, ['Total a pagar']),
+              el('th', {}, ['Detalle'])
+            ])]),
+            el('tbody', {})
+          ])
+        ]),
+        el('div', { id: 'absDependencyCards', className: 'record-card-list' }, [])
       ]),
       el('p', { id: 'totDependency', className: 'text-muted' }, ['Total dependencias - Planeados: 0, Contratados: 0, No contratado: 0, Novedad sin reemplazo: 0, Total ausentismo: 0, Total a pagar: 0'])
     ]),
     el('div', { className: 'section-block mt-2' }, [
       el('h3', { className: 'section-title' }, ['Resumen por sede']),
-      el('div', { className: 'table-wrap' }, [
-        el('table', { className: 'table', id: 'tblTotals' }, [
-          el('thead', {}, [el('tr', {}, [
-            el('th', { 'data-sort-sede': 'sedeNombre', style: 'cursor:pointer' }, ['Sede']),
-            el('th', { 'data-sort-sede': 'planeados', style: 'cursor:pointer' }, ['Planeados']),
-            el('th', { 'data-sort-sede': 'contratados', style: 'cursor:pointer' }, ['Contratados']),
-            el('th', { 'data-sort-sede': 'noContratado', style: 'cursor:pointer' }, ['No contratado']),
-            el('th', { 'data-sort-sede': 'novSinReemplazo', style: 'cursor:pointer' }, ['Novedad sin reemplazo']),
-            el('th', { 'data-sort-sede': 'ausentismoTotal', style: 'cursor:pointer' }, ['Total ausentismo']),
-            el('th', { 'data-sort-sede': 'totalPagar', style: 'cursor:pointer' }, ['Total a pagar']),
-            el('th', {}, ['Detalle'])
-          ])]),
-          el('tbody', {})
-        ])
+      el('div', { className: 'responsive-records' }, [
+        el('div', { className: 'table-wrap responsive-table-view' }, [
+          el('table', { className: 'table', id: 'tblTotals' }, [
+            el('thead', {}, [el('tr', {}, [
+              el('th', { 'data-sort-sede': 'sedeNombre', style: 'cursor:pointer' }, ['Sede']),
+              el('th', { 'data-sort-sede': 'planeados', style: 'cursor:pointer' }, ['Planeados']),
+              el('th', { 'data-sort-sede': 'contratados', style: 'cursor:pointer' }, ['Contratados']),
+              el('th', { 'data-sort-sede': 'noContratado', style: 'cursor:pointer' }, ['No contratado']),
+              el('th', { 'data-sort-sede': 'novSinReemplazo', style: 'cursor:pointer' }, ['Novedad sin reemplazo']),
+              el('th', { 'data-sort-sede': 'ausentismoTotal', style: 'cursor:pointer' }, ['Total ausentismo']),
+              el('th', { 'data-sort-sede': 'totalPagar', style: 'cursor:pointer' }, ['Total a pagar']),
+              el('th', {}, ['Detalle'])
+            ])]),
+            el('tbody', {})
+          ])
+        ]),
+        el('div', { id: 'absSedeCards', className: 'record-card-list' }, [])
       ]),
       el('p', { id: 'totRange', className: 'text-muted' }, ['Total rango a pagar: 0'])
     ]),
     el('div', { className: 'section-block mt-2' }, [
       el('h3', { id: 'detailTitle', className: 'section-title' }, ['Detalle dependencia']),
-      el('div', { className: 'table-wrap' }, [
-        el('table', { className: 'table', id: 'tblDetail' }, [
-          el('thead', {}, [el('tr', {}, [
-            el('th', { 'data-sort-detail': 'fecha', style: 'cursor:pointer' }, ['Fecha']),
-            el('th', { 'data-sort-detail': 'sede', style: 'cursor:pointer' }, ['Sede']),
-            el('th', { 'data-sort-detail': 'documento', style: 'cursor:pointer' }, ['Documento']),
-            el('th', { 'data-sort-detail': 'nombre', style: 'cursor:pointer' }, ['Nombre']),
-            el('th', { 'data-sort-detail': 'estado', style: 'cursor:pointer' }, ['Estado'])
-          ])]),
-          el('tbody', {})
-        ])
+      el('div', { className: 'responsive-records' }, [
+        el('div', { className: 'table-wrap responsive-table-view' }, [
+          el('table', { className: 'table', id: 'tblDetail' }, [
+            el('thead', {}, [el('tr', {}, [
+              el('th', { 'data-sort-detail': 'fecha', style: 'cursor:pointer' }, ['Fecha']),
+              el('th', { 'data-sort-detail': 'sede', style: 'cursor:pointer' }, ['Sede']),
+              el('th', { 'data-sort-detail': 'documento', style: 'cursor:pointer' }, ['Documento']),
+              el('th', { 'data-sort-detail': 'nombre', style: 'cursor:pointer' }, ['Nombre']),
+              el('th', { 'data-sort-detail': 'estado', style: 'cursor:pointer' }, ['Estado'])
+            ])]),
+            el('tbody', {})
+          ])
+        ]),
+        el('div', { id: 'absDetailCards', className: 'record-card-list' }, [])
       ])
     ])
   ]);
 
   const msg = qs('#msg', ui);
-  const dependencyPaginator = createTablePagination(ui, { id: 'absDependency', after: '#tblDependency', onChange: () => renderDependency(qs('#opDate', ui).value) });
-  const totalsPaginator = createTablePagination(ui, { id: 'absSedes', after: '#tblTotals', onChange: renderTotals });
-  const detailPaginator = createTablePagination(ui, { id: 'absDetail', after: '#tblDetail', onChange: renderDetailRows });
+  const dependencyCards = qs('#absDependencyCards', ui);
+  const sedeCards = qs('#absSedeCards', ui);
+  const detailCards = qs('#absDetailCards', ui);
+  const dependencyPaginator = createTablePagination(ui, { id: 'absDependency', after: '#absDependencyCards', onChange: () => renderDependency(qs('#opDate', ui).value) });
+  const totalsPaginator = createTablePagination(ui, { id: 'absSedes', after: '#absSedeCards', onChange: renderTotals });
+  const detailPaginator = createTablePagination(ui, { id: 'absDetail', after: '#absDetailCards', onChange: renderDetailRows });
   const maxQueryDate = yesterdayBogota();
   const opDateInput = qs('#opDate', ui);
   opDateInput.max = maxQueryDate;
@@ -272,6 +284,7 @@ export const Absenteeism = (mount, deps = {}) => {
       );
       return tr;
     }));
+    dependencyCards.replaceChildren(...(pageRows.length ? pageRows.map((row) => dependencyCard(row, date)) : [emptyCard('Sin dependencias para mostrar.')]));
 
     const totals = dependencyRows.reduce((acc, row) => ({
       planeados: acc.planeados + Number(row.planeados || 0),
@@ -307,6 +320,7 @@ export const Absenteeism = (mount, deps = {}) => {
       );
       return tr;
     }));
+    sedeCards.replaceChildren(...(pageRows.length ? pageRows.map((row) => sedeCard(row)) : [emptyCard('Sin sedes para mostrar.')]));
     const totalRange = totalsRows.reduce((acc, row) => acc + Number(row.totalPagar || 0), 0);
     qs('#totRange', ui).textContent = 'Total rango a pagar: ' + totalRange;
     updateSortIndicators('#tblTotals th[data-sort-sede]', 'data-sort-sede', sedeSortKey, sedeSortDir);
@@ -382,7 +396,77 @@ export const Absenteeism = (mount, deps = {}) => {
       el('td', {}, [row.nombre || '-']),
       el('td', {}, [row.estado || '-'])
     ])));
+    detailCards.replaceChildren(...(pageRows.length ? pageRows.map((row) => detailCard(row)) : [emptyCard('Selecciona una dependencia o sede para ver el detalle.')]));
     updateSortIndicators('#tblDetail th[data-sort-detail]', 'data-sort-detail', detailSortKey, detailSortDir);
+  }
+
+  function dependencyCard(row, date) {
+    const btn = el('button', { className: 'btn', type: 'button' }, ['Ver detalle']);
+    btn.addEventListener('click', () => renderDetail(row.dependenciaKey, row.dependenciaNombre, date));
+    return summaryCard({
+      title: row.dependenciaNombre || '-',
+      subtitle: 'Dependencia',
+      meta: [
+        ['Planeados', String(row.planeados)],
+        ['Contratados', String(row.contratados)],
+        ['No contratado', String(row.noContratado)],
+        ['Novedad sin reemplazo', String(row.novSinReemplazo)],
+        ['Total ausentismo', String(row.ausentismoTotal)],
+        ['Total a pagar', String(row.totalPagar)]
+      ],
+      actions: btn
+    });
+  }
+
+  function sedeCard(row) {
+    const btn = el('button', { className: 'btn', type: 'button' }, ['Ver detalle']);
+    btn.addEventListener('click', () => renderSedeDetail(row.sedeCodigo, row.sedeNombre));
+    return summaryCard({
+      title: row.sedeNombre || '-',
+      subtitle: row.dependenciaNombre || 'Sede',
+      meta: [
+        ['Planeados', String(row.planeados)],
+        ['Contratados', String(row.contratados)],
+        ['No contratado', String(row.noContratado)],
+        ['Novedad sin reemplazo', String(row.novSinReemplazo)],
+        ['Total ausentismo', String(row.ausentismoTotal)],
+        ['Total a pagar', String(row.totalPagar)]
+      ],
+      actions: btn
+    });
+  }
+
+  function detailCard(row) {
+    return summaryCard({
+      title: row.nombre || '-',
+      subtitle: `${row.fecha || '-'} - ${row.documento || '-'}`,
+      badge: el('span', { className: 'badge' }, ['Detalle']),
+      meta: [
+        ['Sede', row.sede || '-'],
+        ['Estado', row.estado || '-']
+      ]
+    });
+  }
+
+  function summaryCard({ title, subtitle, meta = [], actions = null, badge = null }) {
+    return el('article', { className: 'record-card' }, [
+      el('div', { className: 'record-card__header' }, [
+        el('div', { className: 'record-card__identity' }, [
+          el('strong', { className: 'record-card__title' }, [title]),
+          el('span', { className: 'record-card__subtitle' }, [subtitle])
+        ]),
+        badge || el('span', { className: 'badge' }, ['Resumen'])
+      ]),
+      el('dl', { className: 'record-card__meta' }, meta.map(([label, value]) => el('div', { className: 'record-card__meta-item' }, [
+        el('dt', {}, [label]),
+        el('dd', {}, [value || '-'])
+      ]))),
+      actions ? el('div', { className: 'record-card__actions' }, [actions]) : null
+    ].filter(Boolean));
+  }
+
+  function emptyCard(text) {
+    return el('p', { className: 'text-muted record-card__empty' }, [text]);
   }
 
   function describeDetailStatus(row, isSurplus = row?.servicioProgramado !== true) {
@@ -540,6 +624,9 @@ export const Absenteeism = (mount, deps = {}) => {
     qs('#tblDependency tbody', ui).replaceChildren();
     qs('#tblTotals tbody', ui).replaceChildren();
     qs('#tblDetail tbody', ui).replaceChildren();
+    dependencyCards.replaceChildren(emptyCard('Sin dependencias para mostrar.'));
+    sedeCards.replaceChildren(emptyCard('Sin sedes para mostrar.'));
+    detailCards.replaceChildren(emptyCard('Selecciona una dependencia o sede para ver el detalle.'));
     qs('#totDependency', ui).textContent = 'Total dependencias - Planeados: 0, Contratados: 0, No contratado: 0, Novedad sin reemplazo: 0, Total ausentismo: 0, Total a pagar: 0';
     qs('#totRange', ui).textContent = 'Total rango a pagar: 0';
     msg.textContent = message || 'Sin datos.';

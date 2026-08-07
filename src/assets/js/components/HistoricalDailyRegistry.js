@@ -28,27 +28,30 @@ export const HistoricalDailyRegistry = (mount, deps = {}) => {
     ]),
     el('div', { className: 'section-block mt-2' }, [
       el('h3', { className: 'section-title' }, ['Registros del dia']),
-      el('div', { className: 'table-wrap' }, [
-        el('table', { className: 'table', id: 'tblHistoricalDaily' }, [
-          el('thead', {}, [
-            el('tr', {}, [
-              el('th', { 'data-sort-historical': 'fecha', style: 'cursor:pointer' }, ['Fecha']),
-              el('th', { 'data-sort-historical': 'hora', style: 'cursor:pointer' }, ['Hora']),
-              el('th', { 'data-sort-historical': 'cedula', style: 'cursor:pointer' }, ['Cedula']),
-              el('th', { 'data-sort-historical': 'nombre', style: 'cursor:pointer' }, ['Nombre']),
-              el('th', { 'data-sort-historical': 'sede', style: 'cursor:pointer' }, ['Sede']),
-              el('th', { 'data-sort-historical': 'novedad', style: 'cursor:pointer' }, ['Novedad']),
-              el('th', { 'data-sort-historical': 'estado', style: 'cursor:pointer' }, ['Estado'])
-            ])
-          ]),
-          el('tbody', {})
-        ])
+      el('div', { className: 'responsive-records' }, [
+        el('div', { className: 'table-wrap responsive-table-view' }, [
+          el('table', { className: 'table', id: 'tblHistoricalDaily' }, [
+            el('thead', {}, [
+              el('tr', {}, [
+                el('th', { 'data-sort-historical': 'fecha', style: 'cursor:pointer' }, ['Fecha']),
+                el('th', { 'data-sort-historical': 'hora', style: 'cursor:pointer' }, ['Hora']),
+                el('th', { 'data-sort-historical': 'cedula', style: 'cursor:pointer' }, ['Cedula']),
+                el('th', { 'data-sort-historical': 'nombre', style: 'cursor:pointer' }, ['Nombre']),
+                el('th', { 'data-sort-historical': 'sede', style: 'cursor:pointer' }, ['Sede']),
+                el('th', { 'data-sort-historical': 'novedad', style: 'cursor:pointer' }, ['Novedad']),
+                el('th', { 'data-sort-historical': 'estado', style: 'cursor:pointer' }, ['Estado'])
+              ])
+            ]),
+            el('tbody', {})
+          ])
+        ]),
+        el('div', { id: 'historicalDailyCards', className: 'record-card-list' }, [])
       ]),
       el('p', { id: 'historicalDailyTotal', className: 'text-muted' }, ['Total registros del dia: 0'])
     ])
   ]);
 
-  const paginator = createTablePagination(ui, { id: 'historicalDaily', after: '#tblHistoricalDaily', onChange: syncRows });
+  const paginator = createTablePagination(ui, { id: 'historicalDaily', after: '#historicalDailyCards', onChange: syncRows });
   qs('#btnGenerateHistoricalDaily', ui)?.addEventListener('click', generateReport);
   qs('#btnExportHistoricalDaily', ui)?.addEventListener('click', exportExcel);
   qs('#historicalDailyDate', ui)?.addEventListener('change', () => {
@@ -156,11 +159,13 @@ export const HistoricalDailyRegistry = (mount, deps = {}) => {
 
   function syncRows() {
     const tbody = qs('#tblHistoricalDaily tbody', ui);
+    const cards = qs('#historicalDailyCards', ui);
     const totalNode = qs('#historicalDailyTotal', ui);
     const exportBtn = qs('#btnExportHistoricalDaily', ui);
     const rows = sortRows(generatedRows, sortKey, sortDir);
     const pageRows = paginator.slice(rows);
     if (tbody) tbody.replaceChildren(...renderRows(pageRows, rows.length));
+    if (cards) cards.replaceChildren(...renderCards(pageRows, rows.length));
     if (totalNode) totalNode.textContent = `Total registros del dia: ${generatedRows.length}`;
     if (exportBtn) exportBtn.disabled = generatedRows.length === 0;
     updateSortIndicators(ui, '#tblHistoricalDaily th[data-sort-historical]', 'data-sort-historical', sortKey, sortDir);
@@ -260,6 +265,29 @@ function renderRows(rows = [], totalRows = rows.length) {
     el('td', {}, [row.sede]),
     el('td', {}, [row.novedad]),
     el('td', {}, [row.estado])
+  ]));
+}
+
+function renderCards(rows = [], totalRows = rows.length) {
+  if (!totalRows) {
+    return [el('p', { className: 'text-muted record-card__empty' }, ['Sin registros para la fecha seleccionada.'])];
+  }
+  return rows.map((row) => el('article', { className: 'record-card' }, [
+    el('div', { className: 'record-card__header' }, [
+      el('div', { className: 'record-card__identity' }, [
+        el('strong', { className: 'record-card__title' }, [row.nombre || '-']),
+        el('span', { className: 'record-card__subtitle' }, [`${row.fecha || '-'} ${row.hora || '-'} - ${row.cedula || '-'}`])
+      ]),
+      el('span', { className: 'badge' }, ['Registro'])
+    ]),
+    el('dl', { className: 'record-card__meta' }, [
+      ['Sede', row.sede || '-'],
+      ['Novedad', row.novedad || '-'],
+      ['Estado', row.estado || '-']
+    ].map(([label, value]) => el('div', { className: 'record-card__meta-item' }, [
+      el('dt', {}, [label]),
+      el('dd', {}, [value || '-'])
+    ])))
   ]));
 }
 

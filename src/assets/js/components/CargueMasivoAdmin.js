@@ -27,27 +27,33 @@ export const CargueMasivoAdmin=(mount,deps={})=>{
       el('div',{},[ el('label',{className:'label'},['Validas']), el('input',{id:'sumOk',className:'input',disabled:true}) ]),
       el('div',{},[ el('label',{className:'label'},['Errores']), el('input',{id:'sumErr',className:'input',disabled:true}) ])
     ]),
-    el('div',{className:'mt-2 table-wrap'},[
-      el('table',{className:'table',id:'tblPreview'},[
-        el('thead',{},[ el('tr',{},[
-          el('th',{},['Documento']),
-          el('th',{},['Nombre']),
-          el('th',{},['Telefono']),
-          el('th',{},['Cargo codigo']),
-          el('th',{},['Sede codigo']),
-          el('th',{},['Cargo']),
-          el('th',{},['Sede']),
-          el('th',{},['Fecha ingreso']),
-          el('th',{},['Estado'])
-        ]) ]),
-        el('tbody',{})
-      ])
+    el('div',{className:'responsive-records mt-2'},[
+      el('div',{className:'table-wrap responsive-table-view'},[
+        el('table',{className:'table',id:'tblPreview'},[
+          el('thead',{},[ el('tr',{},[
+            el('th',{},['Documento']),
+            el('th',{},['Nombre']),
+            el('th',{},['Telefono']),
+            el('th',{},['Cargo codigo']),
+            el('th',{},['Sede codigo']),
+            el('th',{},['Cargo']),
+            el('th',{},['Sede']),
+            el('th',{},['Fecha ingreso']),
+            el('th',{},['Estado'])
+          ]) ]),
+          el('tbody',{})
+        ])
+      ]),
+      el('div',{id:'bulkEmployeePreviewCards',className:'record-card-list'},[])
     ]),
-    el('div',{className:'mt-2 table-wrap'},[
-      el('table',{className:'table',id:'tblErrors'},[
-        el('thead',{},[ el('tr',{},[ el('th',{},['Fila']), el('th',{},['Error']) ]) ]),
-        el('tbody',{})
-      ])
+    el('div',{className:'responsive-records mt-2'},[
+      el('div',{className:'table-wrap responsive-table-view'},[
+        el('table',{className:'table',id:'tblErrors'},[
+          el('thead',{},[ el('tr',{},[ el('th',{},['Fila']), el('th',{},['Error']) ]) ]),
+          el('tbody',{})
+        ])
+      ]),
+      el('div',{id:'bulkEmployeeErrorCards',className:'record-card-list'},[])
     ])
   ]);
 
@@ -65,8 +71,10 @@ export const CargueMasivoAdmin=(mount,deps={})=>{
   let validRows=[];
   let previewRows=[];
   let errorRows=[];
-  const previewPaginator=createTablePagination(ui,{id:'bulkEmployeesPreview',after:'#tblPreview',onChange:()=> renderPreview()});
-  const errorsPaginator=createTablePagination(ui,{id:'bulkEmployeesErrors',after:'#tblErrors',onChange:()=> renderErrors()});
+  const previewCards=qs('#bulkEmployeePreviewCards',ui);
+  const errorCards=qs('#bulkEmployeeErrorCards',ui);
+  const previewPaginator=createTablePagination(ui,{id:'bulkEmployeesPreview',after:'#bulkEmployeePreviewCards',onChange:()=> renderPreview()});
+  const errorsPaginator=createTablePagination(ui,{id:'bulkEmployeesErrors',after:'#bulkEmployeeErrorCards',onChange:()=> renderErrors()});
 
   const unEmp=deps.streamEmployees?.((arr)=>{ employees=arr||[]; });
   const unCargo=deps.streamCargos?.((arr)=>{ cargos=arr||[]; });
@@ -184,6 +192,7 @@ export const CargueMasivoAdmin=(mount,deps={})=>{
       el('td',{},[r.fechaIngreso||'-']),
       el('td',{},[r.ok? 'OK':'ERROR'])
     ])));
+    previewCards.replaceChildren(...(pageRows.length ? pageRows.map((r)=> previewCard(r)) : [el('p',{className:'text-muted record-card__empty'},['Sin filas para previsualizar.'])]));
   }
 
   function renderErrors(errors){
@@ -197,6 +206,46 @@ export const CargueMasivoAdmin=(mount,deps={})=>{
       el('td',{},[String(err.row)]),
       el('td',{},[err.message||'Error'])
     ])));
+    errorCards.replaceChildren(...(pageRows.length ? pageRows.map((err)=> errorCard(err)) : [el('p',{className:'text-muted record-card__empty'},['Sin errores para mostrar.'])]));
+  }
+
+  function previewCard(row){
+    return el('article',{className:'record-card'},[
+      el('div',{className:'record-card__header'},[
+        el('div',{className:'record-card__identity'},[
+          el('strong',{className:'record-card__title'},[row.nombre||'-']),
+          el('span',{className:'record-card__subtitle'},[`Documento: ${row.documento||'-'}`])
+        ]),
+        el('span',{className:`badge ${row.ok?'badge--ok':'badge--off'}`},[row.ok?'OK':'ERROR'])
+      ]),
+      el('dl',{className:'record-card__meta'},[
+        ['Telefono',row.telefono||'-'],
+        ['Cargo',row.cargoNombre||row.cargoCodigo||'-'],
+        ['Sede',row.sedeNombre||row.sedeCodigo||'-'],
+        ['Fecha ingreso',row.fechaIngreso||'-']
+      ].map(([label,value])=> el('div',{className:'record-card__meta-item'},[
+        el('dt',{},[label]),
+        el('dd',{},[value||'-'])
+      ])))
+    ]);
+  }
+
+  function errorCard(err){
+    return el('article',{className:'record-card'},[
+      el('div',{className:'record-card__header'},[
+        el('div',{className:'record-card__identity'},[
+          el('strong',{className:'record-card__title'},[`Fila ${String(err.row||'-')}`]),
+          el('span',{className:'record-card__subtitle'},['Validacion'])
+        ]),
+        el('span',{className:'badge badge--off'},['Error'])
+      ]),
+      el('dl',{className:'record-card__meta'},[
+        ['Detalle',err.message||'Error']
+      ].map(([label,value])=> el('div',{className:'record-card__meta-item'},[
+        el('dt',{},[label]),
+        el('dd',{},[value||'-'])
+      ])))
+    ]);
   }
 
   function validateRows(rows, employeesList, cargosList, sedesList){

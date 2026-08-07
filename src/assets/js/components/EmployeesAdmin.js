@@ -29,22 +29,25 @@ export const EmployeesAdmin=(mount,deps={})=>{
         el('div',{},[ el('label',{className:'label'},['Sede']), el('select',{id:'selSede',className:'select'},[ el('option',{value:''},['Todas']) ]) ]),
         el('div',{},[ el('label',{className:'label'},['Estado']), el('select',{id:'selStatus',className:'select'},[ el('option',{value:''},['Todos']), el('option',{value:'activo'},['Activos']), el('option',{value:'inactivo'},['Inactivos']) ]) ])
       ]),
-      el('div',{className:'mt-2 table-wrap'},[
-        el('table',{className:'table',id:'tbl'},[
-          el('thead',{},[ el('tr',{},[
-            el('th',{'data-sort':'codigo',style:'cursor:pointer'},['Codigo']),
-            el('th',{'data-sort':'documento',style:'cursor:pointer'},['Documento']),
-            el('th',{'data-sort':'nombre',style:'cursor:pointer'},['Nombre']),
-            el('th',{'data-sort':'telefono',style:'cursor:pointer'},['Telefono']),
-            el('th',{'data-sort':'cargoNombre',style:'cursor:pointer'},['Cargo']),
-            el('th',{'data-sort':'sedeNombre',style:'cursor:pointer'},['Sede']),
-            el('th',{'data-sort':'estado',style:'cursor:pointer'},['Estado']),
-            el('th',{'data-sort':'fechaIngreso',style:'cursor:pointer'},['Ingreso']),
-            el('th',{'data-sort':'fechaRetiro',style:'cursor:pointer'},['Retiro']),
-            el('th',{},['Acciones'])
-          ]) ]),
-          el('tbody',{})
-        ])
+      el('div',{className:'responsive-records mt-2'},[
+        el('div',{className:'table-wrap responsive-table-view'},[
+          el('table',{className:'table',id:'tbl'},[
+            el('thead',{},[ el('tr',{},[
+              el('th',{'data-sort':'codigo',style:'cursor:pointer'},['Codigo']),
+              el('th',{'data-sort':'documento',style:'cursor:pointer'},['Documento']),
+              el('th',{'data-sort':'nombre',style:'cursor:pointer'},['Nombre']),
+              el('th',{'data-sort':'telefono',style:'cursor:pointer'},['Telefono']),
+              el('th',{'data-sort':'cargoNombre',style:'cursor:pointer'},['Cargo']),
+              el('th',{'data-sort':'sedeNombre',style:'cursor:pointer'},['Sede']),
+              el('th',{'data-sort':'estado',style:'cursor:pointer'},['Estado']),
+              el('th',{'data-sort':'fechaIngreso',style:'cursor:pointer'},['Ingreso']),
+              el('th',{'data-sort':'fechaRetiro',style:'cursor:pointer'},['Retiro']),
+              el('th',{},['Acciones'])
+            ]) ]),
+            el('tbody',{})
+          ])
+        ]),
+        el('div',{id:'employeeCards',className:'record-card-list'},[])
       ]),
       el('p',{id:'msg',className:'text-muted mt-2'},[' '])
     ])
@@ -195,9 +198,9 @@ export const EmployeesAdmin=(mount,deps={})=>{
   const btnOpenCreate=el('button',{id:'btnOpenCreate',className:'btn btn--primary right',type:'button'},['Crear empleado']);
   qs('#tabList .form-row',ui)?.append(btnOpenCreate);
   btnOpenCreate.addEventListener('click',openCreateModal);
-  let snapshot=[]; let historyRows=[]; const tbody=ui.querySelector('tbody');
+  let snapshot=[]; let historyRows=[]; const tbody=ui.querySelector('tbody'); const cards=qs('#employeeCards',ui);
   let sortKey=''; let sortDir=1;
-  const paginator=createTablePagination(ui,{id:'employees',after:'#tabList .table-wrap',onChange:render});
+  const paginator=createTablePagination(ui,{id:'employees',after:'#tabList .responsive-records',onChange:render});
   let unSedes=()=>{};
   let unCargos=()=>{};
   let unSup=()=>{};
@@ -327,6 +330,7 @@ export const EmployeesAdmin=(mount,deps={})=>{
     const sorted=sortData(data);
     const pageRows=paginator.slice(sorted);
     tbody.replaceChildren(...pageRows.map(e=> row(e)));
+    cards.replaceChildren(...(pageRows.length ? pageRows.map(e=> employeeCard(e)) : [el('p',{className:'text-muted record-card__empty'},['Sin empleados para mostrar.'])]));
     const msg=qs('#msg',ui); if(msg) msg.textContent=`Total registros filtrados: ${data.length}`;
     updateSortIndicators();
   }
@@ -346,6 +350,42 @@ export const EmployeesAdmin=(mount,deps={})=>{
     const tdAcc=el('td',{},[ actionsCell(e) ]);
     tr.append(tdCodigo,tdDoc,tdNombre,tdTel,tdCargo,tdSede,tdEstado,tdIngreso,tdRetiro,tdAcc);
     return tr;
+  }
+  function employeeCard(e){
+    const view=employeeAssignmentView(e);
+    const linked=isLinkedByDoc(e.documento);
+    const docValue=linked ? [e.documento||'-',' ',el('span',{className:'badge'},['Vinculado'])] : [e.documento||'-'];
+    const cargoValue=[assignmentCellText(view.current,'cargo'),programmedBadge(view.programmed,'cargo')].filter(Boolean);
+    const sedeValue=[assignmentCellText(view.current,'sede'),programmedBadge(view.programmed,'sede')].filter(Boolean);
+    return recordCard(e,{
+      title:e.nombre||'-',
+      subtitle:`Codigo: ${e.codigo||'-'}`,
+      meta:[
+        ['Documento',docValue],
+        ['Telefono',e.telefono||'-'],
+        ['Cargo',cargoValue.length?cargoValue:['-']],
+        ['Sede',sedeValue.length?sedeValue:['-']],
+        ['Ingreso',formatDate(view.current?.fechaIngreso||e.fechaIngreso)],
+        ['Retiro',formatDate(e.fechaRetiro)]
+      ],
+      actions:actionsCell(e)
+    });
+  }
+  function recordCard(item,{title,subtitle,meta=[],actions}){
+    return el('article',{className:'record-card'},[
+      el('div',{className:'record-card__header'},[
+        el('div',{className:'record-card__identity'},[
+          el('strong',{className:'record-card__title'},[title]),
+          el('span',{className:'record-card__subtitle'},[subtitle])
+        ]),
+        statusBadge(item.estado)
+      ]),
+      el('dl',{className:'record-card__meta'},meta.map(([label,value])=> el('div',{className:'record-card__meta-item'},[
+        el('dt',{},[label]),
+        el('dd',{},Array.isArray(value)?value:[value||'-'])
+      ]))),
+      el('div',{className:'record-card__actions'},[actions])
+    ]);
   }
   function statusBadge(st){ return el('span',{className:'badge '+(st==='activo'?'badge--ok':'badge--off')},[st||'-']); }
   function assignmentCellText(assignment={},kind='sede'){

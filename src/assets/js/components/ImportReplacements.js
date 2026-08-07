@@ -10,18 +10,21 @@ export const ImportReplacements=(mount,deps={})=>{
   const ui=el('section',{className:'main-card'},[
     el('h2',{},['Reemplazos de importacion']),
     el('p',{className:'text-muted'},[`Fecha: ${fecha||'-'}`]),
-    el('div',{className:'mt-2 table-wrap'},[
-      el('table',{className:'table',id:'tblRep'},[
-        el('thead',{},[el('tr',{},[
-          el('th',{},['Empleado']),
-          el('th',{},['Documento']),
-          el('th',{},['Sede']),
-          el('th',{},['Novedad']),
-          el('th',{},['Decision']),
-          el('th',{},['Supernumerario'])
-        ])]),
-        el('tbody',{})
-      ])
+    el('div',{className:'responsive-records mt-2'},[
+      el('div',{className:'table-wrap responsive-table-view'},[
+        el('table',{className:'table',id:'tblRep'},[
+          el('thead',{},[el('tr',{},[
+            el('th',{},['Empleado']),
+            el('th',{},['Documento']),
+            el('th',{},['Sede']),
+            el('th',{},['Novedad']),
+            el('th',{},['Decision']),
+            el('th',{},['Supernumerario'])
+          ])]),
+          el('tbody',{})
+        ])
+      ]),
+      el('div',{id:'replacementCards',className:'record-card-list'},[])
     ]),
     el('p',{id:'msg',className:'text-muted mt-2'},[candidates.length? 'Selecciona reemplazo o ausentismo por cada fila.':'No hay novedades por reemplazar en esta importacion.']),
     el('div',{className:'form-row mt-2'},[
@@ -30,6 +33,7 @@ export const ImportReplacements=(mount,deps={})=>{
   ]);
 
   const tbody=qs('#tblRep tbody',ui);
+  const cards=qs('#replacementCards',ui);
   let supernumerarios=[];
   let occupiedReplacements=[];
   const unSupn=deps.streamSupernumerarios?.((arr)=>{ supernumerarios=(arr||[]).filter((s)=> s.estado!=='inactivo'); render(); });
@@ -99,13 +103,51 @@ export const ImportReplacements=(mount,deps={})=>{
     return tr;
   }
 
+  function decisionCard(c,idx){
+    const decision=el('select',{className:'select'},[
+      el('option',{value:''},['Seleccione...']),
+      el('option',{value:'reemplazo'},['Reemplazo']),
+      el('option',{value:'ausentismo'},['Ausentismo'])
+    ]);
+    const supSel=el('select',{className:'select',disabled:true},[
+      el('option',{value:''},['Seleccione supernumerario...'])
+    ]);
+    decision.addEventListener('change',()=>{
+      supSel.disabled=decision.value!=='reemplazo';
+      if(supSel.disabled) supSel.value='';
+    });
+    const available=byDoc(c.documento);
+    supSel.append(...available.map((s)=> el('option',{value:s.id},[`${s.nombre||s.documento||'-'} (${s.documento||'-'})`])));
+    if(!available.length) supSel.append(el('option',{value:'',disabled:true},['Sin supernumerarios libres']));
+    return el('article',{className:'record-card','data-idx':String(idx)},[
+      el('div',{className:'record-card__header'},[
+        el('div',{className:'record-card__identity'},[
+          el('strong',{className:'record-card__title'},[c.nombre||'-']),
+          el('span',{className:'record-card__subtitle'},[`Documento: ${c.documento||'-'}`])
+        ]),
+        el('span',{className:'badge'},[c.sedeNombre||c.sedeCodigo||'-'])
+      ]),
+      el('dl',{className:'record-card__meta'},[
+        ['Sede',c.sedeNombre||c.sedeCodigo||'-'],
+        ['Novedad',`${c.novedadNombre||'-'} (${c.novedadCodigo||'-'})`],
+        ['Decision',decision],
+        ['Supernumerario',supSel]
+      ].map(([label,value])=> el('div',{className:'record-card__meta-item'},[
+        el('dt',{},[label]),
+        el('dd',{},Array.isArray(value)?value:[value||'-'])
+      ])))
+    ]);
+  }
+
   function render(){
     tbody.replaceChildren(...candidates.map((c,idx)=> decisionRow(c,idx)));
+    cards.replaceChildren(...(candidates.length ? candidates.map((c,idx)=> decisionCard(c,idx)) : [el('p',{className:'text-muted record-card__empty'},['No hay novedades por reemplazar en esta importacion.'])]));
   }
   render();
 
   qs('#btnSave',ui).addEventListener('click',async()=>{
-    const rows=Array.from(tbody.querySelectorAll('tr'));
+    const source=window.matchMedia?.('(max-width: 900px)')?.matches ? cards : tbody;
+    const rows=Array.from(source.querySelectorAll('[data-idx]'));
     const assignments=[];
     const usedSupn=new Set();
     for(let i=0;i<rows.length;i++){

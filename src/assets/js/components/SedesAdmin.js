@@ -40,22 +40,25 @@ export const SedesAdmin=(mount,deps={})=>{
         el('div',{},[ el('label',{className:'label'},['Buscar']), el('input',{id:'txtSearch',className:'input',placeholder:'Codigo, nombre, dependencia o zona...'}) ]),
         el('div',{},[ el('label',{className:'label'},['Estado']), el('select',{id:'selStatus',className:'select'},[ el('option',{value:''},['Todos']), el('option',{value:'activo'},['Activos']), el('option',{value:'inactivo'},['Inactivos']) ]) ]),
       ]),
-      el('div',{className:'mt-2 table-wrap'},[
-        el('table',{className:'table',id:'tbl'},[
-          el('thead',{},[ el('tr',{},[
-            el('th',{'data-sort':'codigo',style:'cursor:pointer'},['Codigo']),
-            el('th',{'data-sort':'nombre',style:'cursor:pointer'},['Nombre']),
-            el('th',{'data-sort':'dependenciaNombre',style:'cursor:pointer'},['Dependencia']),
-            el('th',{'data-sort':'zonaNombre',style:'cursor:pointer'},['Zona']),
-            el('th',{'data-sort':'numeroOperarios',style:'cursor:pointer'},['Operarios']),
-            el('th',{'data-sort':'jornada',style:'cursor:pointer'},['Jornada']),
-            el('th',{'data-sort':'qrEnabled',style:'cursor:pointer'},['QR']),
-            el('th',{},['Ubicacion QR']),
-            el('th',{'data-sort':'estado',style:'cursor:pointer'},['Estado']),
-            el('th',{},['Acciones'])
-          ]) ]),
-          el('tbody',{})
-        ])
+      el('div',{className:'responsive-records mt-2'},[
+        el('div',{className:'table-wrap responsive-table-view'},[
+          el('table',{className:'table',id:'tbl'},[
+            el('thead',{},[ el('tr',{},[
+              el('th',{'data-sort':'codigo',style:'cursor:pointer'},['Codigo']),
+              el('th',{'data-sort':'nombre',style:'cursor:pointer'},['Nombre']),
+              el('th',{'data-sort':'dependenciaNombre',style:'cursor:pointer'},['Dependencia']),
+              el('th',{'data-sort':'zonaNombre',style:'cursor:pointer'},['Zona']),
+              el('th',{'data-sort':'numeroOperarios',style:'cursor:pointer'},['Operarios']),
+              el('th',{'data-sort':'jornada',style:'cursor:pointer'},['Jornada']),
+              el('th',{'data-sort':'qrEnabled',style:'cursor:pointer'},['QR']),
+              el('th',{},['Ubicacion QR']),
+              el('th',{'data-sort':'estado',style:'cursor:pointer'},['Estado']),
+              el('th',{},['Acciones'])
+            ]) ]),
+            el('tbody',{})
+          ])
+        ]),
+        el('div',{id:'sedeCards',className:'record-card-list'},[])
       ]),
       el('p',{id:'msg',className:'text-muted mt-2'},[' '])
     ])
@@ -207,9 +210,9 @@ export const SedesAdmin=(mount,deps={})=>{
   const btnOpenCreate=el('button',{id:'btnOpenCreate',className:'btn btn--primary right',type:'button'},['Crear sede']);
   qs('#tabList .form-row',ui)?.append(btnOpenCreate);
   btnOpenCreate.addEventListener('click',openCreateModal);
-  let snapshot=[]; const tbody=ui.querySelector('tbody');
+  let snapshot=[]; const tbody=ui.querySelector('tbody'); const cards=qs('#sedeCards',ui);
   let sortKey=''; let sortDir=1;
-  const paginator=createTablePagination(ui,{id:'sedes',after:'#tabList .table-wrap',onChange:render});
+  const paginator=createTablePagination(ui,{id:'sedes',after:'#tabList .responsive-records',onChange:render});
   let unDeps=()=>{};
   let unZones=()=>{};
 
@@ -315,6 +318,7 @@ export const SedesAdmin=(mount,deps={})=>{
     const sorted=sortData(data);
     const pageRows=paginator.slice(sorted);
     tbody.replaceChildren(...pageRows.map(s=> row(s)));
+    cards.replaceChildren(...(pageRows.length ? pageRows.map(s=> sedeCard(s)) : [el('p',{className:'text-muted record-card__empty'},['Sin sedes para mostrar.'])]));
     const msg=qs('#msg',ui); if(msg) msg.textContent=`Total registros filtrados: ${data.length}`;
     updateSortIndicators();
   }
@@ -332,6 +336,37 @@ export const SedesAdmin=(mount,deps={})=>{
     const tdAcc=el('td',{},[ actionsCell(s) ]);
     tr.append(tdCodigo,tdNombre,tdDep,tdZone,tdOps,tdJornada,tdQr,tdQrLocation,tdEstado,tdAcc);
     return tr;
+  }
+  function sedeCard(s){
+    return recordCard(s,{
+      title:s.nombre||'-',
+      subtitle:`Codigo: ${s.codigo||'-'}`,
+      meta:[
+        ['Dependencia',s.dependenciaNombre||depNameByCode(s.dependenciaCodigo)],
+        ['Zona',s.zonaNombre||zoneNameByCode(s.zonaCodigo)],
+        ['Operarios',String(s.numeroOperarios ?? '-')],
+        ['Jornada',labelJornada(s.jornada)],
+        ['QR',qrBadge(s.qrEnabled)],
+        ['Ubicacion QR',qrLocationLabel(s)]
+      ],
+      actions:actionsCell(s)
+    });
+  }
+  function recordCard(item,{title,subtitle,meta=[],actions}){
+    return el('article',{className:'record-card'},[
+      el('div',{className:'record-card__header'},[
+        el('div',{className:'record-card__identity'},[
+          el('strong',{className:'record-card__title'},[title]),
+          el('span',{className:'record-card__subtitle'},[subtitle])
+        ]),
+        statusBadge(item.estado)
+      ]),
+      el('dl',{className:'record-card__meta'},meta.map(([label,value])=> el('div',{className:'record-card__meta-item'},[
+        el('dt',{},[label]),
+        el('dd',{},Array.isArray(value)?value:[value||'-'])
+      ]))),
+      el('div',{className:'record-card__actions'},[actions])
+    ]);
   }
   function labelJornada(v){
     if(v==='lun_sab') return 'Lunes a sabado';

@@ -26,20 +26,23 @@ export const RegistroSede = (mount, deps = {}) => {
           ])
         ])
       ]),
-      el('div', { className: 'table-wrap mt-2' }, [
-        el('table', { className: 'table', id: 'tblDependency' }, [
-          el('thead', {}, [el('tr', {}, [
-            el('th', { 'data-sort-dep': 'dependenciaNombre', style: 'cursor:pointer' }, ['Dependencia']),
-            el('th', { 'data-sort-dep': 'nroSedes', style: 'cursor:pointer' }, ['Nro sedes']),
-            el('th', { 'data-sort-dep': 'planeados', style: 'cursor:pointer' }, ['Planeados']),
-            el('th', { 'data-sort-dep': 'contratados', style: 'cursor:pointer' }, ['Contratados']),
-            el('th', { 'data-sort-dep': 'registrados', style: 'cursor:pointer' }, ['Registrados']),
-            el('th', { 'data-sort-dep': 'faltantes', style: 'cursor:pointer' }, ['Faltantes']),
-            el('th', { 'data-sort-dep': 'sobrantes', style: 'cursor:pointer' }, ['Sobrantes']),
-            el('th', {}, ['Detalle'])
-          ])]),
-          el('tbody', {})
-        ])
+      el('div', { className: 'responsive-records mt-2' }, [
+        el('div', { className: 'table-wrap responsive-table-view' }, [
+          el('table', { className: 'table', id: 'tblDependency' }, [
+            el('thead', {}, [el('tr', {}, [
+              el('th', { 'data-sort-dep': 'dependenciaNombre', style: 'cursor:pointer' }, ['Dependencia']),
+              el('th', { 'data-sort-dep': 'nroSedes', style: 'cursor:pointer' }, ['Nro sedes']),
+              el('th', { 'data-sort-dep': 'planeados', style: 'cursor:pointer' }, ['Planeados']),
+              el('th', { 'data-sort-dep': 'contratados', style: 'cursor:pointer' }, ['Contratados']),
+              el('th', { 'data-sort-dep': 'registrados', style: 'cursor:pointer' }, ['Registrados']),
+              el('th', { 'data-sort-dep': 'faltantes', style: 'cursor:pointer' }, ['Faltantes']),
+              el('th', { 'data-sort-dep': 'sobrantes', style: 'cursor:pointer' }, ['Sobrantes']),
+              el('th', {}, ['Detalle'])
+            ])]),
+            el('tbody', {})
+          ])
+        ]),
+        el('div', { id: 'registroDependencyCards', className: 'record-card-list' }, [])
       ]),
       el('p', { id: 'totDependency', className: 'text-muted' }, ['Total dependencias - Sedes: 0, Planeados: 0, Contratados: 0, Registrados: 0, Faltantes: 0, Sobrantes: 0'])
     ]),
@@ -63,45 +66,54 @@ export const RegistroSede = (mount, deps = {}) => {
           el('select', { id: 'sedeZoneFilter', className: 'input' }, [el('option', { value: '' }, ['Todas'])])
         ])
       ]),
-      el('div', { className: 'table-wrap mt-2' }, [
-        el('table', { className: 'table', id: 'tblTotals' }, [
-          el('thead', {}, [el('tr', {}, [
-            el('th', { 'data-sort-sede': 'sedeNombre', style: 'cursor:pointer' }, ['Sede']),
-            el('th', { 'data-sort-sede': 'zonaNombre', style: 'cursor:pointer' }, ['Zona']),
-            el('th', { 'data-sort-sede': 'planeados', style: 'cursor:pointer' }, ['Planeados']),
-            el('th', { 'data-sort-sede': 'contratados', style: 'cursor:pointer' }, ['Contratados']),
-            el('th', { 'data-sort-sede': 'registrados', style: 'cursor:pointer' }, ['Registrados']),
-            el('th', { 'data-sort-sede': 'faltantes', style: 'cursor:pointer' }, ['Faltantes']),
-            el('th', { 'data-sort-sede': 'sobrantes', style: 'cursor:pointer' }, ['Sobrantes']),
-            el('th', {}, ['Detalle'])
-          ])]),
-          el('tbody', {})
-        ])
+      el('div', { className: 'responsive-records mt-2' }, [
+        el('div', { className: 'table-wrap responsive-table-view' }, [
+          el('table', { className: 'table', id: 'tblTotals' }, [
+            el('thead', {}, [el('tr', {}, [
+              el('th', { 'data-sort-sede': 'sedeNombre', style: 'cursor:pointer' }, ['Sede']),
+              el('th', { 'data-sort-sede': 'zonaNombre', style: 'cursor:pointer' }, ['Zona']),
+              el('th', { 'data-sort-sede': 'planeados', style: 'cursor:pointer' }, ['Planeados']),
+              el('th', { 'data-sort-sede': 'contratados', style: 'cursor:pointer' }, ['Contratados']),
+              el('th', { 'data-sort-sede': 'registrados', style: 'cursor:pointer' }, ['Registrados']),
+              el('th', { 'data-sort-sede': 'faltantes', style: 'cursor:pointer' }, ['Faltantes']),
+              el('th', { 'data-sort-sede': 'sobrantes', style: 'cursor:pointer' }, ['Sobrantes']),
+              el('th', {}, ['Detalle'])
+            ])]),
+            el('tbody', {})
+          ])
+        ]),
+        el('div', { id: 'registroSedeCards', className: 'record-card-list' }, [])
       ]),
       el('p', { id: 'totRange', className: 'text-muted' }, ['Total sedes - Planeados: 0, Contratados: 0, Registrados: 0, Faltantes: 0, Sobrantes: 0'])
     ]),
     el('div', { className: 'section-block mt-2' }, [
       el('h3', { id: 'detailTitle', className: 'section-title' }, ['Detalle']),
-      el('div', { className: 'table-wrap' }, [
-        el('table', { className: 'table', id: 'tblDetail' }, [
-          el('thead', {}, [el('tr', {}, [
-            el('th', { 'data-sort-detail': 'fecha', style: 'cursor:pointer' }, ['Fecha']),
-            el('th', { 'data-sort-detail': 'sede', style: 'cursor:pointer' }, ['Sede']),
-            el('th', { 'data-sort-detail': 'zona', style: 'cursor:pointer' }, ['Zona']),
-            el('th', { 'data-sort-detail': 'documento', style: 'cursor:pointer' }, ['Documento']),
-            el('th', { 'data-sort-detail': 'nombre', style: 'cursor:pointer' }, ['Nombre']),
-            el('th', { 'data-sort-detail': 'estado', style: 'cursor:pointer' }, ['Estado'])
-          ])]),
-          el('tbody', {})
-        ])
+      el('div', { className: 'responsive-records' }, [
+        el('div', { className: 'table-wrap responsive-table-view' }, [
+          el('table', { className: 'table', id: 'tblDetail' }, [
+            el('thead', {}, [el('tr', {}, [
+              el('th', { 'data-sort-detail': 'fecha', style: 'cursor:pointer' }, ['Fecha']),
+              el('th', { 'data-sort-detail': 'sede', style: 'cursor:pointer' }, ['Sede']),
+              el('th', { 'data-sort-detail': 'zona', style: 'cursor:pointer' }, ['Zona']),
+              el('th', { 'data-sort-detail': 'documento', style: 'cursor:pointer' }, ['Documento']),
+              el('th', { 'data-sort-detail': 'nombre', style: 'cursor:pointer' }, ['Nombre']),
+              el('th', { 'data-sort-detail': 'estado', style: 'cursor:pointer' }, ['Estado'])
+            ])]),
+            el('tbody', {})
+          ])
+        ]),
+        el('div', { id: 'registroDetailCards', className: 'record-card-list' }, [])
       ])
     ])
   ]);
 
   const msg = qs('#msg', ui);
-  const dependencyPaginator = createTablePagination(ui, { id: 'registroDependency', after: '#tblDependency', onChange: () => renderDependency(currentDate()) });
-  const totalsPaginator = createTablePagination(ui, { id: 'registroSedes', after: '#tblTotals', onChange: () => renderTotals(currentDate()) });
-  const detailPaginator = createTablePagination(ui, { id: 'registroDetail', after: '#tblDetail', onChange: renderDetailRows });
+  const dependencyCards = qs('#registroDependencyCards', ui);
+  const sedeCards = qs('#registroSedeCards', ui);
+  const detailCards = qs('#registroDetailCards', ui);
+  const dependencyPaginator = createTablePagination(ui, { id: 'registroDependency', after: '#registroDependencyCards', onChange: () => renderDependency(currentDate()) });
+  const totalsPaginator = createTablePagination(ui, { id: 'registroSedes', after: '#registroSedeCards', onChange: () => renderTotals(currentDate()) });
+  const detailPaginator = createTablePagination(ui, { id: 'registroDetail', after: '#registroDetailCards', onChange: renderDetailRows });
   let sedeDailyRows = [];
   let dependencyRows = [];
   let totalsRows = [];
@@ -376,6 +388,7 @@ export const RegistroSede = (mount, deps = {}) => {
       );
       return tr;
     }));
+    dependencyCards.replaceChildren(...(pageRows.length ? pageRows.map((row) => dependencyCard(row, date)) : [emptyCard('Sin dependencias para mostrar.')]));
 
     const totals = filteredRows.reduce((acc, r) => ({
       nroSedes: acc.nroSedes + Number(r.nroSedes || 0),
@@ -444,6 +457,7 @@ export const RegistroSede = (mount, deps = {}) => {
       );
       return tr;
     }));
+    sedeCards.replaceChildren(...(pageRows.length ? pageRows.map((row) => sedeCard(row, date)) : [emptyCard('Sin sedes para mostrar.')]));
     const totals = rows.reduce((acc, r) => ({
       planeados: acc.planeados + Number(r.planeados || 0),
       contratados: acc.contratados + Number(r.contratados || 0),
@@ -548,7 +562,76 @@ export const RegistroSede = (mount, deps = {}) => {
       el('td', {}, [r.nombre || '-']),
       el('td', {}, [r.estado || '-'])
     ])));
+    detailCards.replaceChildren(...(pageRows.length ? pageRows.map((row) => detailCard(row)) : [emptyCard('Selecciona una dependencia o sede para ver el detalle.')]));
     updateSortIndicators('#tblDetail th[data-sort-detail]', 'data-sort-detail', detailSortKey, detailSortDir);
+  }
+
+  function dependencyCard(row, date) {
+    const btn = el('button', { className: 'btn', type: 'button' }, ['Ver detalle']);
+    btn.addEventListener('click', () => renderDependencyDetail(row.dependenciaKey, row.dependenciaNombre, date));
+    return summaryCard({
+      title: row.dependenciaNombre || '-',
+      subtitle: `${String(row.nroSedes || 0)} sedes`,
+      meta: [
+        ['Planeados', String(row.planeados)],
+        ['Contratados', String(row.contratados)],
+        ['Registrados', String(row.registrados)],
+        ['Faltantes', String(row.faltantes)],
+        ['Sobrantes', String(row.sobrantes)]
+      ],
+      actions: btn
+    });
+  }
+
+  function sedeCard(row, date) {
+    const btn = el('button', { className: 'btn', type: 'button' }, ['Ver detalle']);
+    btn.addEventListener('click', () => renderSedeDetail(row.sedeCodigo, row.sedeNombre, date));
+    return summaryCard({
+      title: row.sedeNombre || '-',
+      subtitle: row.zonaNombre || 'Sin zona',
+      meta: [
+        ['Planeados', String(row.planeados)],
+        ['Contratados', String(row.contratados)],
+        ['Registrados', String(row.registrados)],
+        ['Faltantes', String(row.faltantes)],
+        ['Sobrantes', String(row.sobrantes)]
+      ],
+      actions: btn
+    });
+  }
+
+  function detailCard(row) {
+    return summaryCard({
+      title: row.nombre || '-',
+      subtitle: `${row.fecha || '-'} - ${row.documento || '-'}`,
+      badge: el('span', { className: 'badge' }, ['Detalle']),
+      meta: [
+        ['Sede', row.sede || '-'],
+        ['Zona', row.zona || 'Sin zona'],
+        ['Estado', row.estado || '-']
+      ]
+    });
+  }
+
+  function summaryCard({ title, subtitle, meta = [], actions = null, badge = null }) {
+    return el('article', { className: 'record-card' }, [
+      el('div', { className: 'record-card__header' }, [
+        el('div', { className: 'record-card__identity' }, [
+          el('strong', { className: 'record-card__title' }, [title]),
+          el('span', { className: 'record-card__subtitle' }, [subtitle])
+        ]),
+        badge || el('span', { className: 'badge' }, ['Resumen'])
+      ]),
+      el('dl', { className: 'record-card__meta' }, meta.map(([label, value]) => el('div', { className: 'record-card__meta-item' }, [
+        el('dt', {}, [label]),
+        el('dd', {}, [value || '-'])
+      ]))),
+      actions ? el('div', { className: 'record-card__actions' }, [actions]) : null
+    ].filter(Boolean));
+  }
+
+  function emptyCard(text) {
+    return el('p', { className: 'text-muted record-card__empty' }, [text]);
   }
 
   async function loadSedesSnapshot() {
@@ -777,6 +860,7 @@ function getColombiaHolidaySet(year) {
     formatUtcDate(moveToFollowingMondayUtc(makeUtcDate(year, 1, 6))),
     formatUtcDate(moveToFollowingMondayUtc(makeUtcDate(year, 3, 19))),
     formatUtcDate(moveToFollowingMondayUtc(makeUtcDate(year, 6, 29))),
+    formatUtcDate(moveToFollowingMondayUtc(makeUtcDate(year, 7, 9))),
     formatUtcDate(moveToFollowingMondayUtc(makeUtcDate(year, 8, 15))),
     formatUtcDate(moveToFollowingMondayUtc(makeUtcDate(year, 10, 12))),
     formatUtcDate(moveToFollowingMondayUtc(makeUtcDate(year, 11, 1))),

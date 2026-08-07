@@ -9,45 +9,53 @@ export const ImportHistory = (mount, deps = {}) => {
       el('div', {}, [el('label', { className: 'label' }, ['Fecha cierre']), el('input', { id: 'fltDate', className: 'input', type: 'date' })]),
       el('button', { id: 'btnClear', className: 'btn', type: 'button' }, ['Limpiar filtros'])
     ]),
-    el('div', { className: 'mt-2 table-wrap' }, [
-      el('table', { className: 'table' }, [
-        el('thead', {}, [el('tr', {}, [
-          el('th', { 'data-sort': 'fecha', style: 'cursor:pointer' }, ['Fecha cierre']),
-          el('th', { 'data-sort': 'confirmedBy', style: 'cursor:pointer' }, ['Confirmado por']),
-          el('th', { 'data-sort': 'planeados', style: 'cursor:pointer' }, ['Planeados']),
-          el('th', { 'data-sort': 'contratados', style: 'cursor:pointer' }, ['Contratados']),
-          el('th', { 'data-sort': 'registrados', style: 'cursor:pointer' }, ['Asistencias']),
-          el('th', { 'data-sort': 'faltan', style: 'cursor:pointer' }, ['Faltan']),
-          el('th', { 'data-sort': 'sobran', style: 'cursor:pointer' }, ['Sobran']),
-          el('th', { 'data-sort': 'ausentismos', style: 'cursor:pointer' }, ['Ausentismos']),
-          el('th', {}, ['Detalle'])
-        ])]),
-        el('tbody', {})
-      ])
-    ]),
-    el('div', { className: 'section-block mt-2' }, [
-      el('h3', { id: 'detailTitle', className: 'section-title' }, ['Detalle del dia']),
-      el('div', { className: 'table-wrap' }, [
-        el('table', { className: 'table', id: 'tblDetail' }, [
+    el('div', { className: 'responsive-records mt-2' }, [
+      el('div', { className: 'table-wrap responsive-table-view' }, [
+        el('table', { className: 'table' }, [
           el('thead', {}, [el('tr', {}, [
-            el('th', { 'data-sort-detail': 'fecha', style: 'cursor:pointer' }, ['Fecha']),
-            el('th', { 'data-sort-detail': 'hora', style: 'cursor:pointer' }, ['Hora']),
-            el('th', { 'data-sort-detail': 'sede', style: 'cursor:pointer' }, ['Sede']),
-            el('th', { 'data-sort-detail': 'documento', style: 'cursor:pointer' }, ['Documento']),
-            el('th', { 'data-sort-detail': 'nombre', style: 'cursor:pointer' }, ['Nombre']),
-            el('th', { 'data-sort-detail': 'novedad', style: 'cursor:pointer' }, ['Novedad']),
-            el('th', { 'data-sort-detail': 'estado', style: 'cursor:pointer' }, ['Estado'])
+            el('th', { 'data-sort': 'fecha', style: 'cursor:pointer' }, ['Fecha cierre']),
+            el('th', { 'data-sort': 'confirmedBy', style: 'cursor:pointer' }, ['Confirmado por']),
+            el('th', { 'data-sort': 'planeados', style: 'cursor:pointer' }, ['Planeados']),
+            el('th', { 'data-sort': 'contratados', style: 'cursor:pointer' }, ['Contratados']),
+            el('th', { 'data-sort': 'registrados', style: 'cursor:pointer' }, ['Asistencias']),
+            el('th', { 'data-sort': 'faltan', style: 'cursor:pointer' }, ['Faltan']),
+            el('th', { 'data-sort': 'sobran', style: 'cursor:pointer' }, ['Sobran']),
+            el('th', { 'data-sort': 'ausentismos', style: 'cursor:pointer' }, ['Ausentismos']),
+            el('th', {}, ['Detalle'])
           ])]),
           el('tbody', {})
         ])
+      ]),
+      el('div', { id: 'historyCards', className: 'record-card-list' }, [])
+    ]),
+    el('div', { className: 'section-block mt-2' }, [
+      el('h3', { id: 'detailTitle', className: 'section-title' }, ['Detalle del dia']),
+      el('div', { className: 'responsive-records' }, [
+        el('div', { className: 'table-wrap responsive-table-view' }, [
+          el('table', { className: 'table', id: 'tblDetail' }, [
+            el('thead', {}, [el('tr', {}, [
+              el('th', { 'data-sort-detail': 'fecha', style: 'cursor:pointer' }, ['Fecha']),
+              el('th', { 'data-sort-detail': 'hora', style: 'cursor:pointer' }, ['Hora']),
+              el('th', { 'data-sort-detail': 'sede', style: 'cursor:pointer' }, ['Sede']),
+              el('th', { 'data-sort-detail': 'documento', style: 'cursor:pointer' }, ['Documento']),
+              el('th', { 'data-sort-detail': 'nombre', style: 'cursor:pointer' }, ['Nombre']),
+              el('th', { 'data-sort-detail': 'novedad', style: 'cursor:pointer' }, ['Novedad']),
+              el('th', { 'data-sort-detail': 'estado', style: 'cursor:pointer' }, ['Estado'])
+            ])]),
+            el('tbody', {})
+          ])
+        ]),
+        el('div', { id: 'historyDetailCards', className: 'record-card-list' }, [])
       ])
     ]),
     el('p', { id: 'msg', className: 'text-muted mt-2' }, ['Cargando...'])
   ]);
 
   const tbody = qs('tbody', ui);
-  const paginator = createTablePagination(ui, { id: 'importHistory', after: '.table-wrap', onChange: render });
-  const detailPaginator = createTablePagination(ui, { id: 'importHistoryDetail', after: '#tblDetail', onChange: renderDetail });
+  const cards = qs('#historyCards', ui);
+  const detailCards = qs('#historyDetailCards', ui);
+  const paginator = createTablePagination(ui, { id: 'importHistory', after: '#historyCards', onChange: render });
+  const detailPaginator = createTablePagination(ui, { id: 'importHistoryDetail', after: '#historyDetailCards', onChange: renderDetail });
   let snapshot = [];
   let sortKey = 'fecha';
   let sortDir = -1;
@@ -270,6 +278,7 @@ export const ImportHistory = (mount, deps = {}) => {
       );
       return tr;
     }));
+    cards.replaceChildren(...(pageRows.length ? pageRows.map((r) => historyCard(r)) : [el('p', { className: 'text-muted record-card__empty' }, ['Sin cierres para mostrar.'])]));
     qs('#msg', ui).textContent = `Total cierres filtrados: ${count}`;
     updateSortIndicators('th[data-sort]', sortKey, sortDir);
   }
@@ -303,7 +312,54 @@ export const ImportHistory = (mount, deps = {}) => {
       el('td', {}, [r.novedad]),
       el('td', {}, [r.estado])
     ])));
+    detailCards.replaceChildren(...(pageRows.length ? pageRows.map((r) => detailCard(r)) : [el('p', { className: 'text-muted record-card__empty' }, ['Selecciona un cierre para ver el detalle.'])]));
     updateSortIndicators('#tblDetail th[data-sort-detail]', detailSortKey, detailSortDir);
+  }
+
+  function historyCard(row) {
+    const btn = el('button', { className: 'btn', type: 'button' }, ['Ver detalle']);
+    btn.addEventListener('click', () => showDetail(row));
+    return el('article', { className: 'record-card' }, [
+      el('div', { className: 'record-card__header' }, [
+        el('div', { className: 'record-card__identity' }, [
+          el('strong', { className: 'record-card__title' }, [row.fecha || '-']),
+          el('span', { className: 'record-card__subtitle' }, [row.confirmedBy || '-'])
+        ]),
+        el('span', { className: 'badge' }, ['Cierre'])
+      ]),
+      el('dl', { className: 'record-card__meta' }, [
+        ['Planeados', String(row.planeados)],
+        ['Contratados', String(row.contratados)],
+        ['Asistencias', String(row.registrados)],
+        ['Faltan', String(row.faltan)],
+        ['Sobran', String(row.sobran)],
+        ['Ausentismos', String(row.ausentismos)]
+      ].map(([label, value]) => el('div', { className: 'record-card__meta-item' }, [
+        el('dt', {}, [label]),
+        el('dd', {}, [value || '-'])
+      ]))),
+      el('div', { className: 'record-card__actions' }, [btn])
+    ]);
+  }
+
+  function detailCard(row) {
+    return el('article', { className: 'record-card' }, [
+      el('div', { className: 'record-card__header' }, [
+        el('div', { className: 'record-card__identity' }, [
+          el('strong', { className: 'record-card__title' }, [row.nombre || '-']),
+          el('span', { className: 'record-card__subtitle' }, [`${row.fecha || '-'} ${row.hora || '-'} - ${row.documento || '-'}`])
+        ]),
+        el('span', { className: 'badge' }, ['Detalle'])
+      ]),
+      el('dl', { className: 'record-card__meta' }, [
+        ['Sede', row.sede || '-'],
+        ['Novedad', row.novedad || '-'],
+        ['Estado', row.estado || '-']
+      ].map(([label, value]) => el('div', { className: 'record-card__meta-item' }, [
+        el('dt', {}, [label]),
+        el('dd', {}, [value || '-'])
+      ])))
+    ]);
   }
 
   qs('#txtSearch', ui).addEventListener('input', () => { paginator.reset(); render(); });

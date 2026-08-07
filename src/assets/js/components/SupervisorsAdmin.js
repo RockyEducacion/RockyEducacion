@@ -23,20 +23,23 @@ export const SupervisorsAdmin=(mount,deps={})=>{
         el('div',{},[ el('label',{className:'label'},['Buscar']), el('input',{id:'txtSearch',className:'input',placeholder:'Codigo, documento, nombre o zona...'}) ]),
         el('div',{},[ el('label',{className:'label'},['Estado']), el('select',{id:'selStatus',className:'select'},[ el('option',{value:''},['Todos']), el('option',{value:'activo'},['Activos']), el('option',{value:'inactivo'},['Inactivos']) ]) ])
       ]),
-      el('div',{className:'mt-2 table-wrap'},[
-        el('table',{className:'table',id:'tbl'},[
-          el('thead',{},[ el('tr',{},[
-            el('th',{'data-sort':'codigo',style:'cursor:pointer'},['Codigo']),
-            el('th',{'data-sort':'documento',style:'cursor:pointer'},['Documento']),
-            el('th',{'data-sort':'nombre',style:'cursor:pointer'},['Nombre']),
-            el('th',{'data-sort':'zonaNombre',style:'cursor:pointer'},['Zona']),
-            el('th',{'data-sort':'estado',style:'cursor:pointer'},['Estado']),
-            el('th',{'data-sort':'fechaIngreso',style:'cursor:pointer'},['Ingreso']),
-            el('th',{'data-sort':'fechaRetiro',style:'cursor:pointer'},['Retiro']),
-            el('th',{},['Acciones'])
-          ]) ]),
-          el('tbody',{})
-        ])
+      el('div',{className:'responsive-records mt-2'},[
+        el('div',{className:'table-wrap responsive-table-view'},[
+          el('table',{className:'table',id:'tbl'},[
+            el('thead',{},[ el('tr',{},[
+              el('th',{'data-sort':'codigo',style:'cursor:pointer'},['Codigo']),
+              el('th',{'data-sort':'documento',style:'cursor:pointer'},['Documento']),
+              el('th',{'data-sort':'nombre',style:'cursor:pointer'},['Nombre']),
+              el('th',{'data-sort':'zonaNombre',style:'cursor:pointer'},['Zona']),
+              el('th',{'data-sort':'estado',style:'cursor:pointer'},['Estado']),
+              el('th',{'data-sort':'fechaIngreso',style:'cursor:pointer'},['Ingreso']),
+              el('th',{'data-sort':'fechaRetiro',style:'cursor:pointer'},['Retiro']),
+              el('th',{},['Acciones'])
+            ]) ]),
+            el('tbody',{})
+          ])
+        ]),
+        el('div',{id:'supervisorCards',className:'record-card-list'},[])
       ]),
       el('p',{id:'msg',className:'text-muted mt-2'},[' '])
     ])
@@ -73,9 +76,9 @@ export const SupervisorsAdmin=(mount,deps={})=>{
     const cur=zoneSelect.value;
     zoneSelect.replaceChildren(...buildOptions(zoneList,cur));
   }
-  let snapshot=[]; const tbody=ui.querySelector('tbody');
+  let snapshot=[]; const tbody=ui.querySelector('tbody'); const cards=qs('#supervisorCards',ui);
   let sortKey=''; let sortDir=1;
-  const paginator=createTablePagination(ui,{id:'supervisors',after:'#tabList .table-wrap',onChange:render});
+  const paginator=createTablePagination(ui,{id:'supervisors',after:'#tabList .responsive-records',onChange:render});
   let unZones=()=>{};
   let unEmp=()=>{};
   let employees=[];
@@ -114,6 +117,7 @@ export const SupervisorsAdmin=(mount,deps={})=>{
     const sorted=sortData(data);
     const pageRows=paginator.slice(sorted);
     tbody.replaceChildren(...pageRows.map(s=> row(s)));
+    cards.replaceChildren(...(pageRows.length?pageRows.map(s=> supervisorCard(s)):[el('p',{className:'text-muted record-card__empty'},['Sin supervisores para mostrar.'])]));
     const msg=qs('#msg',ui); if(msg) msg.textContent=`Total registros filtrados: ${data.length}`;
     updateSortIndicators();
   }
@@ -159,6 +163,37 @@ export const SupervisorsAdmin=(mount,deps={})=>{
     const btnInfo=el('button',{className:'btn btn--icon',title:'Ver informacion','aria-label':'Ver informacion'},['\u24D8']);
     btnInfo.addEventListener('click',()=>{ const info=auditInfoData(s); showInfoModal('Informacion del registro',[`Evento: ${info.action}`,`Usuario: ${info.user}`,`Fecha: ${info.date}`]); });
     box.append(btnEditZone,btnInfo); return box;
+  }
+  function supervisorCard(s){
+    const linked=isLinkedByDoc(s.documento);
+    const docValue=linked ? [s.documento||'-',' ',el('span',{className:'badge'},['Vinculado'])] : [s.documento||'-'];
+    return recordCard(s,{
+      title:s.nombre||'-',
+      subtitle:`Codigo: ${s.codigo||'-'}`,
+      meta:[
+        ['Documento',docValue],
+        ['Zona',s.zonaNombre||zoneNameByCode(s.zonaCodigo)],
+        ['Ingreso',formatDate(s.fechaIngreso)],
+        ['Retiro',formatDate(s.fechaRetiro)]
+      ],
+      actions:actionsCell(s)
+    });
+  }
+  function recordCard(item,{title,subtitle,meta=[],actions}){
+    return el('article',{className:'record-card'},[
+      el('div',{className:'record-card__header'},[
+        el('div',{className:'record-card__identity'},[
+          el('strong',{className:'record-card__title'},[title]),
+          el('span',{className:'record-card__subtitle'},[subtitle])
+        ]),
+        statusBadge(item.estado)
+      ]),
+      el('dl',{className:'record-card__meta'},meta.map(([label,value])=> el('div',{className:'record-card__meta-item'},[
+        el('dt',{},[label]),
+        el('dd',{},Array.isArray(value)?value:[value||'-'])
+      ]))),
+      el('div',{className:'record-card__actions'},[actions])
+    ]);
   }
   async function startEditZone(s){
     const zoneCode=String(s.zonaCodigo||'').trim();

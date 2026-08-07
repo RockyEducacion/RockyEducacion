@@ -71,13 +71,10 @@ export const Home = async (mount, deps = {}) => {
       deps.listDailyMetricsRange?.(monthStart, today) || []
     ]);
 
-    const todayMetrics = (metrics || []).find((row) => String(row?.fecha || '').trim() === today) || null;
-    const summary = todayMetrics
-      ? computeOperationalSummaryFromMetrics(sedes, todayMetrics)
-      : computeOperationalSummary(sedes, employees, today, historyRows);
+    const summary = computeOperationalSummary(sedes, employees, today, historyRows);
     renderSummary(summaryBlock, summary);
 
-    const chartData = buildMonthlySeries(monthStart, today, metrics || []);
+    const chartData = buildMonthlySeries(monthStart, today, metrics || [], { today, summary });
     renderMonthlyChart(chartBlock, chartData, monthStart, today);
   } catch (error) {
     renderSummary(summaryBlock, emptySummary());
@@ -228,6 +225,7 @@ function getColombiaHolidaySet(year) {
     formatUtcDate(moveToFollowingMondayUtc(makeUtcDate(year, 1, 6))),
     formatUtcDate(moveToFollowingMondayUtc(makeUtcDate(year, 3, 19))),
     formatUtcDate(moveToFollowingMondayUtc(makeUtcDate(year, 6, 29))),
+    formatUtcDate(moveToFollowingMondayUtc(makeUtcDate(year, 7, 9))),
     formatUtcDate(moveToFollowingMondayUtc(makeUtcDate(year, 8, 15))),
     formatUtcDate(moveToFollowingMondayUtc(makeUtcDate(year, 10, 12))),
     formatUtcDate(moveToFollowingMondayUtc(makeUtcDate(year, 11, 1))),
@@ -305,19 +303,6 @@ function buildHistoryByEmployeeId(rows = []) {
   }, new Map());
 }
 
-function computeOperationalSummaryFromMetrics(sedes = [], metrics = {}) {
-  const activeSedes = (sedes || []).filter((row) => String(row?.estado || 'activo').trim().toLowerCase() !== 'inactivo');
-  const planned = Number(metrics?.planned || 0);
-  const contracted = Number(metrics?.expected || 0);
-  return {
-    activeSedes: activeSedes.length,
-    planned,
-    contracted,
-    surplus: Math.max(contracted - planned, 0),
-    missing: Number(metrics?.noContracted || Math.max(planned - contracted, 0))
-  };
-}
-
 function computeOperationalSummary(sedes = [], employees = [], todayISO, historyRows = []) {
   const activeSedes = (sedes || []).filter((row) => String(row?.estado || 'activo').trim().toLowerCase() !== 'inactivo');
   const scheduledSedes = activeSedes.filter((row) => isSedeScheduledForDate(row, todayISO));
@@ -378,17 +363,18 @@ function renderSummary(block, summary) {
   note.textContent = `Planeacion institucional: ${summary.planned} cupos base y ${summary.contracted} contratados activos sin supernumerarios.`;
 }
 
-function buildMonthlySeries(from, to, metricsRows = []) {
+function buildMonthlySeries(from, to, metricsRows = [], live = {}) {
   const rowsByDate = new Map((metricsRows || []).map((row) => [String(row?.fecha || '').trim(), row]));
   const days = listDaysInRange(from, to);
   const rows = days.map((day) => {
     const row = rowsByDate.get(day) || {};
-    const planned = Number(row?.planned || 0);
-    const expected = Number(row?.expected || 0);
+    const useLiveSummary = day === live.today && row?.closed !== true && live.summary;
+    const planned = useLiveSummary ? Number(live.summary.planned || 0) : Number(row?.planned || 0);
+    const expected = useLiveSummary ? Number(live.summary.contracted || 0) : Number(row?.expected || 0);
     const attendance = Number(row?.attendanceCount || 0);
     const rawAbsenteeism = Number(row?.absenteeism || 0);
     const absenteeism = planned <= 0 ? 0 : rawAbsenteeism;
-    const noContracted = Number(row?.noContracted || 0);
+    const noContracted = useLiveSummary ? Number(live.summary.missing || 0) : Number(row?.noContracted || 0);
     const stackedTotal = attendance + absenteeism + noContracted;
     const surplus = Math.max(expected - planned, 0);
     const shortfall = Math.max(planned - stackedTotal, 0);

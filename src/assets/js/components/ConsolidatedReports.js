@@ -426,6 +426,7 @@ export const ConsolidatedReports = (mount, deps = {}) => {
       formatUtcDate(moveToFollowingMondayUtc(makeUtcDate(year, 1, 6))),
       formatUtcDate(moveToFollowingMondayUtc(makeUtcDate(year, 3, 19))),
       formatUtcDate(moveToFollowingMondayUtc(makeUtcDate(year, 6, 29))),
+      formatUtcDate(moveToFollowingMondayUtc(makeUtcDate(year, 7, 9))),
       formatUtcDate(moveToFollowingMondayUtc(makeUtcDate(year, 8, 15))),
       formatUtcDate(moveToFollowingMondayUtc(makeUtcDate(year, 10, 12))),
       formatUtcDate(moveToFollowingMondayUtc(makeUtcDate(year, 11, 1))),
