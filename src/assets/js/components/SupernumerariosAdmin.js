@@ -1,4 +1,4 @@
-import { el, qs } from '../utils/dom.js';
+import { el, qs, infoIcon } from '../utils/dom.js';
 import { showInfoModal } from '../utils/infoModal.js';
 import { showActionModal } from '../utils/actionModal.js';
 import { createTablePagination } from '../utils/pagination.js';
@@ -353,7 +353,7 @@ export const SupernumerariosAdmin=(mount,deps={})=>{
   }
   function actionsCell(e){
     const box=el('div',{className:'row-actions'},[]);
-    const btnInfo=el('button',{className:'btn btn--icon',title:'Ver informacion','aria-label':'Ver informacion'},['\u24D8']);
+    const btnInfo=el('button',{className:'btn btn--icon',title:'Ver informacion','aria-label':'Ver informacion'},[infoIcon()]);
     btnInfo.addEventListener('click',()=>{ const info=auditInfoData(e); showInfoModal('Informacion del registro',[`Evento: ${info.action}`,`Usuario: ${info.user}`,`Fecha: ${info.date}`]); });
     box.append(btnInfo); return box;
   }

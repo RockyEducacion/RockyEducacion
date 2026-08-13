@@ -1,4 +1,4 @@
-import { el, qs } from '../utils/dom.js';
+import { el, qs, infoIcon, lucideInlineIcon, moreIcon } from '../utils/dom.js';
 import { showInfoModal } from '../utils/infoModal.js';
 import { showActionModal } from '../utils/actionModal.js';
 import { createTablePagination } from '../utils/pagination.js';
@@ -539,12 +539,12 @@ export const SedesAdmin=(mount,deps={})=>{
     const box=el('div',{className:'row-actions'},[]);
     const canManageQrDevices=can(PERMS.MANAGE_QR_DEVICES);
     const qrDisabledReason=s.qrEnabled!==true?'Activa QR en la sede para registrar tablets':'No tienes permiso para administrar tablets QR';
-    const btnInfo=el('button',{className:'btn btn--icon',type:'button',title:'Ver informacion','aria-label':'Ver informacion'},['\u24D8']);
+    const btnInfo=el('button',{className:'btn btn--icon',type:'button',title:'Ver informacion','aria-label':'Ver informacion'},[infoIcon()]);
     btnInfo.addEventListener('click',()=>{ const info=auditInfoData(s); showInfoModal('Informacion del registro',[`Evento: ${info.action}`,`Usuario: ${info.user}`,`Fecha: ${info.date}`]); });
-    const btnQr=el('button',{className:'btn btn--icon',type:'button',title:canManageQrDevices && s.qrEnabled===true?'Registrar tablet QR':qrDisabledReason,'aria-label':'Registrar tablet QR'},['QR']);
+    const btnQr=el('button',{className:'btn btn--icon',type:'button',title:canManageQrDevices && s.qrEnabled===true?'Registrar tablet QR':qrDisabledReason,'aria-label':'Registrar tablet QR'},[lucideInlineIcon('qr-code','QR')]);
     btnQr.disabled=s.qrEnabled!==true || !canManageQrDevices;
     btnQr.addEventListener('click',()=> openRegisterQrDeviceModal(s));
-    const btnMore=el('button',{className:'btn btn--icon',type:'button',title:'Mas opciones','aria-label':'Mas opciones'},['\u22EF']);
+    const btnMore=el('button',{className:'btn btn--icon',type:'button',title:'Mas opciones','aria-label':'Mas opciones'},[moreIcon()]);
     btnMore.addEventListener('click',()=> openMoreOptionsModal(s));
     box.append(btnMore,btnQr,btnInfo); return box;
   }

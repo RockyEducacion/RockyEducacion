@@ -4,6 +4,7 @@ import { getState, subscribe } from '../state.js';
 import { can, isSuperAdmin, PERMS } from '../permissions.js';
 
 const MOBILE_BREAKPOINT = '(max-width: 900px)';
+const VALID_THEMES = new Set(['light', 'dark', 'color']);
 
 export const Sidebar = (deps = {}) => {
   const container = el('div', {});
@@ -33,10 +34,8 @@ export const Sidebar = (deps = {}) => {
 
   if (user && userProfile) {
     const govLinks = [];
-    if (isSuperAdmin()) {
-      govLinks.push(navLink('Centro de Permisos', '/permissions'));
-      govLinks.push(navLink('Auditoria', '/permissions-audit'));
-    }
+    if (isSuperAdmin() || can(PERMS.VIEW_PERMISSIONS)) govLinks.push(navLink('Centro de Permisos', '/permissions'));
+    if (isSuperAdmin() || can(PERMS.VIEW_AUDIT)) govLinks.push(navLink('Auditoria', '/permissions-audit'));
     if (can(PERMS.VIEW_USERS)) govLinks.push(navLink('Usuarios', '/users'));
     if (govLinks.length) sections.push(section('Gobierno', govLinks, 'gobierno', '/gobierno-dashboard'));
 
@@ -45,39 +44,45 @@ export const Sidebar = (deps = {}) => {
     if (can(PERMS.VIEW_DEPENDENCIES)) adminLinks.push(navLink('Dependencias', '/dependencies'));
     if (can(PERMS.VIEW_SEDES)) adminLinks.push(navLink('Sedes', '/sedes'));
     if (can(PERMS.VIEW_QR_SCANNER)) adminLinks.push(navLink('Lector QR', '/lector-qr'));
-    if (can(PERMS.MANAGE_QR_DEVICES)) adminLinks.push(navLink('Tablets QR', '/tablets-qr'));
+    if (can(PERMS.VIEW_QR_DEVICES)) adminLinks.push(navLink('Tablets QR', '/tablets-qr'));
     if (can(PERMS.VIEW_CARGOS)) adminLinks.push(navLink('Cargos', '/cargos'));
     if (can(PERMS.VIEW_NOVEDADES)) adminLinks.push(navLink('Novedades', '/novedades'));
     if (adminLinks.length) sections.push(section('Administracion', adminLinks, 'administracion', '/administracion-dashboard'));
 
     const employeeLinks = [];
     if (can(PERMS.VIEW_EMPLOYEES)) employeeLinks.push(navLink('Empleados', '/employees'));
-    if (can(PERMS.VIEW_EMPLOYEES)) employeeLinks.push(navLink('Novedades empleados', '/employee-novelties'));
+    if (can(PERMS.VIEW_EMPLOYEE_NOVELTIES)) employeeLinks.push(navLink('Novedades empleados', '/employee-novelties'));
     if (can(PERMS.VIEW_SUPERVISORS)) employeeLinks.push(navLink('Supervisores', '/supervisors'));
-    if (can(PERMS.UPLOAD_DATA)) employeeLinks.push(navLink('Incapacidades', '/upload'));
+    if (can(PERMS.VIEW_INCAPACITIES)) employeeLinks.push(navLink('Incapacidades', '/upload'));
     if (employeeLinks.length) sections.push(section('Empleados', employeeLinks, 'empleados', '/empleados-dashboard'));
 
     const opLinks = [];
-    if (can(PERMS.IMPORT_DATA)) opLinks.push(navLink('Registro Diario', '/registros-vivo', { badgeId: 'sidebarRegistroDiarioBadge' }));
+    if (can(PERMS.VIEW_OPERATION_REGISTRY)) opLinks.push(navLink('Registro Diario', '/registros-vivo', { badgeId: 'sidebarRegistroDiarioBadge' }));
     if (can(PERMS.VIEW_QR_DAILY_REGISTRY)) opLinks.push(navLink('Registro QR', '/registro-qr'));
     if (can(PERMS.VIEW_SUPERNUMERARIOS)) opLinks.push(navLink('Supernumerarios', '/supernumerarios', { badgeId: 'sidebarSupernumerariosFreeBadge', badgeAlwaysVisible: true, badgeAriaLabel: '0 supernumerarios libres hoy' }));
-    if (can(PERMS.IMPORT_DATA)) opLinks.push(navLink('Registro Sede', '/registro-sede'));
+    if (can(PERMS.VIEW_OPERATION_REGISTRY)) opLinks.push(navLink('Registro Sede', '/registro-sede'));
     if (can(PERMS.VIEW_IMPORT_HISTORY)) opLinks.push(navLink('Historial', '/import-history'));
     if (opLinks.length) sections.push(section('Operacion', opLinks, 'operacion', '/operacion-dashboard'));
 
     const reportLinks = [];
     const dailyReportLinks = [];
+    if (can(PERMS.VIEW_REPORTS_EMPLOYEES)) reportLinks.push(navLink('Empleados', '/reports-employees'));
+    if (can(PERMS.VIEW_REPORTS_HIRING)) reportLinks.push(navLink('Contratacion por Sedes', '/reports-hiring'));
     if (can(PERMS.VIEW_REPORTS_CLIENT)) dailyReportLinks.push(navLink('Historico Registro Diario', '/reports-daily-history'));
-    if (can(PERMS.MANAGE_ABSENTEEISM)) dailyReportLinks.push(navLink('Ausentismo', '/absenteeism'));
+    if (can(PERMS.VIEW_REPORTS_QR_HISTORY)) dailyReportLinks.push(navLink('Historico Registro QR', '/reports-qr-history'));
+    if (can(PERMS.VIEW_REPORTS_ABSENTEEISM)) dailyReportLinks.push(navLink('Ausentismo', '/absenteeism'));
     if (dailyReportLinks.length) reportLinks.push(subSection('Reportes diarios', dailyReportLinks, 'reportes_diarios'));
-    if (can(PERMS.VIEW_REPORTS_COMPANY)) reportLinks.push(navLink('Reportes consolidados', '/reports-consolidated'));
+    const consolidatedReportLinks = [];
+    if (can(PERMS.VIEW_REPORTS_NOVELTIES_CONSOLIDATED)) consolidatedReportLinks.push(navLink('Consolidado Novedades', '/reports-novelties-consolidated'));
+    if (can(PERMS.VIEW_REPORTS_SERVICES_CONSOLIDATED)) consolidatedReportLinks.push(navLink('Consolidado Servicios', '/reports-services-consolidated'));
+    if (consolidatedReportLinks.length) reportLinks.push(subSection('Reportes consolidados', consolidatedReportLinks, 'reportes_consolidados'));
     if (reportLinks.length) {
       sections.push(section('Reportes', reportLinks, 'reportes', '/reportes-dashboard'));
     }
 
     const bulkLinks = [];
-    if (can(PERMS.EDIT_SEDES)) bulkLinks.push(navLink('Cargue sedes', '/bulk-upload-sedes'));
-    if (can(PERMS.EDIT_EMPLOYEES)) bulkLinks.push(navLink('Cargue empleados', '/bulk-upload'));
+    if (can(PERMS.VIEW_BULK_UPLOAD_SEDES)) bulkLinks.push(navLink('Cargue sedes', '/bulk-upload-sedes'));
+    if (can(PERMS.VIEW_BULK_UPLOAD_EMPLOYEES)) bulkLinks.push(navLink('Cargue empleados', '/bulk-upload'));
     if (bulkLinks.length) sections.push(section('Cargue masivo', bulkLinks, 'cargue_masivo', '/cargue-masivo-dashboard'));
 
   }
@@ -109,7 +114,7 @@ export const Sidebar = (deps = {}) => {
     syncCollapseBtn();
   });
 
-  const applyTheme = (t) => document.documentElement.setAttribute('data-theme', t);
+  const applyTheme = (t) => document.documentElement.setAttribute('data-theme', VALID_THEMES.has(t) ? t : 'light');
   applyTheme(getState().theme);
   const unsub = subscribe('theme', applyTheme);
   const unPendingBadge = bindPendingNoveltyBadge(container, deps);
@@ -264,6 +269,9 @@ function scheduleLucideIcons(attempt = 0) {
           width: 18,
           height: 18
         }
+      });
+      document.querySelectorAll('.sidebar__item-icon,.sidebar__section-icon,.sidebar__subsection-icon').forEach((icon) => {
+        icon.classList.toggle('has-lucide-svg', Boolean(icon.querySelector('svg')));
       });
       document.documentElement.classList.add('has-lucide-icons');
       return;
@@ -675,7 +683,7 @@ function getSectionIconMeta(key) {
     administracion: { icon: 'building-2', fallback: 'AD' },
     empleados: { icon: 'users', fallback: 'EM' },
     operacion: { icon: 'clipboard-check', fallback: 'OP' },
-    reportes: { icon: 'bar-chart-3', fallback: 'RP' },
+    reportes: { icon: 'file-bar-chart', fallback: 'RP' },
     cargue_masivo: { icon: 'upload', fallback: 'CM' }
   };
   return map[key] || { icon: 'folder', fallback: '>>' };
@@ -683,7 +691,8 @@ function getSectionIconMeta(key) {
 
 function getSubsectionIconMeta(key) {
   const map = {
-    reportes_diarios: { icon: 'calendar-days', fallback: 'D' }
+    reportes_diarios: { icon: 'calendar-days', fallback: 'D' },
+    reportes_consolidados: { icon: 'files', fallback: 'C' }
   };
   return map[key] || { icon: 'folder-open', fallback: '-' };
 }
@@ -713,11 +722,16 @@ function getNavIconMeta(route) {
     '/registro-qr': { icon: 'qr-code', fallback: 'RQ' },
     '/import-history': { icon: 'clock-3', fallback: 'HI' },
     '/absenteeism': { icon: 'user-x', fallback: 'AU' },
-    '/reports': { icon: 'bar-chart-3', fallback: 'RP' },
-    '/reports-client': { icon: 'bar-chart-3', fallback: 'RC' },
-    '/reports-company': { icon: 'pie-chart', fallback: 'RE' },
-    '/reports-daily-history': { icon: 'history', fallback: 'HR' },
-    '/reports-consolidated': { icon: 'layers', fallback: 'RC' },
+    '/reports': { icon: 'file-bar-chart', fallback: 'RP' },
+    '/reports-client': { icon: 'file-bar-chart', fallback: 'RC' },
+    '/reports-company': { icon: 'file-spreadsheet', fallback: 'RE' },
+    '/reports-daily-history': { icon: 'calendar-check', fallback: 'HR' },
+    '/reports-qr-history': { icon: 'file-search', fallback: 'HQ' },
+    '/reports-employees': { icon: 'file-text', fallback: 'EM' },
+    '/reports-hiring': { icon: 'file-spreadsheet', fallback: 'CS' },
+    '/reports-novelties-consolidated': { icon: 'file-warning', fallback: 'CN' },
+    '/reports-services-consolidated': { icon: 'table', fallback: 'CS' },
+    '/reports-consolidated': { icon: 'files', fallback: 'RC' },
     '/upload': { icon: 'file-heart', fallback: 'IN' }
   };
   return map[route] || { icon: 'circle', fallback: '>>' };

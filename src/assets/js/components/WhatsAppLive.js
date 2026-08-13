@@ -1,4 +1,4 @@
-import { el, qs, enableSectionToggles } from '../utils/dom.js';
+import { el, qs, enableSectionToggles, infoIcon } from '../utils/dom.js';
 import { showInfoModal } from '../utils/infoModal.js';
 
 const colombiaHolidayCache = new Map();
@@ -695,7 +695,7 @@ export const WhatsAppLive = (mount, deps = {}) => {
   function infoButtonForRow(row) {
     const isSuper = row?.isSupernumerario === true || String(row?.tipoPersonal || '').trim() === 'supernumerario';
     const target = isSuper ? 'supernumerario' : 'empleado';
-    const btn = el('button', { className: 'btn', type: 'button', title: `Ver informacion del ${target}`, 'aria-label': `Ver informacion del ${target}` }, ['ⓘ']);
+    const btn = el('button', { className: 'btn btn--icon', type: 'button', title: `Ver informacion del ${target}`, 'aria-label': `Ver informacion del ${target}` }, [infoIcon()]);
     btn.addEventListener('click', () => {
       const info = employeeInfoSnapshot(row);
       showInfoModal(`Informacion del ${target}`, [

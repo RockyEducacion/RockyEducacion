@@ -13,7 +13,7 @@ export const config = {
   cronSecret: String(process.env.CRON_SECRET || '').trim(),
   employeePortalAllowedOrigins: String(process.env.EMPLOYEE_PORTAL_ALLOWED_ORIGINS || '').split(',').map((value) => value.trim()).filter(Boolean),
   employeePortalSessionHours: Number(process.env.EMPLOYEE_PORTAL_SESSION_HOURS || 12),
-  publicBackendUrl: String(process.env.WHATSAPP_BACKEND_PUBLIC_URL || process.env.PUBLIC_BACKEND_URL || 'https://capcol-whatsapp-backend.vercel.app').replace(/\/+$/, ''),
+  publicBackendUrl: String(process.env.WHATSAPP_BACKEND_PUBLIC_URL || process.env.PUBLIC_BACKEND_URL || 'https://rockyeducacion-whatsapp.vercel.app').replace(/\/+$/, ''),
   qrTokenMinutes: Number(process.env.ATTENDANCE_QR_TOKEN_MINUTES || 10),
   whatsappVerifyToken: required('WHATSAPP_VERIFY_TOKEN'),
   whatsappAccessToken: String(process.env.WHATSAPP_ACCESS_TOKEN || '').trim(),
@@ -21,3 +21,21 @@ export const config = {
   whatsappGraphVersion: String(process.env.WHATSAPP_GRAPH_VERSION || 'v25.0').trim(),
   whatsappAppSecret: String(process.env.WHATSAPP_APP_SECRET || '').trim()
 };
+
+export function isAllowedCorsOrigin(origin) {
+  const value = String(origin || '').trim();
+  if (!value) return false;
+  if (isLocalDevOrigin(value)) return true;
+  if (!config.employeePortalAllowedOrigins.length) return true;
+  return config.employeePortalAllowedOrigins.includes(value);
+}
+
+function isLocalDevOrigin(origin) {
+  try {
+    const url = new URL(origin);
+    return ['http:', 'https:'].includes(url.protocol)
+      && ['localhost', '127.0.0.1', '::1'].includes(url.hostname);
+  } catch (_) {
+    return false;
+  }
+}

@@ -12,8 +12,8 @@ export const CargueMasivoDashboard = (mount, deps = {}) => renderModuleDashboard
     'Revisa catalogos maestros antes de importar datos masivos.'
   ],
   actions: [
-    { label: 'Cargue sedes', route: '/bulk-upload-sedes', perm: PERMS.EDIT_SEDES, detail: 'Plantilla y validacion de sedes.' },
-    { label: 'Cargue empleados', route: '/bulk-upload', perm: PERMS.EDIT_EMPLOYEES, detail: 'Plantilla y validacion de empleados.' }
+    { label: 'Cargue sedes', route: '/bulk-upload-sedes', perm: PERMS.VIEW_BULK_UPLOAD_SEDES, detail: 'Plantilla y validacion de sedes.' },
+    { label: 'Cargue empleados', route: '/bulk-upload', perm: PERMS.VIEW_BULK_UPLOAD_EMPLOYEES, detail: 'Plantilla y validacion de empleados.' }
   ],
   metrics: [
     { label: 'Sedes activas', tone: 'green', load: async (deps) => countStream(deps.streamSedes, isActive) },

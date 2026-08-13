@@ -1,5 +1,5 @@
 import crypto from 'node:crypto';
-import { config } from './config.js';
+import { config, isAllowedCorsOrigin } from './config.js';
 import { supabaseAdmin } from './supabase.js';
 
 const MAIN_PORTAL_ONLY_ROLES = ['superadmin', 'admin', 'editor', 'consultor', 'tablet_qr'];
@@ -115,7 +115,7 @@ function buildEmployeeSessionPayload(sessionRow, employeeRow = null) {
 function employeePortalCors(req, res) {
   const origin = String(req.headers.origin || '').trim();
   if (!origin) return;
-  if (config.employeePortalAllowedOrigins.length && !config.employeePortalAllowedOrigins.includes(origin)) return;
+  if (!isAllowedCorsOrigin(origin)) return;
 
   res.setHeader('Access-Control-Allow-Origin', origin);
   res.setHeader('Vary', 'Origin');

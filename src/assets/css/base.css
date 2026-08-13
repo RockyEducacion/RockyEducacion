@@ -104,6 +104,35 @@ html[data-theme="dark"]{
   --shadow:0 22px 44px rgba(0,0,0,.34);
   --shadow-soft:0 14px 28px rgba(0,0,0,.26)
 }
+html[data-theme="color"]{
+  --color-primary:#1455c8;
+  --color-primary-600:#0d3f97;
+  --color-primary-soft:rgba(20,85,200,.14);
+  --color-accent:#1d9a6c;
+  --color-accent-600:#12704f;
+  --color-accent-soft:rgba(29,154,108,.14);
+  --color-bg:#edf5fb;
+  --color-surface:#ffffff;
+  --color-surface-alt:#f2f8f4;
+  --color-fg:#143149;
+  --color-muted:#5b7488;
+  --color-border:#c9dae9;
+  --color-border-strong:#a9bfd3;
+  --bg-tint-1:rgba(20,85,200,.24);
+  --bg-tint-2:rgba(29,154,108,.2);
+  --sidebar-bg:linear-gradient(180deg,rgba(12,55,118,.98),rgba(15,82,92,.96));
+  --sidebar-fg:#eef9ff;
+  --sidebar-muted:#b9d6e4;
+  --sidebar-border:rgba(255,255,255,.16);
+  --sidebar-hover:rgba(255,255,255,.1);
+  --sidebar-active:rgba(255,255,255,.16);
+  --header-bg:linear-gradient(90deg,rgba(255,255,255,.9),rgba(233,246,239,.88));
+  --header-fg:#143149;
+  --header-border:rgba(160,189,213,.7);
+  --header-hover:rgba(20,85,200,.09);
+  --shadow:0 20px 44px rgba(14,60,112,.12);
+  --shadow-soft:0 12px 28px rgba(14,60,112,.09)
+}
 html[data-theme="dark"] body{
   background:
     radial-gradient(920px 420px at -8% 0%,rgba(99,176,255,.12),transparent 62%),
@@ -121,6 +150,25 @@ html[data-theme="dark"] body::after{
     linear-gradient(180deg,rgba(255,255,255,.08) 0%,rgba(255,255,255,0) 100%),
     linear-gradient(90deg,rgba(34,108,54,.88) 0%,rgba(28,90,45,.84) 100%);
   box-shadow:0 -8px 28px rgba(0,0,0,.22)
+}
+html[data-theme="color"] body{
+  background:
+    radial-gradient(820px 360px at -10% -4%,rgba(20,85,200,.28),transparent 62%),
+    radial-gradient(760px 360px at 102% 6%,rgba(29,154,108,.25),transparent 58%),
+    radial-gradient(560px 260px at 54% 104%,rgba(212,151,31,.14),transparent 64%),
+    linear-gradient(180deg,#f4faff 0%,#e4f2fb 42%,#e0f2e8 100%)
+}
+html[data-theme="color"] body::before{
+  background:
+    linear-gradient(150deg,rgba(255,255,255,.22) 0%,rgba(255,255,255,0) 52%),
+    linear-gradient(0deg,rgba(14,72,156,.92) 0%,rgba(20,85,200,.88) 55%,rgba(15,67,138,.82) 100%);
+  box-shadow:0 -16px 54px rgba(14,60,112,.16)
+}
+html[data-theme="color"] body::after{
+  background:
+    linear-gradient(180deg,rgba(255,255,255,.88) 0%,rgba(255,255,255,.18) 100%),
+    linear-gradient(90deg,rgba(29,154,108,.94) 0%,rgba(212,151,31,.86) 100%);
+  box-shadow:0 -10px 30px rgba(28,108,78,.16)
 }
 a{color:var(--color-primary);text-decoration:none}
 a:hover{text-decoration:none}

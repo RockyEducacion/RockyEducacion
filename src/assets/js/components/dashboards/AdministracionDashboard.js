@@ -17,7 +17,7 @@ export const AdministracionDashboard = (mount, deps = {}) => renderModuleDashboa
     { label: 'Sedes', route: '/sedes', perm: PERMS.VIEW_SEDES, detail: 'Puntos de operacion y QR.' },
     { label: 'Cargos', route: '/cargos', perm: PERMS.VIEW_CARGOS, detail: 'Cargos y salarios.' },
     { label: 'Novedades', route: '/novedades', perm: PERMS.VIEW_NOVEDADES, detail: 'Tipos de novedades y reglas.' },
-    { label: 'Tablets QR', route: '/tablets-qr', perm: PERMS.MANAGE_QR_DEVICES, detail: 'Dispositivos registrados.' }
+    { label: 'Tablets QR', route: '/tablets-qr', perm: PERMS.VIEW_QR_DEVICES, detail: 'Dispositivos registrados.' }
   ],
   metrics: [
     { label: 'Sedes activas', tone: 'green', load: async (deps) => countStream(deps.streamSedes, isActive) },

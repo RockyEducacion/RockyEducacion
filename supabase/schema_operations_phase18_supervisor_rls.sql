@@ -152,12 +152,17 @@ drop function if exists public.list_supernumerarios_for_current_supervisor();
 create or replace function public.list_supernumerarios_for_current_supervisor()
 returns table (
   id uuid,
+  codigo text,
   documento text,
   nombre text,
   telefono text,
   estado text,
+  cargo_codigo text,
+  cargo_nombre text,
   sede_codigo text,
-  sede_nombre text
+  sede_nombre text,
+  fecha_ingreso date,
+  fecha_retiro date
 )
 language sql
 stable
@@ -166,12 +171,17 @@ set search_path = public
 as $$
   select
     e.id,
+    e.codigo,
     e.documento,
     e.nombre,
     e.telefono,
     e.estado,
+    e.cargo_codigo,
+    e.cargo_nombre,
     e.sede_codigo,
-    e.sede_nombre
+    e.sede_nombre,
+    e.fecha_ingreso::date,
+    e.fecha_retiro::date
   from public.employees e
   left join public.cargos c on c.codigo = e.cargo_codigo
   where coalesce(e.estado, 'activo') <> 'inactivo'

@@ -1,13 +1,13 @@
 import { el, qs } from '../utils/dom.js';
-import { isSuperAdmin } from '../permissions.js';
+import { can, isSuperAdmin, PERMS } from '../permissions.js';
 import { createTablePagination } from '../utils/pagination.js';
 
 export const PermissionsAudit = (mount, deps = {}) => {
-  if (!isSuperAdmin()) {
+  if (!isSuperAdmin() && !can(PERMS.VIEW_AUDIT)) {
     mount.replaceChildren(
       el('section', { className: 'main-card' }, [
         el('h2', {}, ['Auditoria de permisos']),
-        el('p', {}, ['Solo SuperAdmin puede consultar la auditoria de permisos.'])
+        el('p', {}, ['No tienes permiso para consultar la auditoria de permisos.'])
       ])
     );
     return;

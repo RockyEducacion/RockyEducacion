@@ -1,4 +1,4 @@
-import { el, qs } from '../utils/dom.js';
+import { el, qs, infoIcon, editIcon, cancelIcon } from '../utils/dom.js';
 import { showInfoModal } from '../utils/infoModal.js';
 import { createTablePagination } from '../utils/pagination.js';
 import { showActionModal } from '../utils/actionModal.js';
@@ -370,13 +370,13 @@ export const EmployeeNovelties = (mount, deps = {}) => {
   }
 
   function actionsCell(row) {
-    const btnInfo = el('button', { className: 'btn btn--icon', type: 'button', title: 'Ver informacion', 'aria-label': 'Ver informacion' }, ['\u24D8']);
+    const btnInfo = el('button', { className: 'btn btn--icon', type: 'button', title: 'Ver informacion', 'aria-label': 'Ver informacion' }, [infoIcon()]);
     btnInfo.addEventListener('click', () => showInfo(row));
     const actions = [];
     if (canManageSchedules && row.source === 'history' && row.isProgrammed && row.previousHistoryItem) {
-      const btnEdit = el('button', { className: 'btn btn--icon', type: 'button', title: 'Editar programacion', 'aria-label': 'Editar programacion' }, ['\u270E']);
+      const btnEdit = el('button', { className: 'btn btn--icon', type: 'button', title: 'Editar programacion', 'aria-label': 'Editar programacion' }, [editIcon()]);
       btnEdit.addEventListener('click', () => editProgrammedAssignment(row));
-      const btnCancel = el('button', { className: 'btn btn--icon btn--danger', type: 'button', title: 'Cancelar programacion', 'aria-label': 'Cancelar programacion' }, ['\u2716']);
+      const btnCancel = el('button', { className: 'btn btn--icon btn--danger', type: 'button', title: 'Cancelar programacion', 'aria-label': 'Cancelar programacion' }, [cancelIcon()]);
       btnCancel.addEventListener('click', () => cancelProgrammedAssignment(row));
       actions.push(btnEdit, btnCancel);
     }

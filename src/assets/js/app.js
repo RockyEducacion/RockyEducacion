@@ -30,6 +30,10 @@ import { CargueMasivoSedesAdmin } from './components/CargueMasivoSedesAdmin.js';
 import { ImportHistory } from './components/ImportHistory.js';
 import { Absenteeism } from './components/Absenteeism.js';
 import { HistoricalDailyRegistry } from './components/HistoricalDailyRegistry.js';
+import { HistoricalQrRegistry } from './components/HistoricalQrRegistry.js';
+import { EmployeesReport } from './components/EmployeesReport.js';
+import { HiringBySedeReport } from './components/HiringBySedeReport.js';
+import { ConsolidatedNoveltiesReport } from './components/ConsolidatedNoveltiesReport.js';
 import { ConsolidatedReports } from './components/ConsolidatedReports.js';
 import { ImportReplacements } from './components/ImportReplacements.js';
 import { CargarDatos } from './components/CargarDatos.js';
@@ -67,6 +71,19 @@ let unsubRoleMatrix=null; let unsubUserOverrides=null; let unsubAudit=null;
 let authSyncToken = 0;
 let routerStarted = false;
 const PUBLIC_AUTH_ROUTES = new Set(['/login', '/forgot-password', '/reset-password']);
+const REPORT_VIEW_PERMISSIONS = [
+  PERMS.VIEW_REPORTS_CLIENT,
+  PERMS.VIEW_REPORTS_QR_HISTORY,
+  PERMS.VIEW_REPORTS_ABSENTEEISM,
+  PERMS.VIEW_REPORTS_EMPLOYEES,
+  PERMS.VIEW_REPORTS_HIRING,
+  PERMS.VIEW_REPORTS_NOVELTIES_CONSOLIDATED,
+  PERMS.VIEW_REPORTS_SERVICES_CONSOLIDATED
+];
+const CONSOLIDATED_REPORT_VIEW_PERMISSIONS = [
+  PERMS.VIEW_REPORTS_NOVELTIES_CONSOLIDATED,
+  PERMS.VIEW_REPORTS_SERVICES_CONSOLIDATED
+];
 const guardWrite=(perm,fn)=> async (...args)=>{
   if(typeof fn!=='function') return undefined;
   if(!can(perm)) throw new Error('No tienes permiso de edicion para esta seccion.');
@@ -88,18 +105,18 @@ const guardWrite=(perm,fn)=> async (...args)=>{
         streamZones:fb.streamZones, createZone:guardWrite(PERMS.EDIT_ZONES,fb.createZone), updateZone:guardWrite(PERMS.EDIT_ZONES,fb.updateZone), setZoneStatus:guardWrite(PERMS.EDIT_ZONES,fb.setZoneStatus), findZoneByCode:fb.findZoneByCode, getNextZoneCode:fb.getNextZoneCode,
         streamDependencies:fb.streamDependencies, createDependency:guardWrite(PERMS.EDIT_DEPENDENCIES,fb.createDependency), updateDependency:guardWrite(PERMS.EDIT_DEPENDENCIES,fb.updateDependency), setDependencyStatus:guardWrite(PERMS.EDIT_DEPENDENCIES,fb.setDependencyStatus), findDependencyByCode:fb.findDependencyByCode, getNextDependencyCode:fb.getNextDependencyCode,
         streamSedes:fb.streamSedes, createSede:guardWrite(PERMS.EDIT_SEDES,fb.createSede), updateSede:guardWrite(PERMS.EDIT_SEDES,fb.updateSede), setSedeStatus:guardWrite(PERMS.EDIT_SEDES,fb.setSedeStatus), findSedeByCode:fb.findSedeByCode, getNextSedeCode:fb.getNextSedeCode,
-        createQrDevice:guardWrite(PERMS.MANAGE_QR_DEVICES,fb.createQrDevice), setQrDeviceStatus:guardWrite(PERMS.MANAGE_QR_DEVICES,fb.setQrDeviceStatus), listQrDevices:fb.listQrDevices, streamQrDevices:fb.streamQrDevices, scanAttendanceQr:fb.scanAttendanceQr, listDailyQrRecords:fb.listDailyQrRecords, streamDailyQrRecords:fb.streamDailyQrRecords,
-        createSedesBulk:guardWrite(PERMS.EDIT_SEDES,fb.createSedesBulk),
+        createQrDevice:guardWrite(PERMS.MANAGE_QR_DEVICES,fb.createQrDevice), setQrDeviceStatus:guardWrite(PERMS.MANAGE_QR_DEVICES,fb.setQrDeviceStatus), listQrDevices:fb.listQrDevices, streamQrDevices:fb.streamQrDevices, scanAttendanceQr:guardWrite(PERMS.USE_QR_SCANNER,fb.scanAttendanceQr), listDailyQrRecords:fb.listDailyQrRecords, streamDailyQrRecords:fb.streamDailyQrRecords,
+        createSedesBulk:guardWrite(PERMS.BULK_UPLOAD_SEDES,fb.createSedesBulk),
         streamEmployees:fb.streamEmployees, streamActiveBaseEmployees:fb.streamActiveBaseEmployees, createEmployee:guardWrite(PERMS.EDIT_EMPLOYEES,fb.createEmployee), rehireEmployee:guardWrite(PERMS.EDIT_EMPLOYEES,fb.rehireEmployee), updateEmployee:guardWrite(PERMS.EDIT_EMPLOYEES,fb.updateEmployee), setEmployeeStatus:guardWrite(PERMS.EDIT_EMPLOYEES,fb.setEmployeeStatus), updateProgrammedEmployeeAssignment:guardWrite(PERMS.MANAGE_EMPLOYEE_SCHEDULES,fb.updateProgrammedEmployeeAssignment), cancelProgrammedEmployeeAssignment:guardWrite(PERMS.MANAGE_EMPLOYEE_SCHEDULES,fb.cancelProgrammedEmployeeAssignment), findEmployeeByCode:fb.findEmployeeByCode, findEmployeeByDocument:fb.findEmployeeByDocument, getNextEmployeeCode:fb.getNextEmployeeCode,
         generateEmployeeCertificate:fb.generateEmployeeCertificate,
         streamEmployeeCargoHistory:fb.streamEmployeeCargoHistory, streamEmployeeCargoHistoryAll:fb.streamEmployeeCargoHistoryAll,
-        createEmployeesBulk:guardWrite(PERMS.EDIT_EMPLOYEES,fb.createEmployeesBulk),
+        createEmployeesBulk:guardWrite(PERMS.BULK_UPLOAD_EMPLOYEES,fb.createEmployeesBulk),
         streamSupernumerarios:fb.streamSupernumerarios, listSupervisorAvailableSupernumerarios:fb.listSupervisorAvailableSupernumerarios, createSupernumerario:guardWrite(PERMS.EDIT_SUPERNUMERARIOS,fb.createSupernumerario), updateSupernumerario:guardWrite(PERMS.EDIT_SUPERNUMERARIOS,fb.updateSupernumerario), setSupernumerarioStatus:guardWrite(PERMS.EDIT_SUPERNUMERARIOS,fb.setSupernumerarioStatus), findSupernumerarioByCode:fb.findSupernumerarioByCode, findSupernumerarioByDocument:fb.findSupernumerarioByDocument, getNextSupernumerarioCode:fb.getNextSupernumerarioCode,
         streamCargos:fb.streamCargos, createCargo:guardWrite(PERMS.EDIT_CARGOS,fb.createCargo), updateCargo:guardWrite(PERMS.EDIT_CARGOS,fb.updateCargo), setCargoStatus:guardWrite(PERMS.EDIT_CARGOS,fb.setCargoStatus), findCargoByCode:fb.findCargoByCode, getNextCargoCode:fb.getNextCargoCode,
         streamNovedades:fb.streamNovedades, createNovedad:guardWrite(PERMS.EDIT_NOVEDADES,fb.createNovedad), updateNovedad:guardWrite(PERMS.EDIT_NOVEDADES,fb.updateNovedad), setNovedadStatus:guardWrite(PERMS.EDIT_NOVEDADES,fb.setNovedadStatus), findNovedadByCode:fb.findNovedadByCode, findNovedadByCodigoNovedad:fb.findNovedadByCodigoNovedad, getNextNovedadCode:fb.getNextNovedadCode,
         streamSupervisors:fb.streamSupervisors, createSupervisor:guardWrite(PERMS.EDIT_SUPERVISORS,fb.createSupervisor), updateSupervisor:guardWrite(PERMS.EDIT_SUPERVISORS,fb.updateSupervisor), setSupervisorStatus:guardWrite(PERMS.EDIT_SUPERVISORS,fb.setSupervisorStatus), findSupervisorByCode:fb.findSupervisorByCode, findSupervisorByDocument:fb.findSupervisorByDocument, getNextSupervisorCode:fb.getNextSupervisorCode,
-        confirmImportOperation:fb.confirmImportOperation, saveImportReplacements:fb.saveImportReplacements,
-        closeOperationDayManual:fb.closeOperationDayManual,
+        confirmImportOperation:guardWrite(PERMS.MANAGE_OPERATION_REGISTRY,fb.confirmImportOperation), saveImportReplacements:guardWrite(PERMS.MANAGE_OPERATION_REGISTRY,fb.saveImportReplacements),
+        closeOperationDayManual:guardWrite(PERMS.MANAGE_OPERATION_REGISTRY,fb.closeOperationDayManual),
         isOperationDayClosed:fb.isOperationDayClosed, listClosedOperationDaysRange:fb.listClosedOperationDaysRange, listDailyClosuresRange:fb.listDailyClosuresRange,
         listDailySedeClosuresRange:fb.listDailySedeClosuresRange,
         listSedeStatusRange:fb.listSedeStatusRange, listAttendanceRange:fb.listAttendanceRange, listImportReplacementsRange:fb.listImportReplacementsRange, listSupernumerarioReplacementOccupancy:fb.listSupernumerarioReplacementOccupancy, listEmployeeDailyStatusRange:fb.listEmployeeDailyStatusRange,
@@ -107,10 +124,10 @@ const guardWrite=(perm,fn)=> async (...args)=>{
         streamDailyMetricsByDate:fb.streamDailyMetricsByDate,
         streamIncapacitadosByDate:fb.streamIncapacitadosByDate,
         streamIncapacidades:fb.streamIncapacidades,
-        uploadIncapacidadSupport:fb.uploadIncapacidadSupport,
-        createIncapacidad:fb.createIncapacidad,
-        updateIncapacidad:fb.updateIncapacidad,
-        setIncapacidadStatus:fb.setIncapacidadStatus,
+        uploadIncapacidadSupport:guardWrite(PERMS.MANAGE_INCAPACITIES,fb.uploadIncapacidadSupport),
+        createIncapacidad:guardWrite(PERMS.MANAGE_INCAPACITIES,fb.createIncapacidad),
+        updateIncapacidad:guardWrite(PERMS.MANAGE_INCAPACITIES,fb.updateIncapacidad),
+        setIncapacidadStatus:guardWrite(PERMS.MANAGE_INCAPACITIES,fb.setIncapacidadStatus),
         listIncapacidadesRange:fb.listIncapacidadesRange,
         streamImportHistory:fb.streamImportHistory, streamDailyClosures:fb.streamDailyClosures, streamWhatsAppIncoming:fb.streamWhatsAppIncoming,
         streamAttendanceByDate:fb.streamAttendanceByDate, streamAttendanceRecent:fb.streamAttendanceRecent, streamImportReplacementsByDate:fb.streamImportReplacementsByDate
@@ -175,55 +192,73 @@ const guardWrite=(perm,fn)=> async (...args)=>{
   addRoute('/notes', ()=> requireAuth(()=> Notes(root)));
 
   // Gobierno
-  addRoute('/gobierno-dashboard', ()=> requireAuth(()=> guardAny([PERMS.VIEW_USERS], ()=> GobiernoDashboard(root, deps), { allowSuperAdmin: true })));
-  addRoute('/permissions', ()=> requireAuth(()=> { if(!isSuperAdmin()) return block('Solo SuperAdmin puede ver esto.'); return PermissionsCenter(root, deps); }));
-  addRoute('/permissions-audit', ()=> requireAuth(()=> { if(!isSuperAdmin()) return block('Solo SuperAdmin puede ver esto.'); return PermissionsAudit(root, deps); }));
+  addRoute('/gobierno-dashboard', ()=> requireAuth(()=> guardAny([PERMS.VIEW_USERS, PERMS.VIEW_PERMISSIONS, PERMS.VIEW_AUDIT], ()=> GobiernoDashboard(root, deps), { allowSuperAdmin: true })));
+  addRoute('/permissions', ()=> requireAuth(()=> { if(!isSuperAdmin() && !can(PERMS.VIEW_PERMISSIONS)) return block('No tienes permiso para acceder a esta sección.'); return PermissionsCenter(root, deps); }));
+  addRoute('/permissions-audit', ()=> requireAuth(()=> { if(!isSuperAdmin() && !can(PERMS.VIEW_AUDIT)) return block('No tienes permiso para consultar auditoria.'); return PermissionsAudit(root, deps); }));
 
   // Administración
-  addRoute('/administracion-dashboard', ()=> requireAuth(()=> guardAny([PERMS.VIEW_ZONES, PERMS.VIEW_DEPENDENCIES, PERMS.VIEW_SEDES, PERMS.VIEW_QR_SCANNER, PERMS.MANAGE_QR_DEVICES, PERMS.VIEW_CARGOS, PERMS.VIEW_NOVEDADES], ()=> AdministracionDashboard(root, deps))));
+  addRoute('/administracion-dashboard', ()=> requireAuth(()=> guardAny([PERMS.VIEW_ZONES, PERMS.VIEW_DEPENDENCIES, PERMS.VIEW_SEDES, PERMS.VIEW_QR_SCANNER, PERMS.VIEW_QR_DEVICES, PERMS.VIEW_CARGOS, PERMS.VIEW_NOVEDADES], ()=> AdministracionDashboard(root, deps))));
   addRoute('/users', ()=> requireAuth(()=> guard(PERMS.VIEW_USERS, ()=> UsersAdmin(root, deps))));
   addRoute('/zones', ()=> requireAuth(()=> guard(PERMS.VIEW_ZONES, ()=> ZonesAdmin(root, deps))));
   addRoute('/dependencies', ()=> requireAuth(()=> guard(PERMS.VIEW_DEPENDENCIES, ()=> DependenciesAdmin(root, deps))));
   addRoute('/sedes', ()=> requireAuth(()=> guard(PERMS.VIEW_SEDES, ()=> SedesAdmin(root, deps))));
-  addRoute('/bulk-upload-sedes', ()=> requireAuth(()=> guard(PERMS.EDIT_SEDES, ()=> CargueMasivoSedesAdmin(root, deps))));
-  addRoute('/empleados-dashboard', ()=> requireAuth(()=> guardAny([PERMS.VIEW_EMPLOYEES, PERMS.VIEW_SUPERVISORS, PERMS.UPLOAD_DATA], ()=> EmpleadosDashboard(root, deps))));
+  addRoute('/bulk-upload-sedes', ()=> requireAuth(()=> guard(PERMS.VIEW_BULK_UPLOAD_SEDES, ()=> CargueMasivoSedesAdmin(root, deps))));
+  addRoute('/empleados-dashboard', ()=> requireAuth(()=> guardAny([PERMS.VIEW_EMPLOYEES, PERMS.VIEW_EMPLOYEE_NOVELTIES, PERMS.VIEW_SUPERVISORS, PERMS.VIEW_INCAPACITIES], ()=> EmpleadosDashboard(root, deps))));
   addRoute('/employees', ()=> requireAuth(()=> guard(PERMS.VIEW_EMPLOYEES, ()=> EmployeesAdmin(root, deps))));
-  addRoute('/employee-novelties', ()=> requireAuth(()=> guard(PERMS.VIEW_EMPLOYEES, ()=> EmployeeNovelties(root, deps))));
+  addRoute('/employee-novelties', ()=> requireAuth(()=> guard(PERMS.VIEW_EMPLOYEE_NOVELTIES, ()=> EmployeeNovelties(root, deps))));
   addRoute('/supernumerarios', ()=> requireAuth(()=> guard(PERMS.VIEW_SUPERNUMERARIOS, ()=> SupernumerariosAdmin(root, deps))));
-  addRoute('/bulk-upload', ()=> requireAuth(()=> guard(PERMS.EDIT_EMPLOYEES, ()=> CargueMasivoAdmin(root, deps))));
+  addRoute('/bulk-upload', ()=> requireAuth(()=> guard(PERMS.VIEW_BULK_UPLOAD_EMPLOYEES, ()=> CargueMasivoAdmin(root, deps))));
   addRoute('/cargos', ()=> requireAuth(()=> guard(PERMS.VIEW_CARGOS, ()=> CargosAdmin(root, deps))));
   addRoute('/novedades', ()=> requireAuth(()=> guard(PERMS.VIEW_NOVEDADES, ()=> NovedadesAdmin(root, deps))));
   addRoute('/supervisors', ()=> requireAuth(()=> guard(PERMS.VIEW_SUPERVISORS, ()=> SupervisorsAdmin(root, deps))));
 
   // Operación
-  addRoute('/operacion-dashboard', ()=> requireAuth(()=> guardAny([PERMS.IMPORT_DATA, PERMS.VIEW_QR_DAILY_REGISTRY, PERMS.VIEW_SUPERNUMERARIOS, PERMS.VIEW_IMPORT_HISTORY], ()=> OperacionDashboard(root, deps))));
+  addRoute('/operacion-dashboard', ()=> requireAuth(()=> guardAny([PERMS.VIEW_OPERATION_REGISTRY, PERMS.VIEW_QR_DAILY_REGISTRY, PERMS.VIEW_SUPERNUMERARIOS, PERMS.VIEW_IMPORT_HISTORY], ()=> OperacionDashboard(root, deps))));
   addRoute('/imports', ()=> { navigate('/registros-vivo'); return null; });
   addRoute('/whatsapp-live', ()=> { navigate('/registros-vivo'); return null; });
-  addRoute('/registros-vivo', ()=> requireAuth(()=> guard(PERMS.IMPORT_DATA, ()=> WhatsAppLive(root, deps))));
-  addRoute('/registro-sede', ()=> requireAuth(()=> guard(PERMS.IMPORT_DATA, ()=> RegistroSede(root, deps))));
+  addRoute('/registros-vivo', ()=> requireAuth(()=> guard(PERMS.VIEW_OPERATION_REGISTRY, ()=> WhatsAppLive(root, deps))));
+  addRoute('/registro-sede', ()=> requireAuth(()=> guard(PERMS.VIEW_OPERATION_REGISTRY, ()=> RegistroSede(root, deps))));
   addRoute('/lector-qr', ()=> requireAuth(()=> guard(PERMS.VIEW_QR_SCANNER, ()=> QrTabletScanner(root, deps))));
-  addRoute('/tablets-qr', ()=> requireAuth(()=> guard(PERMS.MANAGE_QR_DEVICES, ()=> QrDevicesInfo(root, deps))));
+  addRoute('/tablets-qr', ()=> requireAuth(()=> guard(PERMS.VIEW_QR_DEVICES, ()=> QrDevicesInfo(root, deps))));
   addRoute('/registro-qr', ()=> requireAuth(()=> guard(PERMS.VIEW_QR_DAILY_REGISTRY, ()=> QrDailyRegistry(root, deps))));
-  addRoute('/imports-replacements', ()=> requireAuth(()=> guard(PERMS.IMPORT_DATA, ()=> ImportReplacements(root, deps))));
+  addRoute('/imports-replacements', ()=> requireAuth(()=> guard(PERMS.VIEW_OPERATION_REGISTRY, ()=> ImportReplacements(root, deps))));
   addRoute('/import-history', ()=> requireAuth(()=> guard(PERMS.VIEW_IMPORT_HISTORY, ()=> ImportHistory(root, deps))));
-  addRoute('/absenteeism', ()=> requireAuth(()=> guard(PERMS.MANAGE_ABSENTEEISM, ()=> Absenteeism(root, deps))));
+  addRoute('/absenteeism', ()=> requireAuth(()=> guard(PERMS.VIEW_REPORTS_ABSENTEEISM, ()=> Absenteeism(root, deps))));
 
   // Consultor
-  addRoute('/reportes-dashboard', ()=> requireAuth(()=> guardAny([PERMS.VIEW_REPORTS_CLIENT, PERMS.MANAGE_ABSENTEEISM, PERMS.VIEW_REPORTS_COMPANY], ()=> ReportesDashboard(root, deps))));
+  addRoute('/reportes-dashboard', ()=> requireAuth(()=> guardAny(REPORT_VIEW_PERMISSIONS, ()=> ReportesDashboard(root, deps))));
   addRoute('/reports', ()=> requireAuth(()=> {
     if (can(PERMS.VIEW_REPORTS_CLIENT)) { navigate('/reports-daily-history'); return null; }
-    if (can(PERMS.VIEW_REPORTS_COMPANY)) { navigate('/reports-consolidated'); return null; }
+    if (can(PERMS.VIEW_REPORTS_QR_HISTORY)) { navigate('/reports-qr-history'); return null; }
+    if (can(PERMS.VIEW_REPORTS_ABSENTEEISM)) { navigate('/absenteeism'); return null; }
+    if (can(PERMS.VIEW_REPORTS_EMPLOYEES)) { navigate('/reports-employees'); return null; }
+    if (can(PERMS.VIEW_REPORTS_HIRING)) { navigate('/reports-hiring'); return null; }
+    if (can(PERMS.VIEW_REPORTS_NOVELTIES_CONSOLIDATED)) { navigate('/reports-novelties-consolidated'); return null; }
+    if (can(PERMS.VIEW_REPORTS_SERVICES_CONSOLIDATED)) { navigate('/reports-services-consolidated'); return null; }
     return block('No tienes permiso para acceder a esta seccion.');
   }));
   addRoute('/reports-client', ()=> { navigate('/reports-daily-history'); return null; });
-  addRoute('/reports-company', ()=> { navigate('/reports-consolidated'); return null; });
+  addRoute('/reports-company', ()=> requireAuth(()=> guardAny(CONSOLIDATED_REPORT_VIEW_PERMISSIONS, ()=> {
+    if (can(PERMS.VIEW_REPORTS_NOVELTIES_CONSOLIDATED)) { navigate('/reports-novelties-consolidated'); return null; }
+    if (can(PERMS.VIEW_REPORTS_SERVICES_CONSOLIDATED)) { navigate('/reports-services-consolidated'); return null; }
+    return block('No tienes permiso para acceder a esta seccion.');
+  })));
   addRoute('/reports-daily', ()=> { navigate('/reports-daily-history'); return null; });
   addRoute('/reports-daily-history', ()=> requireAuth(()=> guard(PERMS.VIEW_REPORTS_CLIENT, ()=> HistoricalDailyRegistry(root, deps))));
-  addRoute('/reports-consolidated', ()=> requireAuth(()=> guard(PERMS.VIEW_REPORTS_COMPANY, ()=> ConsolidatedReports(root, deps))));
+  addRoute('/reports-qr-history', ()=> requireAuth(()=> guard(PERMS.VIEW_REPORTS_QR_HISTORY, ()=> HistoricalQrRegistry(root, deps))));
+  addRoute('/reports-employees', ()=> requireAuth(()=> guard(PERMS.VIEW_REPORTS_EMPLOYEES, ()=> EmployeesReport(root, deps))));
+  addRoute('/reports-hiring', ()=> requireAuth(()=> guard(PERMS.VIEW_REPORTS_HIRING, ()=> HiringBySedeReport(root, deps))));
+  addRoute('/reports-novelties-consolidated', ()=> requireAuth(()=> guard(PERMS.VIEW_REPORTS_NOVELTIES_CONSOLIDATED, ()=> ConsolidatedNoveltiesReport(root, deps))));
+  addRoute('/reports-services-consolidated', ()=> requireAuth(()=> guard(PERMS.VIEW_REPORTS_SERVICES_CONSOLIDATED, ()=> ConsolidatedReports(root, deps))));
+  addRoute('/reports-consolidated', ()=> requireAuth(()=> guardAny(CONSOLIDATED_REPORT_VIEW_PERMISSIONS, ()=> {
+    if (can(PERMS.VIEW_REPORTS_NOVELTIES_CONSOLIDATED)) { navigate('/reports-novelties-consolidated'); return null; }
+    if (can(PERMS.VIEW_REPORTS_SERVICES_CONSOLIDATED)) { navigate('/reports-services-consolidated'); return null; }
+    return block('No tienes permiso para acceder a esta seccion.');
+  })));
 
   // Supervisor/Empleado
-  addRoute('/cargue-masivo-dashboard', ()=> requireAuth(()=> guardAny([PERMS.EDIT_SEDES, PERMS.EDIT_EMPLOYEES], ()=> CargueMasivoDashboard(root, deps))));
-  addRoute('/upload', ()=> requireAuth(()=> guard(PERMS.UPLOAD_DATA, ()=> CargarDatos(root, deps))));
+  addRoute('/cargue-masivo-dashboard', ()=> requireAuth(()=> guardAny([PERMS.VIEW_BULK_UPLOAD_SEDES, PERMS.VIEW_BULK_UPLOAD_EMPLOYEES], ()=> CargueMasivoDashboard(root, deps))));
+  addRoute('/upload', ()=> requireAuth(()=> guard(PERMS.VIEW_INCAPACITIES, ()=> CargarDatos(root, deps))));
 })();
 function getRoutePath(){ return (window.location.hash || '#/login').replace('#', '').split('?')[0]; }
 function isPublicAuthRoute(){ return PUBLIC_AUTH_ROUTES.has(getRoutePath()); }

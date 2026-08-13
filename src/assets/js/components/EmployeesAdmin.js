@@ -1,4 +1,4 @@
-import { el, qs } from '../utils/dom.js';
+import { el, qs, infoIcon, moreIcon, viewIcon } from '../utils/dom.js';
 import { showInfoModal } from '../utils/infoModal.js';
 import { showActionModal } from '../utils/actionModal.js';
 import { createTablePagination } from '../utils/pagination.js';
@@ -390,7 +390,8 @@ export const EmployeesAdmin=(mount,deps={})=>{
   function statusBadge(st){ return el('span',{className:'badge '+(st==='activo'?'badge--ok':'badge--off')},[st||'-']); }
   function assignmentCellText(assignment={},kind='sede'){
     if(kind==='cargo') return assignment?.cargoNombre||cargoNameByCode(assignment?.cargoCodigo)||assignment?.cargoCodigo||'-';
-    return assignment?.sedeNombre||sedeNameByCode(assignment?.sedeCodigo)||assignment?.sedeCodigo||'-';
+    const catalogName = sedeNameByCode(assignment?.sedeCodigo);
+    return catalogName !== '-' ? catalogName : (assignment?.sedeNombre||assignment?.sedeCodigo||'-');
   }
   function programmedBadge(assignment=null,kind='sede'){
     if(!assignment) return null;
@@ -576,6 +577,13 @@ export const EmployeesAdmin=(mount,deps={})=>{
         { id:'documento', label:'Documento', type:'text', required:true, value:e.documento||'' },
         { id:'nombre', label:'Nombre completo', type:'text', required:true, value:e.nombre||'' },
         { id:'telefono', label:'Telefono', type:'text', required:true, value:e.telefono||'' },
+        { id:'fechaNacimiento', label:'Fecha nacimiento', type:'date', value:toInputDate(e.fechaNacimiento) },
+        { id:'eps', label:'EPS', type:'text', value:e.eps||'' },
+        { id:'afp', label:'AFP', type:'text', value:e.afp||'' },
+        { id:'arlRiesgo', label:'Riesgo ARL', type:'text', value:e.arlRiesgo||'' },
+        { id:'dotacionCamisa', label:'Camisa', type:'text', value:e.dotacionCamisa||'' },
+        { id:'dotacionPantalon', label:'Pantalon', type:'text', value:e.dotacionPantalon||'' },
+        { id:'dotacionZapatos', label:'Zapatos', type:'text', value:e.dotacionZapatos||'' },
         { id:'fechaIngreso', label:'Fecha ingreso', type:'date', required:true, value:toInputDate(e.fechaIngreso) },
         { id:'detail', label:'Detalle de la modificacion', type:'textarea', required:true, placeholder:'Describe brevemente el cambio realizado' }
       ]
@@ -585,7 +593,16 @@ export const EmployeesAdmin=(mount,deps={})=>{
     const newDoc=String(modal.values.documento||'').trim();
     const newName=String(modal.values.nombre||'').trim();
     const newPhone=String(modal.values.telefono||'').trim();
+    const newFechaNacimiento=String(modal.values.fechaNacimiento||'').trim();
+    const newEps=String(modal.values.eps||'').trim();
+    const newAfp=String(modal.values.afp||'').trim();
+    const newArlRiesgo=String(modal.values.arlRiesgo||'').trim();
+    const newDotacionCamisa=String(modal.values.dotacionCamisa||'').trim();
+    const newDotacionPantalon=String(modal.values.dotacionPantalon||'').trim();
+    const newDotacionZapatos=String(modal.values.dotacionZapatos||'').trim();
     const newIngreso=String(modal.values.fechaIngreso||'').trim();
+    if(newFechaNacimiento && !validInputDate(newFechaNacimiento)) return alert('Selecciona una fecha de nacimiento valida.');
+    if(newFechaNacimiento && newFechaNacimiento>todayInputDate()) return alert('La fecha de nacimiento no puede ser futura.');
     if(!/^\d{4}-\d{2}-\d{2}$/.test(newIngreso)) return alert('Selecciona la fecha de ingreso.');
     const currentRetiro=toInputDate(e.fechaRetiro);
     if(currentRetiro && newIngreso>currentRetiro) return alert('La fecha de ingreso no puede ser posterior a la fecha de retiro.');
@@ -597,9 +614,16 @@ export const EmployeesAdmin=(mount,deps={})=>{
         documento:newDoc,
         nombre:newName,
         telefono:newPhone,
+        fechaNacimiento:newFechaNacimiento||null,
+        eps:newEps||null,
+        afp:newAfp||null,
+        arlRiesgo:newArlRiesgo||null,
+        dotacionCamisa:newDotacionCamisa||null,
+        dotacionPantalon:newDotacionPantalon||null,
+        dotacionZapatos:newDotacionZapatos||null,
         fechaIngreso:new Date(`${newIngreso}T00:00:00`)
       });
-      await deps.addAuditLog?.({ targetType:'employee', targetId:e.id, action:'update_employee', before:{ codigo:e.codigo, documento:e.documento, nombre:e.nombre, telefono:e.telefono, fechaIngreso:e.fechaIngreso||null }, after:{ codigo:newCode, documento:newDoc, nombre:newName, telefono:newPhone, fechaIngreso:newIngreso }, note:modal.values.detail||null });
+      await deps.addAuditLog?.({ targetType:'employee', targetId:e.id, action:'update_employee', before:{ codigo:e.codigo, documento:e.documento, nombre:e.nombre, telefono:e.telefono, fechaNacimiento:e.fechaNacimiento||null, eps:e.eps||null, afp:e.afp||null, arlRiesgo:e.arlRiesgo||null, dotacionCamisa:e.dotacionCamisa||null, dotacionPantalon:e.dotacionPantalon||null, dotacionZapatos:e.dotacionZapatos||null, fechaIngreso:e.fechaIngreso||null }, after:{ codigo:newCode, documento:newDoc, nombre:newName, telefono:newPhone, fechaNacimiento:newFechaNacimiento||null, eps:newEps||null, afp:newAfp||null, arlRiesgo:newArlRiesgo||null, dotacionCamisa:newDotacionCamisa||null, dotacionPantalon:newDotacionPantalon||null, dotacionZapatos:newDotacionZapatos||null, fechaIngreso:newIngreso }, note:modal.values.detail||null });
     }catch(err){ alert('Error: '+(err?.message||err)); }
   }
   async function openTransferEmployeeModal(e){
@@ -768,15 +792,65 @@ export const EmployeesAdmin=(mount,deps={})=>{
   }
   function actionsCell(e){
     const box=el('div',{className:'row-actions'},[]);
-    const btnMore=el('button',{className:'btn btn--icon',type:'button',title:'Mas opciones','aria-label':'Mas opciones'},['\u22EF']);
+    const btnMore=el('button',{className:'btn btn--icon',type:'button',title:'Mas opciones','aria-label':'Mas opciones'},[moreIcon()]);
     btnMore.addEventListener('click',()=> openMoreOptionsModal(e));
-    const btnInfo=el('button',{className:'btn btn--icon',type:'button',title:'Ver informacion','aria-label':'Ver informacion'},['\u24D8']);
+    const btnView=el('button',{className:'btn btn--icon',type:'button',title:'Ver ficha','aria-label':'Ver ficha'},[viewIcon()]);
+    btnView.addEventListener('click',()=>{ openEmployeeDetailModal(e); });
+    const btnInfo=el('button',{className:'btn btn--icon',type:'button',title:'Ver informacion','aria-label':'Ver informacion'},[infoIcon()]);
     btnInfo.addEventListener('click',()=>{ openCargoHistoryModal(e); });
-    box.append(btnMore,btnInfo);
+    box.append(btnMore,btnView,btnInfo);
     return box;
+  }
+  function openEmployeeDetailModal(e){
+    showInfoModal(`Ficha del empleado - ${e?.nombre||'-'}`,[employeeDetailContent(e)]);
+  }
+  function employeeDetailContent(e){
+    const view=employeeAssignmentView(e);
+    const current=view.current||{};
+    return el('div',{className:'employee-detail'},[
+      detailSection('Datos basicos',[
+        ['Codigo',e.codigo],
+        ['Documento',e.documento],
+        ['Nombre',e.nombre],
+        ['Telefono',e.telefono],
+        ['Fecha nacimiento',formatInputDate(e.fechaNacimiento)],
+        ['Estado',e.estado],
+        ['Cargo actual',assignmentCellText(current,'cargo')],
+        ['Sede actual',assignmentCellText(current,'sede')],
+        ['Ingreso',formatDate(current.fechaIngreso||e.fechaIngreso)],
+        ['Retiro',formatDate(e.fechaRetiro)]
+      ]),
+      detailSection('Seguridad social',[
+        ['EPS',e.eps],
+        ['AFP',e.afp],
+        ['Riesgo ARL',e.arlRiesgo]
+      ]),
+      detailSection('Dotacion',[
+        ['Camisa',e.dotacionCamisa],
+        ['Pantalon',e.dotacionPantalon],
+        ['Zapatos',e.dotacionZapatos]
+      ])
+    ]);
+  }
+  function detailSection(title,items=[]){
+    return el('section',{className:'employee-detail__section'},[
+      el('h4',{className:'employee-detail__heading'},[title]),
+      el('dl',{className:'employee-detail__grid'},items.map(([label,value])=> el('div',{className:'employee-detail__item'},[
+        el('dt',{},[label]),
+        el('dd',{},[detailValue(value)])
+      ])))
+    ]);
+  }
+  function detailValue(value){
+    const text=String(value ?? '').trim();
+    return text || '-';
   }
   function toInputDate(ts){
     try{
+      if(typeof ts==='string'){
+        const raw=ts.trim();
+        if(/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw;
+      }
       const d=ts?.toDate? ts.toDate(): (ts? new Date(ts): null);
       if(!d) return '';
       const pad=(n)=> String(n).padStart(2,'0');

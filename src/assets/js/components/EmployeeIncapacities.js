@@ -1,4 +1,4 @@
-import { el, qs } from '../utils/dom.js';
+import { el, qs, viewIcon } from '../utils/dom.js';
 import { showInfoModal } from '../utils/infoModal.js';
 
 const SUPPORT_ACCEPT = 'application/pdf,image/png,image/jpeg,image/webp';
@@ -122,11 +122,13 @@ export function EmployeeIncapacities(mount, { apiRequest, session } = {}) {
     const actions = [supportButton];
     if (hasSupport) {
       actions.unshift(el('a', {
-        className: 'btn',
+        className: 'btn btn--icon',
         href: row.soporteUrl,
         target: '_blank',
-        rel: 'noopener noreferrer'
-      }, ['Ver soporte']));
+        rel: 'noopener noreferrer',
+        title: 'Ver soporte',
+        'aria-label': 'Ver soporte'
+      }, [viewIcon()]));
     }
 
     return el('article', { className: `employee-incapacity-item ${hasSupport ? 'has-support' : 'missing-support'}` }, [

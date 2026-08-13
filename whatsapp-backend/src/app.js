@@ -2,7 +2,7 @@
 import crypto from 'node:crypto';
 import express from 'express';
 import QRCode from 'qrcode';
-import { config } from './config.js';
+import { config, isAllowedCorsOrigin } from './config.js';
 import { buildEmployeeCertificatePdf, certificateFileName, normalizeCertificateType } from './certificates/certificate-service.js';
 import { getActiveEmployeePortalContext, registerEmployeePortalRoutes } from './employee-portal.js';
 import { supabaseAdmin } from './supabase.js';
@@ -428,7 +428,7 @@ function getQrDeviceTokenFromRequest(req) {
 function attendanceQrCors(req, res) {
   const origin = String(req.headers.origin || '').trim();
   if (!origin) return;
-  if (config.employeePortalAllowedOrigins.length && !config.employeePortalAllowedOrigins.includes(origin)) return;
+  if (!isAllowedCorsOrigin(origin)) return;
 
   res.setHeader('Access-Control-Allow-Origin', origin);
   res.setHeader('Vary', 'Origin');
@@ -532,7 +532,7 @@ function registerCertificateRoutes(appInstance) {
 function certificateCors(req, res) {
   const origin = String(req.headers.origin || '').trim();
   if (!origin) return;
-  if (config.employeePortalAllowedOrigins.length && !config.employeePortalAllowedOrigins.includes(origin)) return;
+  if (!isAllowedCorsOrigin(origin)) return;
   res.setHeader('Access-Control-Allow-Origin', origin);
   res.setHeader('Vary', 'Origin');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
@@ -2228,7 +2228,11 @@ async function registerNovelty(phone, employee, novelty, selectedSede = null, in
   }, { onConflict: 'id' });
   if (attendanceError) throw attendanceError;
 
-  if (novelty.absenteeism) {
+  const scheduledForService = novelty.absenteeism
+    ? await isAttendanceScheduledForOperationalService({ date, employeeId: freshEmployee.id, documento })
+    : false;
+
+  if (novelty.absenteeism && scheduledForService) {
     const { error: absenteeismError } = await supabaseAdmin.from('absenteeism').upsert({
       id: attendanceId,
       fecha: date,
@@ -2276,6 +2280,35 @@ async function registerNovelty(phone, employee, novelty, selectedSede = null, in
   await sendText(phone, `Registro confirmado. Fecha: ${formatDateForHumans(date)}, Hora: ${time}, Novedad: ${novelty.label}, Muchas Gracias.`);
 }
 
+async function isAttendanceScheduledForOperationalService({ date, employeeId, documento }) {
+  const day = String(date || '').trim();
+  const empId = String(employeeId || '').trim();
+  const doc = String(documento || '').trim();
+  if (!day || (!empId && !doc)) return false;
+
+  const refreshed = await refreshEmployeeDailyStatusSnapshot(day);
+  if (refreshed === null) return true;
+
+  let query = supabaseAdmin
+    .from('employee_daily_status')
+    .select('servicio_programado')
+    .eq('fecha', day)
+    .eq('tipo_personal', 'empleado')
+    .limit(1);
+  if (empId && doc) {
+    query = query.or(`employee_id.eq.${empId},documento.eq.${doc}`);
+  } else if (empId) {
+    query = query.eq('employee_id', empId);
+  } else {
+    query = query.eq('documento', doc);
+  }
+
+  const { data, error } = await query;
+  if (error) throw error;
+  const row = Array.isArray(data) ? data[0] : null;
+  return row?.servicio_programado === true;
+}
+
 async function clearDailyOperationalAbsenceArtifacts(recordId) {
   const dailyId = String(recordId || '').trim();
   if (!dailyId) return;
@@ -2319,6 +2352,32 @@ async function fetchDailyMetricsRow(date) {
     .maybeSingle();
   if (error) throw error;
   return data || null;
+}
+
+async function normalizeZeroDemandDailyMetrics(date) {
+  const day = String(date || '').trim();
+  if (!day) return null;
+  const row = await fetchDailyMetricsRow(day);
+  if (!row) return null;
+  const planned = Number(row?.planned || 0);
+  const expected = Number(row?.expected || 0);
+  if (planned !== 0 || expected !== 0) return row;
+  const attendanceCount = Number(row?.attendance_count || 0);
+  if (Number(row?.absenteeism || 0) === 0 && Number(row?.missing || 0) === 0 && Number(row?.paid_services || 0) === attendanceCount) {
+    return row;
+  }
+  const { data, error } = await supabaseAdmin
+    .from('daily_metrics')
+    .update({
+      absenteeism: 0,
+      missing: 0,
+      paid_services: attendanceCount
+    })
+    .eq('fecha', day)
+    .select('*')
+    .maybeSingle();
+  if (error) throw error;
+  return data || row;
 }
 
 async function removeInvalidScheduledEmployeeDailyStatusRows(date) {
@@ -2417,6 +2476,7 @@ async function refreshOperationalSnapshotsFromEmployeeDailyStatus(date) {
     if (isMissingRpcError(error)) return null;
     throw error;
   }
+  await normalizeZeroDemandDailyMetrics(day);
 
   return unwrapRpcSingleRow(data);
 }
@@ -2446,7 +2506,8 @@ async function recomputeDailyMetrics(date) {
     if (error) {
       if (!isMissingRpcError(error)) throw error;
     } else {
-      return unwrapRpcSingleRow(data) || (await fetchDailyMetricsRow(day));
+      await normalizeZeroDemandDailyMetrics(day);
+      return (await fetchDailyMetricsRow(day)) || unwrapRpcSingleRow(data);
     }
   }
 
@@ -2500,12 +2561,11 @@ async function recomputeDailyMetrics(date) {
   const uniqueDocs = new Set(attRows.map((row) => String(row?.documento || row?.empleado_id || '').trim()).filter(Boolean));
   const dedupedAttendanceRows = dedupeAttendanceRows(attRows);
   const actualAttendanceCount = dedupedAttendanceRows.filter((row) => row?.asistio === true).length;
-  const actualAbsenteeism = dedupedAttendanceRows.filter((row) => row?.asistio === false).length;
   const attendanceCount = planned === 0 && expected === 0
     ? actualAttendanceCount
     : attRows.filter((row) => metricAttendanceCountsAsService(row, replacementMap, replacementRules)).length;
   const absenteeism = planned === 0 && expected === 0
-    ? actualAbsenteeism
+    ? 0
     : attRows.filter((row) => metricAttendanceCountsAsAbsenteeism(row, replacementMap, replacementRules)).length;
   const paidServices = attendanceCount;
   const noContracted = Math.max(0, planned - expected);
@@ -2608,8 +2668,10 @@ async function recomputeSedeStatusSnapshot(date) {
     const source = assignment || employee;
     const sedeCode = String(row?.sede_codigo || source?.sede_codigo || source?.sedeCodigo || '').trim();
     if (!sedeCode || !activeSedeCodes.has(sedeCode)) return;
-    if (!registeredBySede.has(sedeCode)) registeredBySede.set(sedeCode, new Set());
-    registeredBySede.get(sedeCode).add(doc || empId || String(row?.id || '').trim());
+    if (row?.asistio === true) {
+      if (!registeredBySede.has(sedeCode)) registeredBySede.set(sedeCode, new Set());
+      registeredBySede.get(sedeCode).add(doc || empId || String(row?.id || '').trim());
+    }
     const repl = replacementMap.get(metricReplacementKey(row)) || null;
     const hasReplacement = String(repl?.decision || '').trim().toLowerCase() === 'reemplazo';
     if (row?.asistio === false && metricAttendanceRequiresReplacement(row, replacementRules) && !hasReplacement) {
@@ -2983,7 +3045,7 @@ async function computeDailyClosureSummary(date) {
     summary.asistencias = actualRows.filter((row) => row?.asistio === true).length;
     summary.ausentismos = 0;
     summary.faltan = 0;
-    summary.sobran = actualRows.length;
+    summary.sobran = summary.asistencias;
   }
 
   summary.noContratados = Math.max(0, summary.planeados - summary.contratados);
@@ -3063,6 +3125,7 @@ async function computeDailySedeClosureSnapshot(date) {
 
   const registeredBySede = new Map();
   for (const row of dedupeAttendanceRows(attendance || [])) {
+    if (row?.asistio !== true) continue;
     const doc = String(row?.documento || '').trim();
     if (doc && replacementSuperDocs.has(day + '|' + doc)) continue;
     if (doc && supernumerarioDocs.has(doc)) continue;
@@ -3085,7 +3148,7 @@ async function computeDailySedeClosureSnapshot(date) {
     const registrados = Number(registeredBySede.get(sedeCode)?.size || 0);
     const externalRegistered = Math.max(0, registrados - baseContracted);
     const contratados = Math.min(planeados, baseContracted + externalRegistered);
-    const faltantes = Math.max(0, planeados - registrados);
+    const faltantes = Math.max(0, planeados - contratados);
     const sobrantes = Math.max(0, registrados - planeados);
     return {
       id: day + '_' + sedeCode,
@@ -3113,7 +3176,7 @@ async function persistDailySedeClosureSnapshot(day) {
   return snapshot;
 }
 
-async function closeOperationDay(date) {
+export async function closeOperationDay(date) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(String(date || '').trim())) {
     throw new Error('invalid_date');
   }
@@ -3198,13 +3261,13 @@ async function closeOperationDay(date) {
         fecha: day,
         status: 'closed',
         locked: true,
-        planeados: Number(closureSummary?.planeados || metrics?.planned || 0),
-        contratados: Number(closureSummary?.contratados || metrics?.expected || 0),
-        asistencias: Number(closureSummary?.asistencias || 0),
-        ausentismos: Number(closureSummary?.ausentismos || metrics?.absenteeism || 0),
-        faltan: Number(closureSummary?.faltan || 0),
-        sobran: Number(closureSummary?.sobran || 0),
-        no_contratados: Number(closureSummary?.noContratados || metrics?.no_contracted || metrics?.noContracted || 0),
+        planeados: Number(closureSummary?.planeados ?? metrics?.planned ?? 0),
+        contratados: Number(closureSummary?.contratados ?? metrics?.expected ?? 0),
+        asistencias: Number(closureSummary?.asistencias ?? 0),
+        ausentismos: Number(closureSummary?.ausentismos ?? metrics?.absenteeism ?? 0),
+        faltan: Number(closureSummary?.faltan ?? 0),
+        sobran: Number(closureSummary?.sobran ?? 0),
+        no_contratados: Number(closureSummary?.noContratados ?? metrics?.no_contracted ?? metrics?.noContracted ?? 0),
         closed_by_uid: null,
         closed_by_email: 'cron@system'
       }, { onConflict: 'id' });
@@ -3336,23 +3399,29 @@ function assertCronAuthorized(req) {
 }
 
 async function finalizePendingAbsenteeismForClosure(day) {
+  await refreshEmployeeDailyStatusSnapshot(day);
   const [
     { data: attendanceRows, error: attendanceError },
     { data: replacementRows, error: replacementsError },
+    { data: statusRows, error: statusError },
     novedadesRows
   ] = await Promise.all([
     supabaseAdmin.from('attendance').select('*').eq('fecha', day),
     supabaseAdmin.from('import_replacements').select('*').eq('fecha', day),
+    supabaseAdmin.from('employee_daily_status').select('fecha, employee_id, documento, tipo_personal, servicio_programado').eq('fecha', day),
     selectAllRows('novedades', 'codigo, codigo_novedad, nombre, reemplazo')
   ]);
   if (attendanceError) throw attendanceError;
   if (replacementsError) throw replacementsError;
+  if (statusError) throw statusError;
 
   const replacementRules = buildNovedadReplacementRules(novedadesRows || []);
   const replacementMap = new Map((replacementRows || []).map((row) => [metricReplacementKey(row), row]));
+  const scheduledServiceLookup = buildScheduledServiceLookup(statusRows || []);
 
   for (const row of attendanceRows || []) {
     if (!metricAttendanceRequiresReplacement(row, replacementRules)) continue;
+    if (!attendanceHasScheduledService(row, scheduledServiceLookup)) continue;
     const key = metricReplacementKey(row);
     const existing = replacementMap.get(key);
     const existingDecision = String(existing?.decision || '').trim().toLowerCase();
@@ -3396,19 +3465,43 @@ async function finalizePendingAbsenteeismForClosure(day) {
   await materializeClosedOperationalAbsenteeismForClosure(day);
 }
 
+function buildScheduledServiceLookup(statusRows = []) {
+  const lookup = new Set();
+  for (const row of statusRows || []) {
+    if (String(row?.tipo_personal || row?.tipoPersonal || '').trim() !== 'empleado') continue;
+    if (row?.servicio_programado !== true && row?.servicioProgramado !== true) continue;
+    for (const key of statusLookupKeys(row)) lookup.add(key);
+  }
+  return lookup;
+}
+
+function attendanceHasScheduledService(row = {}, lookup = new Set()) {
+  return statusLookupKeys(row).some((key) => lookup.has(key));
+}
+
+function statusLookupKeys(row = {}) {
+  const fecha = String(row?.fecha || '').trim();
+  const employeeId = String(row?.employee_id || row?.employeeId || row?.empleado_id || row?.empleadoId || '').trim();
+  const documento = String(row?.documento || '').trim();
+  return [
+    fecha && employeeId ? `${fecha}_id:${employeeId}` : '',
+    fecha && documento ? `${fecha}_doc:${documento}` : ''
+  ].filter(Boolean);
+}
+
 async function cleanupNonProgrammedClosedOperationalAbsenteeism(day) {
   const refreshed = await refreshEmployeeDailyStatusSnapshot(day);
   if (refreshed === null) return 0;
 
   const { data: statusRows, error } = await supabaseAdmin
     .from('employee_daily_status')
-    .select('source_replacement_id, source_absenteeism_id, source_attendance_id, source_incapacity_id, tipo_personal, servicio_programado')
+    .select('employee_id, documento, source_replacement_id, source_absenteeism_id, source_attendance_id, source_incapacity_id, tipo_personal, servicio_programado')
     .eq('fecha', day)
     .eq('tipo_personal', 'empleado')
     .eq('servicio_programado', false);
   if (error) throw error;
 
-  const candidateRows = (statusRows || []).filter((row) => !row?.source_attendance_id && !row?.source_incapacity_id && (row?.source_replacement_id || row?.source_absenteeism_id));
+  const candidateRows = (statusRows || []).filter((row) => row?.source_replacement_id || row?.source_absenteeism_id);
   if (!candidateRows.length) return 0;
 
   const chunk = (items, size = 200) => {
@@ -3417,8 +3510,9 @@ async function cleanupNonProgrammedClosedOperationalAbsenteeism(day) {
     return output;
   };
 
-  const replacementIds = [...new Set(candidateRows.map((row) => row?.source_replacement_id).filter(Boolean))];
-  const absenteeismIds = [...new Set(candidateRows.map((row) => row?.source_absenteeism_id).filter(Boolean))];
+  const deterministicIds = candidateRows.map((row) => buildDailyRecordId(day, row?.documento, row?.employee_id)).filter(Boolean);
+  const replacementIds = [...new Set([...candidateRows.map((row) => row?.source_replacement_id), ...deterministicIds].filter(Boolean))];
+  const absenteeismIds = [...new Set([...candidateRows.map((row) => row?.source_absenteeism_id), ...deterministicIds].filter(Boolean))];
 
   const cronReplacementIds = [];
   for (const batch of chunk(replacementIds)) {

@@ -1,4 +1,4 @@
-import { el, qs } from '../utils/dom.js';
+import { el, qs, infoIcon, editIcon } from '../utils/dom.js';
 import { showInfoModal } from '../utils/infoModal.js';
 import { showActionModal } from '../utils/actionModal.js';
 import { createTablePagination } from '../utils/pagination.js';
@@ -158,9 +158,9 @@ export const SupervisorsAdmin=(mount,deps={})=>{
   }
   function actionsCell(s){
     const box=el('div',{className:'row-actions'},[]);
-    const btnEditZone=el('button',{className:'btn btn--icon',type:'button',title:'Editar zona','aria-label':'Editar zona'},['\u270E']);
+    const btnEditZone=el('button',{className:'btn btn--icon',type:'button',title:'Editar zona','aria-label':'Editar zona'},[editIcon()]);
     btnEditZone.addEventListener('click',()=> startEditZone(s));
-    const btnInfo=el('button',{className:'btn btn--icon',title:'Ver informacion','aria-label':'Ver informacion'},['\u24D8']);
+    const btnInfo=el('button',{className:'btn btn--icon',title:'Ver informacion','aria-label':'Ver informacion'},[infoIcon()]);
     btnInfo.addEventListener('click',()=>{ const info=auditInfoData(s); showInfoModal('Informacion del registro',[`Evento: ${info.action}`,`Usuario: ${info.user}`,`Fecha: ${info.date}`]); });
     box.append(btnEditZone,btnInfo); return box;
   }

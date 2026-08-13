@@ -12,10 +12,10 @@ export const OperacionDashboard = (mount, deps = {}) => renderModuleDashboard(mo
     'Usa supernumerarios y QR como apoyo directo al control diario.'
   ],
   actions: [
-    { label: 'Registro Diario', route: '/registros-vivo', perm: PERMS.IMPORT_DATA, detail: 'Seguimiento y gestion de novedades.' },
+    { label: 'Registro Diario', route: '/registros-vivo', perm: PERMS.VIEW_OPERATION_REGISTRY, detail: 'Seguimiento y gestion de novedades.' },
     { label: 'Registro QR', route: '/registro-qr', perm: PERMS.VIEW_QR_DAILY_REGISTRY, detail: 'Marcaciones desde tablets.' },
     { label: 'Supernumerarios', route: '/supernumerarios', perm: PERMS.VIEW_SUPERNUMERARIOS, detail: 'Disponibilidad para reemplazos.' },
-    { label: 'Registro Sede', route: '/registro-sede', perm: PERMS.IMPORT_DATA, detail: 'Resumen por sede y dependencia.' },
+    { label: 'Registro Sede', route: '/registro-sede', perm: PERMS.VIEW_OPERATION_REGISTRY, detail: 'Resumen por sede y dependencia.' },
     { label: 'Historial', route: '/import-history', perm: PERMS.VIEW_IMPORT_HISTORY, detail: 'Importaciones y eventos previos.' }
   ],
   metrics: [

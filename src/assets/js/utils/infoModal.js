@@ -12,11 +12,13 @@ export function showInfoModal(title, lines = []) {
     el('button', { className: 'btn info-modal__close', type: 'button', 'aria-label': 'Cerrar' }, ['x'])
   ]);
 
+  const items = Array.isArray(lines) ? lines : [lines];
   const body = el(
     'div',
     { className: 'info-modal__body' },
-    (Array.isArray(lines) ? lines : [String(lines || '')]).map((line) =>
-      el('p', { className: 'info-modal__line' }, [String(line || '-')])
+    items.map((line) => line instanceof Node
+      ? line
+      : el('p', { className: 'info-modal__line' }, [String(line || '-')])
     )
   );
 

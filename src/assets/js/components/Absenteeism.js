@@ -1,15 +1,17 @@
-import { el, qs, enableSectionToggles } from '../utils/dom.js';
+import { el, qs, enableSectionToggles, viewIcon } from '../utils/dom.js';
 import { createTablePagination } from '../utils/pagination.js';
+import { can, PERMS } from '../permissions.js';
 
 export const Absenteeism = (mount, deps = {}) => {
+  const canExport = can(PERMS.EXPORT_REPORTS_ABSENTEEISM);
   const ui = el('section', { className: 'main-card' }, [
     el('h2', {}, ['Ausentismo y pago por dependencia']),
     el('div', { className: 'form-row mt-2' }, [
       el('div', {}, [el('label', { className: 'label' }, ['Fecha']), el('input', { id: 'opDate', className: 'input', type: 'date' })]),
       el('button', { id: 'btnRun', className: 'btn btn--primary', type: 'button' }, ['Consultar fecha']),
-      el('button', { id: 'btnExportSummary', className: 'btn', type: 'button' }, ['Exportar resumen Excel']),
-      el('button', { id: 'btnExportSede', className: 'btn', type: 'button' }, ['Exportar sedes Excel']),
-      el('button', { id: 'btnExportDetail', className: 'btn', type: 'button' }, ['Exportar detalle Excel']),
+      el('button', { id: 'btnExportSummary', className: 'btn', type: 'button', disabled: !canExport, title: canExport ? '' : 'Modo consulta: no puedes exportar.' }, ['Exportar resumen Excel']),
+      el('button', { id: 'btnExportSede', className: 'btn', type: 'button', disabled: !canExport, title: canExport ? '' : 'Modo consulta: no puedes exportar.' }, ['Exportar sedes Excel']),
+      el('button', { id: 'btnExportDetail', className: 'btn', type: 'button', disabled: !canExport, title: canExport ? '' : 'Modo consulta: no puedes exportar.' }, ['Exportar detalle Excel']),
       el('span', { id: 'msg', className: 'text-muted' }, [' '])
     ]),
     el('div', { className: 'section-block mt-2' }, [
@@ -270,7 +272,7 @@ export const Absenteeism = (mount, deps = {}) => {
     const pageRows = dependencyPaginator.slice(rows);
     tbody.replaceChildren(...pageRows.map((row) => {
       const tr = el('tr', {}, []);
-      const btn = el('button', { className: 'btn', type: 'button' }, ['Ver']);
+      const btn = el('button', { className: 'btn btn--icon', type: 'button', title: 'Ver detalle', 'aria-label': 'Ver detalle' }, [viewIcon()]);
       btn.addEventListener('click', () => renderDetail(row.dependenciaKey, row.dependenciaNombre, date));
       tr.append(
         el('td', {}, [row.dependenciaNombre || '-']),
@@ -306,7 +308,7 @@ export const Absenteeism = (mount, deps = {}) => {
     const pageRows = totalsPaginator.slice(rows);
     tbody.replaceChildren(...pageRows.map((row) => {
       const tr = el('tr', {}, []);
-      const btn = el('button', { className: 'btn', type: 'button' }, ['Ver']);
+      const btn = el('button', { className: 'btn btn--icon', type: 'button', title: 'Ver detalle', 'aria-label': 'Ver detalle' }, [viewIcon()]);
       btn.addEventListener('click', () => renderSedeDetail(row.sedeCodigo, row.sedeNombre));
       tr.append(
         el('td', {}, [row.sedeNombre || '-']),
@@ -401,7 +403,7 @@ export const Absenteeism = (mount, deps = {}) => {
   }
 
   function dependencyCard(row, date) {
-    const btn = el('button', { className: 'btn', type: 'button' }, ['Ver detalle']);
+    const btn = el('button', { className: 'btn btn--icon', type: 'button', title: 'Ver detalle', 'aria-label': 'Ver detalle' }, [viewIcon()]);
     btn.addEventListener('click', () => renderDetail(row.dependenciaKey, row.dependenciaNombre, date));
     return summaryCard({
       title: row.dependenciaNombre || '-',
@@ -419,7 +421,7 @@ export const Absenteeism = (mount, deps = {}) => {
   }
 
   function sedeCard(row) {
-    const btn = el('button', { className: 'btn', type: 'button' }, ['Ver detalle']);
+    const btn = el('button', { className: 'btn btn--icon', type: 'button', title: 'Ver detalle', 'aria-label': 'Ver detalle' }, [viewIcon()]);
     btn.addEventListener('click', () => renderSedeDetail(row.sedeCodigo, row.sedeNombre));
     return summaryCard({
       title: row.sedeNombre || '-',
@@ -525,6 +527,10 @@ export const Absenteeism = (mount, deps = {}) => {
   }
 
   async function exportSummaryExcel() {
+    if (!canExport) {
+      msg.textContent = 'No tienes permiso para exportar este reporte.';
+      return;
+    }
     if (!dependencyRows.length && !totalsRows.length) {
       msg.textContent = 'No hay datos para exportar.';
       return;
@@ -561,6 +567,10 @@ export const Absenteeism = (mount, deps = {}) => {
   }
 
   async function exportDetailExcel() {
+    if (!canExport) {
+      msg.textContent = 'No tienes permiso para exportar este reporte.';
+      return;
+    }
     if (!detailRowsCache.length) {
       msg.textContent = 'Primero abre un detalle para exportar.';
       return;
@@ -585,6 +595,10 @@ export const Absenteeism = (mount, deps = {}) => {
   }
 
   async function exportSedeExcel() {
+    if (!canExport) {
+      msg.textContent = 'No tienes permiso para exportar este reporte.';
+      return;
+    }
     if (!totalsRows.length) {
       msg.textContent = 'No hay resumen por sede para exportar.';
       return;

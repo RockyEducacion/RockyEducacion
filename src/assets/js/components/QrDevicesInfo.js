@@ -1,4 +1,4 @@
-import { el, qs } from '../utils/dom.js';
+import { el, qs, infoIcon, moreIcon } from '../utils/dom.js';
 import { createTablePagination } from '../utils/pagination.js';
 import { showActionModal } from '../utils/actionModal.js';
 import { showInfoModal } from '../utils/infoModal.js';
@@ -212,9 +212,9 @@ export const QrDevicesInfo = (mount, deps = {}) => {
 
   function actionsCell(row = {}) {
     const box = el('div', { className: 'row-actions' }, []);
-    const btnMore = el('button', { className: 'btn btn--icon', type: 'button', title: 'Mas opciones', 'aria-label': 'Mas opciones' }, ['\u22EF']);
+    const btnMore = el('button', { className: 'btn btn--icon', type: 'button', title: 'Mas opciones', 'aria-label': 'Mas opciones' }, [moreIcon()]);
     btnMore.addEventListener('click', () => openMoreOptionsModal(row));
-    const btnInfo = el('button', { className: 'btn btn--icon', type: 'button', title: 'Ver informacion', 'aria-label': 'Ver informacion' }, ['\u24D8']);
+    const btnInfo = el('button', { className: 'btn btn--icon', type: 'button', title: 'Ver informacion', 'aria-label': 'Ver informacion' }, [infoIcon()]);
     btnInfo.addEventListener('click', () => showDeviceInfo(row));
     box.append(btnMore, btnInfo);
     return box;

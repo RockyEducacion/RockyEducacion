@@ -1,8 +1,9 @@
-import { el, qs } from '../utils/dom.js';
+import { el, qs, infoIcon, moreIcon } from '../utils/dom.js';
 import { getState } from '../state.js';
 import { showInfoModal } from '../utils/infoModal.js';
 import { showActionModal } from '../utils/actionModal.js';
 import { createTablePagination } from '../utils/pagination.js';
+import { can, PERMS } from '../permissions.js';
 
 const SOURCE_CODE_OPTIONS = [
   { code: '3', value: 'Enfermedad General' },
@@ -28,7 +29,9 @@ export const CargarDatos = (mount, deps = {}) => {
   const ownDocument = portalMode
     ? sanitizeDocument(deps?.portalSession?.documento)
     : sanitizeDocument(profile?.documento);
-  const canManageAll = !portalMode && role !== 'empleado';
+  const canManageIncapacities = portalMode || can(PERMS.MANAGE_INCAPACITIES);
+  const canViewAllIncapacities = !portalMode && role !== 'empleado';
+  const canManageAll = canViewAllIncapacities && canManageIncapacities;
   const today = todayBogota();
 
   let employees = [];
@@ -160,7 +163,7 @@ export const CargarDatos = (mount, deps = {}) => {
   qs('.tabs', ui)?.classList.add('hidden');
   tabCreate.classList.add('hidden');
   tabList.classList.remove('hidden');
-  const btnOpenCreate = portalMode
+  const btnOpenCreate = portalMode || !canManageIncapacities
     ? null
     : el('button', { id: 'incOpenCreate', className: 'btn btn--primary right', type: 'button' }, ['Crear incapacidad']);
   if (btnOpenCreate) qs('#incTabList .form-row', ui)?.append(btnOpenCreate);
@@ -329,6 +332,10 @@ export const CargarDatos = (mount, deps = {}) => {
   }
 
   async function onSave() {
+    if (!canManageIncapacities) {
+      setMessage(createMsg, 'No tienes permiso para gestionar incapacidades.', 'error');
+      return;
+    }
     const target = canManageAll ? resolveEmployeeInput(employeeInput?.value || '') : currentFixedEmployee();
     const fechaInicio = String(startInput?.value || '').trim();
     const fechaFin = String(endInput?.value || '').trim();
@@ -452,6 +459,10 @@ export const CargarDatos = (mount, deps = {}) => {
   }
 
   async function openIncapacityModal(row = null) {
+    if (!canManageIncapacities) {
+      showInfoModal('Solo consulta', ['No tienes permiso para gestionar incapacidades.']);
+      return;
+    }
     editingId = row?.id || null;
     const isEdit = Boolean(row?.id);
     const employeeOptions = employees
@@ -507,6 +518,10 @@ export const CargarDatos = (mount, deps = {}) => {
   }
 
   async function saveIncapacityFromModal(row = null, values = {}) {
+    if (!canManageIncapacities) {
+      showInfoModal('Solo consulta', ['No tienes permiso para gestionar incapacidades.']);
+      return;
+    }
     const isEdit = Boolean(row?.id);
     const target = canManageAll
       ? (resolveEmployeeInput(values.employee || '') || (row ? normalizeEmployeeInfo(row) : null))
@@ -592,7 +607,7 @@ export const CargarDatos = (mount, deps = {}) => {
     const canal = String(channelFilter?.value || '').trim();
     const support = String(supportFilter?.value || '').trim();
     return sortRows(incapRows
-      .filter((row) => canManageAll || portalMode || sanitizeDocument(row?.documento) === ownDocument)
+      .filter((row) => canViewAllIncapacities || portalMode || sanitizeDocument(row?.documento) === ownDocument)
       .filter((row) => !estado || String(row?.estado || '').trim().toLowerCase() === estado)
       .filter((row) => !canal || String(row?.canalRegistro || '').trim().toLowerCase() === canal)
       .filter((row) => {
@@ -735,15 +750,18 @@ export const CargarDatos = (mount, deps = {}) => {
   }
 
   function actionsCell(row) {
-    const btnMore = el('button', { className: 'btn btn--icon', type: 'button', title: 'Mas opciones', 'aria-label': 'Mas opciones' }, ['\u22EF']);
-    btnMore.addEventListener('click', () => openMoreOptionsModal(row));
-    const actionButtons = [btnMore];
+    const actionButtons = [];
+    if (canManageIncapacities) {
+      const btnMore = el('button', { className: 'btn btn--icon', type: 'button', title: 'Mas opciones', 'aria-label': 'Mas opciones' }, [moreIcon()]);
+      btnMore.addEventListener('click', () => openMoreOptionsModal(row));
+      actionButtons.push(btnMore);
+    }
     if (row?.soporteUrl && !portalMode) {
       const btnPdf = el('button', { className: 'btn btn--icon', type: 'button', title: 'Descargar soporte PDF', 'aria-label': 'Descargar soporte PDF' }, ['PDF']);
       btnPdf.addEventListener('click', () => downloadSupportPdf(row));
       actionButtons.push(btnPdf);
     }
-    const btnInfo = el('button', { className: 'btn btn--icon', type: 'button', title: 'Ver informacion del empleado', 'aria-label': 'Ver informacion del empleado' }, ['\u24D8']);
+    const btnInfo = el('button', { className: 'btn btn--icon', type: 'button', title: 'Ver informacion del empleado', 'aria-label': 'Ver informacion del empleado' }, [infoIcon()]);
     btnInfo.addEventListener('click', () => showEmployeeInfo(row));
     actionButtons.push(btnInfo);
     return el('div', { className: 'row-actions' }, actionButtons);
@@ -776,6 +794,10 @@ export const CargarDatos = (mount, deps = {}) => {
   }
 
   async function openMoreOptionsModal(row) {
+    if (!canManageIncapacities) {
+      showInfoModal('Solo consulta', ['No tienes permiso para gestionar incapacidades.']);
+      return;
+    }
     const isActive = String(row?.estado || '').trim().toLowerCase() === 'activo';
     const options = [
       { value: '', label: 'Seleccione...' },

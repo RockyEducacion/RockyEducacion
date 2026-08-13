@@ -1,4 +1,4 @@
-import { el, qs, enableSectionToggles } from '../utils/dom.js';
+import { el, qs, enableSectionToggles, viewIcon } from '../utils/dom.js';
 import { createTablePagination } from '../utils/pagination.js';
 
 export const RegistroSede = (mount, deps = {}) => {
@@ -374,7 +374,7 @@ export const RegistroSede = (mount, deps = {}) => {
     const pageRows = dependencyPaginator.slice(sortedRows);
     tb.replaceChildren(...pageRows.map((r) => {
       const tr = el('tr', {}, []);
-      const btn = el('button', { className: 'btn', type: 'button' }, ['Ver']);
+      const btn = el('button', { className: 'btn btn--icon', type: 'button', title: 'Ver detalle', 'aria-label': 'Ver detalle' }, [viewIcon()]);
       btn.addEventListener('click', () => renderDependencyDetail(r.dependenciaKey, r.dependenciaNombre, date));
       tr.append(
         el('td', {}, [r.dependenciaNombre || '-']),
@@ -443,7 +443,7 @@ export const RegistroSede = (mount, deps = {}) => {
     const pageRows = totalsPaginator.slice(sortedRows);
     tb.replaceChildren(...pageRows.map((r) => {
       const tr = el('tr', {}, []);
-      const btn = el('button', { className: 'btn', type: 'button' }, ['Ver']);
+      const btn = el('button', { className: 'btn btn--icon', type: 'button', title: 'Ver detalle', 'aria-label': 'Ver detalle' }, [viewIcon()]);
       btn.addEventListener('click', () => renderSedeDetail(r.sedeCodigo, r.sedeNombre, date));
       tr.append(
         el('td', {}, [r.sedeNombre || '-']),
@@ -567,7 +567,7 @@ export const RegistroSede = (mount, deps = {}) => {
   }
 
   function dependencyCard(row, date) {
-    const btn = el('button', { className: 'btn', type: 'button' }, ['Ver detalle']);
+    const btn = el('button', { className: 'btn btn--icon', type: 'button', title: 'Ver detalle', 'aria-label': 'Ver detalle' }, [viewIcon()]);
     btn.addEventListener('click', () => renderDependencyDetail(row.dependenciaKey, row.dependenciaNombre, date));
     return summaryCard({
       title: row.dependenciaNombre || '-',
@@ -584,7 +584,7 @@ export const RegistroSede = (mount, deps = {}) => {
   }
 
   function sedeCard(row, date) {
-    const btn = el('button', { className: 'btn', type: 'button' }, ['Ver detalle']);
+    const btn = el('button', { className: 'btn btn--icon', type: 'button', title: 'Ver detalle', 'aria-label': 'Ver detalle' }, [viewIcon()]);
     btn.addEventListener('click', () => renderSedeDetail(row.sedeCodigo, row.sedeNombre, date));
     return summaryCard({
       title: row.sedeNombre || '-',

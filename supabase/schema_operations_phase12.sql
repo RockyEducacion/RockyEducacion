@@ -147,7 +147,7 @@ begin
         else coalesce((select count(*)::integer from scheduled_service_rows sr where sr.cuenta_pago_servicio = true), 0)
       end as attendance_count,
       case
-        when bc.planned = 0 and bc.expected = 0 then coalesce((select count(*)::integer from actual_rows ar where ar.asistio = false), 0)
+        when bc.planned = 0 and bc.expected = 0 then 0
         when bc.is_closed then coalesce((select count(*)::integer from scheduled_service_rows sr where coalesce(sr.cuenta_pago_servicio, false) = false), 0)
         else coalesce((select count(*)::integer from scheduled_service_rows sr where coalesce(sr.decision_cobertura, '') = 'ausentismo' or sr.estado_dia = 'ausente_sin_reemplazo'), 0)
       end as absenteeism,

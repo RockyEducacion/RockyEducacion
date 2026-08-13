@@ -1,7 +1,9 @@
 import { el, qs } from '../utils/dom.js';
 import { createTablePagination } from '../utils/pagination.js';
+import { can, PERMS } from '../permissions.js';
 
 export const CargueMasivoAdmin=(mount,deps={})=>{
+  const canImport = can(PERMS.BULK_UPLOAD_EMPLOYEES);
   const ui=el('section',{className:'main-card'},[
     el('h2',{},['Cargue masivo de empleados']),
     el('p',{className:'text-muted mt-2'},['Columnas esperadas: documento, nombre, telefono, cargo codigo, sede codigo, fecha ingreso. El código del empleado se genera automáticamente y el teléfono se guarda con prefijo 57.']),
@@ -9,7 +11,7 @@ export const CargueMasivoAdmin=(mount,deps={})=>{
       el('button',{id:'btnTemplate',className:'btn',type:'button'},['Descargar plantilla CSV']),
       el('input',{id:'fileInput',className:'input',type:'file',accept:'.csv,.xls,.xlsx'}),
       el('button',{id:'btnValidate',className:'btn btn--primary'},['Validar archivo']),
-      el('button',{id:'btnImport',className:'btn',disabled:true},['Importar empleados']),
+      el('button',{id:'btnImport',className:'btn',disabled:true,title:canImport?'':'Modo consulta: no puedes importar empleados.'},['Importar empleados']),
       el('span',{id:'msg',className:'text-muted'},[' '])
     ]),
     el('div',{id:'importProgress',className:'bulk-progress hidden','aria-live':'polite'},[
@@ -94,14 +96,17 @@ export const CargueMasivoAdmin=(mount,deps={})=>{
       renderPreview(result.preview);
       renderErrors(result.errors);
       validRows=result.valid;
-      btnImport.disabled=result.valid.length===0;
-      msg.textContent=result.errors.length? 'Validacion finalizada con errores.' : 'Archivo valido. Puedes importar.';
+      btnImport.disabled=!canImport || result.valid.length===0;
+      msg.textContent=result.errors.length
+        ? 'Validacion finalizada con errores.'
+        : canImport ? 'Archivo valido. Puedes importar.' : 'Archivo valido. Modo consulta: no tienes permiso para importar.';
     }catch(e){
       msg.textContent='Error: '+(e?.message||e);
     }
   });
 
   btnImport.addEventListener('click',async()=>{
+    if(!canImport){ msg.textContent='No tienes permiso para importar empleados.'; return; }
     if(!validRows.length){ msg.textContent='No hay filas validas para importar.'; return; }
     btnImport.disabled=true;
     btnValidate.disabled=true;

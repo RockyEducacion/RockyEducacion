@@ -1,7 +1,14 @@
-import { el } from '../utils/dom.js';
+import { el, lucideInlineIcon } from '../utils/dom.js';
 import { navigate } from '../router.js';
 import { getState, setState } from '../state.js';
 import { isMobileSidebarOpen, toggleMobileSidebar } from './Sidebar.js';
+
+const THEMES = ['light', 'dark', 'color'];
+const THEME_META = {
+  light: { icon: 'sun', fallback: '*', title: 'Tema claro' },
+  dark: { icon: 'moon', fallback: '◐', title: 'Tema oscuro' },
+  color: { icon: 'palette', fallback: '◆', title: 'Tema color' }
+};
 
 export const Header=(deps={})=>{
   const { user, theme }=getState();
@@ -14,14 +21,16 @@ export const Header=(deps={})=>{
     'aria-controls':'app-sidebar'
   },['☰']) : null;
   const syncThemeBtn = (currentTheme) => {
-    const dark = currentTheme === 'dark';
-    themeBtn.textContent = dark ? '☀' : '☾';
-    themeBtn.title = dark ? 'Cambiar a tema claro' : 'Cambiar a tema oscuro';
+    const normalizedTheme = THEMES.includes(currentTheme) ? currentTheme : 'light';
+    const next = nextTheme(normalizedTheme);
+    const nextMeta = THEME_META[next];
+    themeBtn.replaceChildren(lucideInlineIcon(nextMeta.icon, nextMeta.fallback, 'app-theme-icon'));
+    themeBtn.title = `Cambiar a ${nextMeta.title.toLowerCase()}`;
     themeBtn.setAttribute('aria-label', themeBtn.title);
   };
   syncThemeBtn(theme);
   themeBtn.addEventListener('click', () => {
-    const next = getState().theme === 'dark' ? 'light' : 'dark';
+    const next = nextTheme(getState().theme);
     document.documentElement.setAttribute('data-theme', next);
     setState({ theme: next });
     syncThemeBtn(next);
@@ -44,7 +53,7 @@ export const Header=(deps={})=>{
     mobileMenuBtn,
     el('a',{href:'#',className:'header-nav__brand',title:'Empresa','aria-label':'Empresa'},[
       el('span',{className:'header-nav__brand-mark'},[
-        el('img',{className:'header-nav__brand-logo',src:'src/assets/img/tercero.png',alt:'Logo Servilimpieza',loading:'lazy'})
+        el('img',{className:'header-nav__brand-logo',src:'src/assets/img/tercero.png',alt:'Logo Capcol',loading:'lazy'})
       ]),
       el('span',{className:'header-nav__brand-copy'},[
         el('span',{className:'header-nav__brand-kicker'},['SERVILIMPIEZA S.A.'])
@@ -65,6 +74,11 @@ export const Header=(deps={})=>{
   ]);
   return el('div',{className:'header'},[nav]);
 };
+
+function nextTheme(theme) {
+  const currentIndex = THEMES.indexOf(theme);
+  return THEMES[(currentIndex >= 0 ? currentIndex + 1 : 1) % THEMES.length];
+}
 
 function navLink(text,to,onClick){
   const a=el('a',{href:`#${to}`,className:'header-nav__link'},[text]);

@@ -1,7 +1,9 @@
 import { el, qs, enableSectionToggles } from '../utils/dom.js';
 import { createTablePagination } from '../utils/pagination.js';
+import { can, PERMS } from '../permissions.js';
 
 export const HistoricalDailyRegistry = (mount, deps = {}) => {
+  const canExport = can(PERMS.EXPORT_REPORTS_CLIENT);
   const maxDate = yesterdayBogota();
   let selectedDate = maxDate;
   let generatedRows = [];
@@ -23,7 +25,7 @@ export const HistoricalDailyRegistry = (mount, deps = {}) => {
         }, [])
       ]),
       el('button', { id: 'btnGenerateHistoricalDaily', className: 'btn btn--primary', type: 'button' }, ['Consultar fecha']),
-      el('button', { id: 'btnExportHistoricalDaily', className: 'btn', type: 'button', disabled: true }, ['Exportar Excel']),
+      el('button', { id: 'btnExportHistoricalDaily', className: 'btn', type: 'button', disabled: true, title: canExport ? '' : 'Modo consulta: no puedes exportar.' }, ['Exportar Excel']),
       el('span', { id: 'historicalDailyMsg', className: 'text-muted' }, [' '])
     ]),
     el('div', { className: 'section-block mt-2' }, [
@@ -167,7 +169,7 @@ export const HistoricalDailyRegistry = (mount, deps = {}) => {
     if (tbody) tbody.replaceChildren(...renderRows(pageRows, rows.length));
     if (cards) cards.replaceChildren(...renderCards(pageRows, rows.length));
     if (totalNode) totalNode.textContent = `Total registros del dia: ${generatedRows.length}`;
-    if (exportBtn) exportBtn.disabled = generatedRows.length === 0;
+    if (exportBtn) exportBtn.disabled = !canExport || generatedRows.length === 0;
     updateSortIndicators(ui, '#tblHistoricalDaily th[data-sort-historical]', 'data-sort-historical', sortKey, sortDir);
   }
 
@@ -223,6 +225,7 @@ export const HistoricalDailyRegistry = (mount, deps = {}) => {
     const btn = qs('#btnExportHistoricalDaily', ui);
     try {
       if (!generatedRows.length) throw new Error('Primero genera el reporte.');
+      if (!canExport) throw new Error('No tienes permiso para exportar este reporte.');
       if (btn) {
         btn.disabled = true;
         btn.textContent = 'Generando...';
@@ -246,7 +249,7 @@ export const HistoricalDailyRegistry = (mount, deps = {}) => {
       setMessage(`Error al generar Excel: ${error?.message || error}`);
     } finally {
       if (btn) {
-        btn.disabled = generatedRows.length === 0;
+        btn.disabled = !canExport || generatedRows.length === 0;
         btn.textContent = 'Exportar Excel';
       }
     }

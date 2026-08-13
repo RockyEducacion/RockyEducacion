@@ -1,7 +1,9 @@
 import { el, qs } from '../utils/dom.js';
 import { createTablePagination } from '../utils/pagination.js';
+import { can, PERMS } from '../permissions.js';
 
 export const CargueMasivoSedesAdmin=(mount,deps={})=>{
+  const canImport = can(PERMS.BULK_UPLOAD_SEDES);
   const ui=el('section',{className:'main-card'},[
     el('h2',{},['Cargue masivo de sedes']),
     el('p',{className:'text-muted mt-2'},['Columnas esperadas: nombre sede, dependencia codigo, zona codigo, nro operarios, jornada, qr, latitud qr, longitud qr, radio qr. El codigo de sede se genera automaticamente. Jornada valida: lun_vie, lun_sab o lun_dom.']),
@@ -9,7 +11,7 @@ export const CargueMasivoSedesAdmin=(mount,deps={})=>{
       el('button',{id:'btnTemplate',className:'btn',type:'button'},['Descargar plantilla CSV']),
       el('input',{id:'fileInput',className:'input',type:'file',accept:'.csv,.xls,.xlsx'}),
       el('button',{id:'btnValidate',className:'btn btn--primary'},['Validar archivo']),
-      el('button',{id:'btnImport',className:'btn',disabled:true},['Importar sedes']),
+      el('button',{id:'btnImport',className:'btn',disabled:true,title:canImport?'':'Modo consulta: no puedes importar sedes.'},['Importar sedes']),
       el('span',{id:'msg',className:'text-muted'},[' '])
     ]),
     el('div',{className:'divider'}),
@@ -81,14 +83,17 @@ export const CargueMasivoSedesAdmin=(mount,deps={})=>{
       renderPreview(result.preview);
       renderErrors(result.errors);
       validRows=result.valid;
-      btnImport.disabled=result.valid.length===0;
-      msg.textContent=result.errors.length? 'Validacion finalizada con errores.' : 'Archivo valido. Puedes importar.';
+      btnImport.disabled=!canImport || result.valid.length===0;
+      msg.textContent=result.errors.length
+        ? 'Validacion finalizada con errores.'
+        : canImport ? 'Archivo valido. Puedes importar.' : 'Archivo valido. Modo consulta: no tienes permiso para importar.';
     }catch(e){
       msg.textContent='Error: '+(e?.message||e);
     }
   });
 
   btnImport.addEventListener('click',async()=>{
+    if(!canImport){ msg.textContent='No tienes permiso para importar sedes.'; return; }
     if(!validRows.length){ msg.textContent='No hay filas validas para importar.'; return; }
     btnImport.disabled=true;
     msg.textContent='Importando sedes...';

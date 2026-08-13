@@ -1,23 +1,19 @@
 import { el, qs } from '../utils/dom.js';
+import { can, PERMS } from '../permissions.js';
 
 export const ConsolidatedReports = (mount, deps = {}) => {
+  const canExport = can(PERMS.EXPORT_REPORTS_SERVICES_CONSOLIDATED);
   const selectedSet = {
-    title: 'Reportes consolidados',
-    subtitle: 'Reportes de analisis por periodo, contratacion y novedades.',
+    title: 'Consolidado Servicios',
+    subtitle: 'Rango de fechas con servicios planeados, cedulas atendidas y ausentismos confirmados.',
     reports: [
-      { id: 'employees_current', title: 'Empleados', subtitle: 'Vigentes con cedula, nombre, cargo, zona, dependencia y sede' },
-      { id: 'attendance_without_fs', title: 'Consolidado asistencia (Sin FS)', subtitle: 'Rango de fechas con sede trabajada, AUS-novedad y total de asistencias' },
-      { id: 'services_without_fs', title: 'Consolidado servicios (Sin FS)', subtitle: 'Rango de fechas con servicios planeados, cedulas atendidas y ausentismos confirmados' },
-      { id: 'hiring_by_sede', title: 'Contratacion por Sedes', subtitle: 'Dependencia, zona, sede, planeados y contratados por sede' },
-      { id: 'novelties_consolidated', title: 'Consolidado Novedades', subtitle: 'Periodo de tiempo con personas reportadas en novedades distintas de Trabajando y Compensatorio' }
+      { id: 'services_without_fs', title: 'Consolidado Servicios', subtitle: 'Rango de fechas con servicios planeados, cedulas atendidas y ausentismos confirmados' }
     ]
   };
   const ui = el('section', { className: 'main-card' }, [
     el('h2', {}, [selectedSet.title]),
     el('p', { className: 'text-muted' }, [selectedSet.subtitle]),
-    el('div', { className: 'reports-grid mt-2', id: 'reportsCards' }, []),
-    el('div', { className: 'divider' }, []),
-    el('div', { id: 'reportContent' }, [el('p', { className: 'text-muted' }, ['Selecciona una tarjeta para abrir el reporte.'])]),
+    el('div', { id: 'reportContent', className: 'mt-2' }, []),
     el('p', { id: 'msg', className: 'text-muted mt-2' }, [' '])
   ]);
 
@@ -29,7 +25,7 @@ export const ConsolidatedReports = (mount, deps = {}) => {
       el('span', { className: 'report-card__subtitle' }, [r.subtitle])
     ])
   );
-  qs('#reportsCards', ui).replaceChildren(...cards);
+  qs('#reportsCards', ui)?.replaceChildren(...cards);
 
   let selectedReportId = '';
   let generatedEmployeesRows = [];
@@ -1784,7 +1780,7 @@ export const ConsolidatedReports = (mount, deps = {}) => {
       syncEmployeesDependencyOptions(generatedEmployeesRows);
       syncEmployeesSedeOptions(generatedEmployeesRows);
       renderEmployeesTable();
-      if (btnExport) btnExport.disabled = generatedEmployeesRows.length === 0;
+      if (btnExport) btnExport.disabled = !canExport || generatedEmployeesRows.length === 0;
       setMessage(' ');
     } catch (e) {
       setMessage(`Error al generar reporte: ${e?.message || e}`);
@@ -1839,7 +1835,7 @@ export const ConsolidatedReports = (mount, deps = {}) => {
       const totalAttendance = normalized.rows.reduce((acc, row) => acc + Number(row.asistencias || 0), 0);
       const totalNode = qs('#attendanceWithoutFsTotal', ui);
       if (totalNode) totalNode.textContent = `Periodo: ${dateFrom} a ${dateTo} | Empleados: ${normalized.rows.length} | Dias: ${normalized.days.length} | Asistencias: ${totalAttendance}`;
-      if (btnExport) btnExport.disabled = normalized.rows.length === 0;
+      if (btnExport) btnExport.disabled = !canExport || normalized.rows.length === 0;
       setMessage(`Consolidado generado para ${dateFrom} a ${dateTo}. Empleados: ${normalized.rows.length}`);
     } catch (e) {
       setMessage(`Error al generar consolidado de asistencia: ${e?.message || e}`);
@@ -1897,7 +1893,7 @@ export const ConsolidatedReports = (mount, deps = {}) => {
       const totalAttendance = normalized.rows.reduce((acc, row) => acc + Number(row.asistencias || 0), 0);
       const totalNode = qs('#servicesWithoutFsTotal', ui);
       if (totalNode) totalNode.textContent = `Periodo: ${dateFrom} a ${dateTo} | Servicios: ${normalized.rows.length} | Dias: ${normalized.days.length} | Asistencias: ${totalAttendance}`;
-      if (btnExport) btnExport.disabled = normalized.rows.length === 0;
+      if (btnExport) btnExport.disabled = !canExport || normalized.rows.length === 0;
       setMessage(`Consolidado de servicios generado para ${dateFrom} a ${dateTo}. Servicios: ${normalized.rows.length}`);
     } catch (e) {
       setMessage(`Error al generar consolidado de servicios: ${e?.message || e}`);
@@ -1938,7 +1934,7 @@ export const ConsolidatedReports = (mount, deps = {}) => {
       if (totalNode) totalNode.textContent = `Total registros del dia: ${generatedDailyRows.length}`;
       const tbody = qs('#dailyTbody', ui);
       if (tbody) tbody.replaceChildren(...renderDailyRows(generatedDailyRows));
-      if (btnExport) btnExport.disabled = generatedDailyRows.length === 0;
+      if (btnExport) btnExport.disabled = !canExport || generatedDailyRows.length === 0;
       setMessage(`Reporte generado para ${date}. Registros: ${generatedDailyRows.length}`);
     } catch (e) {
       setMessage(`Error al generar reporte diario: ${e?.message || e}`);
@@ -1977,7 +1973,7 @@ export const ConsolidatedReports = (mount, deps = {}) => {
       syncHiringDependencyOptions(generatedHiringRows);
       syncHiringSedeOptions(generatedHiringRows);
       renderHiringTable();
-      if (btnExport) btnExport.disabled = generatedHiringRows.length === 0;
+      if (btnExport) btnExport.disabled = !canExport || generatedHiringRows.length === 0;
       setMessage(' ');
     } catch (e) {
       setMessage(`Error al generar reporte de contratacion: ${e?.message || e}`);
@@ -2021,7 +2017,7 @@ export const ConsolidatedReports = (mount, deps = {}) => {
       const totalNode = qs('#noveltiesTotal', ui);
       if (totalNode) totalNode.textContent = `Periodo: ${dateFrom} a ${dateTo} | Registros: ${generatedNoveltyRows.length} | Personas: ${peopleCount}`;
       renderNoveltiesTable();
-      if (btnExport) btnExport.disabled = generatedNoveltyRows.length === 0;
+      if (btnExport) btnExport.disabled = !canExport || generatedNoveltyRows.length === 0;
       setMessage(' ');
     } catch (e) {
       setMessage(`Error al generar consolidado de novedades: ${e?.message || e}`);
@@ -2075,7 +2071,7 @@ export const ConsolidatedReports = (mount, deps = {}) => {
       }
       const tbody = qs('#absenteeismTbody', ui);
       if (tbody) tbody.replaceChildren(...renderAbsenteeismRows(generatedAbsenteeismRows));
-      if (btnExport) btnExport.disabled = generatedAbsenteeismRows.length === 0;
+      if (btnExport) btnExport.disabled = !canExport || generatedAbsenteeismRows.length === 0;
       setMessage(`Reporte generado para ${date}. Sedes: ${generatedAbsenteeismRows.length}`);
     } catch (e) {
       setMessage(`Error al generar reporte de ausentismo: ${e?.message || e}`);
@@ -2091,6 +2087,7 @@ export const ConsolidatedReports = (mount, deps = {}) => {
   async function exportEmployeesExcel() {
     try {
       if (!generatedEmployeesRows.length) throw new Error('Primero genera el reporte.');
+      if (!canExport) throw new Error('No tienes permiso para exportar este reporte.');
       const btn = qs('#btnExportEmployees', ui);
       if (btn) {
         btn.disabled = true;
@@ -2109,7 +2106,7 @@ export const ConsolidatedReports = (mount, deps = {}) => {
     } finally {
       const btn = qs('#btnExportEmployees', ui);
       if (btn) {
-        btn.disabled = generatedEmployeesRows.length === 0;
+        btn.disabled = !canExport || generatedEmployeesRows.length === 0;
         btn.textContent = 'Generar Excel';
       }
     }
@@ -2118,6 +2115,7 @@ export const ConsolidatedReports = (mount, deps = {}) => {
   async function exportAttendanceWithoutFsExcel() {
     try {
       if (!generatedAttendanceWithoutFsRows.length) throw new Error('Primero genera el reporte.');
+      if (!canExport) throw new Error('No tienes permiso para exportar este reporte.');
       const btn = qs('#btnExportAttendanceWithoutFs', ui);
       if (btn) {
         btn.disabled = true;
@@ -2151,7 +2149,7 @@ export const ConsolidatedReports = (mount, deps = {}) => {
     } finally {
       const btn = qs('#btnExportAttendanceWithoutFs', ui);
       if (btn) {
-        btn.disabled = generatedAttendanceWithoutFsRows.length === 0;
+        btn.disabled = !canExport || generatedAttendanceWithoutFsRows.length === 0;
         btn.textContent = 'Generar Excel';
       }
     }
@@ -2160,6 +2158,7 @@ export const ConsolidatedReports = (mount, deps = {}) => {
   async function exportServicesWithoutFsExcel() {
     try {
       if (!generatedServicesWithoutFsRows.length) throw new Error('Primero genera el reporte.');
+      if (!canExport) throw new Error('No tienes permiso para exportar este reporte.');
       const btn = qs('#btnExportServicesWithoutFs', ui);
       if (btn) {
         btn.disabled = true;
@@ -2189,15 +2188,15 @@ export const ConsolidatedReports = (mount, deps = {}) => {
         { wch: 12 }
       ];
       const wb = mod.utils.book_new();
-      mod.utils.book_append_sheet(wb, ws, 'Consolidado servicios');
-      mod.writeFile(wb, `consolidado_servicios_sin_fs_${selectedServicesWithoutFsDateFrom}_a_${selectedServicesWithoutFsDateTo}.xlsx`);
+      mod.utils.book_append_sheet(wb, ws, 'Consolidado Servicios');
+      mod.writeFile(wb, `consolidado_servicios_${selectedServicesWithoutFsDateFrom}_a_${selectedServicesWithoutFsDateTo}.xlsx`);
       setMessage(`Excel generado correctamente. Servicios: ${generatedServicesWithoutFsRows.length}`);
     } catch (e) {
       setMessage(`Error al generar Excel del consolidado de servicios: ${e?.message || e}`);
     } finally {
       const btn = qs('#btnExportServicesWithoutFs', ui);
       if (btn) {
-        btn.disabled = generatedServicesWithoutFsRows.length === 0;
+        btn.disabled = !canExport || generatedServicesWithoutFsRows.length === 0;
         btn.textContent = 'Generar Excel';
       }
     }
@@ -2206,6 +2205,7 @@ export const ConsolidatedReports = (mount, deps = {}) => {
   async function exportDailyExcel() {
     try {
       if (!generatedDailyRows.length) throw new Error('Primero genera el reporte.');
+      if (!canExport) throw new Error('No tienes permiso para exportar este reporte.');
       const btn = qs('#btnExportDaily', ui);
       if (btn) {
         btn.disabled = true;
@@ -2233,7 +2233,7 @@ export const ConsolidatedReports = (mount, deps = {}) => {
     } finally {
       const btn = qs('#btnExportDaily', ui);
       if (btn) {
-        btn.disabled = generatedDailyRows.length === 0;
+        btn.disabled = !canExport || generatedDailyRows.length === 0;
         btn.textContent = 'Generar Excel';
       }
     }
@@ -2242,6 +2242,7 @@ export const ConsolidatedReports = (mount, deps = {}) => {
   async function exportHiringExcel() {
     try {
       if (!generatedHiringRows.length) throw new Error('Primero genera el reporte.');
+      if (!canExport) throw new Error('No tienes permiso para exportar este reporte.');
       const btn = qs('#btnExportHiring', ui);
       if (btn) {
         btn.disabled = true;
@@ -2269,7 +2270,7 @@ export const ConsolidatedReports = (mount, deps = {}) => {
     } finally {
       const btn = qs('#btnExportHiring', ui);
       if (btn) {
-        btn.disabled = generatedHiringRows.length === 0;
+        btn.disabled = !canExport || generatedHiringRows.length === 0;
         btn.textContent = 'Generar Excel';
       }
     }
@@ -2278,6 +2279,7 @@ export const ConsolidatedReports = (mount, deps = {}) => {
   async function exportNoveltyExcel() {
     try {
       if (!generatedNoveltyRows.length) throw new Error('Primero genera el reporte.');
+      if (!canExport) throw new Error('No tienes permiso para exportar este reporte.');
       const btn = qs('#btnExportNovelties', ui);
       if (btn) {
         btn.disabled = true;
@@ -2304,7 +2306,7 @@ export const ConsolidatedReports = (mount, deps = {}) => {
     } finally {
       const btn = qs('#btnExportNovelties', ui);
       if (btn) {
-        btn.disabled = generatedNoveltyRows.length === 0;
+        btn.disabled = !canExport || generatedNoveltyRows.length === 0;
         btn.textContent = 'Generar Excel';
       }
     }
@@ -2313,6 +2315,7 @@ export const ConsolidatedReports = (mount, deps = {}) => {
   async function exportAbsenteeismExcel() {
     try {
       if (!generatedAbsenteeismRows.length) throw new Error('Primero genera el reporte.');
+      if (!canExport) throw new Error('No tienes permiso para exportar este reporte.');
       const btn = qs('#btnExportAbsenteeism', ui);
       if (btn) {
         btn.disabled = true;
@@ -2343,7 +2346,7 @@ export const ConsolidatedReports = (mount, deps = {}) => {
     } finally {
       const btn = qs('#btnExportAbsenteeism', ui);
       if (btn) {
-        btn.disabled = generatedAbsenteeismRows.length === 0;
+        btn.disabled = !canExport || generatedAbsenteeismRows.length === 0;
         btn.textContent = 'Generar Excel';
       }
     }
@@ -2354,7 +2357,7 @@ export const ConsolidatedReports = (mount, deps = {}) => {
       el('div', { className: 'form-row' }, [
         el('div', {}, [el('h3', { style: 'margin:0;' }, ['Reporte: Empleados vigentes'])]),
         el('button', { id: 'btnGenerateEmployees', className: 'btn right', type: 'button' }, ['Generar reporte']),
-        el('button', { id: 'btnExportEmployees', className: 'btn btn--primary', type: 'button', disabled: true }, ['Generar Excel'])
+        el('button', { id: 'btnExportEmployees', className: 'btn btn--primary', type: 'button', disabled: true, title: canExport ? '' : 'Modo consulta: no puedes exportar.' }, ['Generar Excel'])
       ]),
       el('div', { className: 'form-row mt-2' }, [
         el('div', {}, [
@@ -2415,7 +2418,7 @@ export const ConsolidatedReports = (mount, deps = {}) => {
         el('div', {}, [el('label', { className: 'label' }, ['Desde']), el('input', { id: 'attendanceWithoutFsDateFrom', className: 'input', type: 'date', value: selectedAttendanceWithoutFsDateFrom, max: todayBogota(), style: 'max-width:180px' })]),
         el('div', {}, [el('label', { className: 'label' }, ['Hasta']), el('input', { id: 'attendanceWithoutFsDateTo', className: 'input', type: 'date', value: selectedAttendanceWithoutFsDateTo, max: todayBogota(), style: 'max-width:180px' })]),
         el('button', { id: 'btnGenerateAttendanceWithoutFs', className: 'btn', type: 'button' }, ['Generar reporte']),
-        el('button', { id: 'btnExportAttendanceWithoutFs', className: 'btn btn--primary', type: 'button', disabled: true }, ['Generar Excel'])
+        el('button', { id: 'btnExportAttendanceWithoutFs', className: 'btn btn--primary', type: 'button', disabled: true, title: canExport ? '' : 'Modo consulta: no puedes exportar.' }, ['Generar Excel'])
       ]),
       el('p', { id: 'attendanceWithoutFsTotal', className: 'text-muted mt-2' }, ['Selecciona el rango y genera el reporte.']),
       el('div', { className: 'table-wrap mt-2' }, [
@@ -2437,11 +2440,11 @@ export const ConsolidatedReports = (mount, deps = {}) => {
   function renderServicesWithoutFsPanel() {
     const content = el('section', {}, [
       el('div', { className: 'form-row' }, [
-        el('div', {}, [el('h3', { style: 'margin:0;' }, ['Reporte: Consolidado servicios (Sin FS)'])]),
+        el('div', {}, [el('h3', { style: 'margin:0;' }, ['Reporte: Consolidado Servicios'])]),
         el('div', {}, [el('label', { className: 'label' }, ['Desde']), el('input', { id: 'servicesWithoutFsDateFrom', className: 'input', type: 'date', value: selectedServicesWithoutFsDateFrom, max: todayBogota(), style: 'max-width:180px' })]),
         el('div', {}, [el('label', { className: 'label' }, ['Hasta']), el('input', { id: 'servicesWithoutFsDateTo', className: 'input', type: 'date', value: selectedServicesWithoutFsDateTo, max: todayBogota(), style: 'max-width:180px' })]),
         el('button', { id: 'btnGenerateServicesWithoutFs', className: 'btn', type: 'button' }, ['Generar reporte']),
-        el('button', { id: 'btnExportServicesWithoutFs', className: 'btn btn--primary', type: 'button', disabled: true }, ['Generar Excel'])
+        el('button', { id: 'btnExportServicesWithoutFs', className: 'btn btn--primary', type: 'button', disabled: true, title: canExport ? '' : 'Modo consulta: no puedes exportar.' }, ['Generar Excel'])
       ]),
       el('p', { id: 'servicesWithoutFsTotal', className: 'text-muted mt-2' }, ['Selecciona el rango y genera el reporte.']),
       el('div', { className: 'table-wrap mt-2' }, [
@@ -2468,7 +2471,7 @@ export const ConsolidatedReports = (mount, deps = {}) => {
         el('div', {}, [el('h3', { style: 'margin:0;' }, ['Reporte: Registro diario'])]),
         el('div', {}, [el('label', { className: 'label' }, ['Fecha']), el('input', { id: 'dailyDate', className: 'input', type: 'date', value: selectedDailyDate, style: 'max-width:180px' })]),
         el('button', { id: 'btnGenerateDaily', className: 'btn', type: 'button' }, ['Generar reporte']),
-        el('button', { id: 'btnExportDaily', className: 'btn btn--primary', type: 'button', disabled: true }, ['Generar Excel'])
+        el('button', { id: 'btnExportDaily', className: 'btn btn--primary', type: 'button', disabled: true, title: canExport ? '' : 'Modo consulta: no puedes exportar.' }, ['Generar Excel'])
       ]),
       el('p', { id: 'dailyTotal', className: 'text-muted mt-2' }, ['Selecciona una fecha cerrada y genera el reporte.']),
       el('div', { className: 'table-wrap mt-2' }, [
@@ -2488,7 +2491,7 @@ export const ConsolidatedReports = (mount, deps = {}) => {
       el('div', { className: 'form-row' }, [
         el('div', {}, [el('h3', { style: 'margin:0;' }, ['Reporte: Contratacion por Sedes'])]),
         el('button', { id: 'btnGenerateHiring', className: 'btn right', type: 'button' }, ['Generar reporte']),
-        el('button', { id: 'btnExportHiring', className: 'btn btn--primary', type: 'button', disabled: true }, ['Generar Excel'])
+        el('button', { id: 'btnExportHiring', className: 'btn btn--primary', type: 'button', disabled: true, title: canExport ? '' : 'Modo consulta: no puedes exportar.' }, ['Generar Excel'])
       ]),
       el('div', { className: 'form-row mt-2' }, [
         el('div', {}, [
@@ -2569,7 +2572,7 @@ export const ConsolidatedReports = (mount, deps = {}) => {
         el('div', {}, [el('h3', { style: 'margin:0;' }, ['Reporte: Ausentismo diario'])]),
         el('div', {}, [el('label', { className: 'label' }, ['Fecha']), el('input', { id: 'absenteeismDate', className: 'input', type: 'date', value: selectedAbsenteeismDate, style: 'max-width:180px' })]),
         el('button', { id: 'btnGenerateAbsenteeism', className: 'btn', type: 'button' }, ['Generar reporte']),
-        el('button', { id: 'btnExportAbsenteeism', className: 'btn btn--primary', type: 'button', disabled: true }, ['Generar Excel'])
+        el('button', { id: 'btnExportAbsenteeism', className: 'btn btn--primary', type: 'button', disabled: true, title: canExport ? '' : 'Modo consulta: no puedes exportar.' }, ['Generar Excel'])
       ]),
       el('p', { id: 'absenteeismTotal', className: 'text-muted mt-2' }, ['Selecciona una fecha cerrada y genera el reporte.']),
       el('div', { className: 'table-wrap mt-2' }, [
@@ -2591,7 +2594,7 @@ export const ConsolidatedReports = (mount, deps = {}) => {
         el('div', {}, [el('label', { className: 'label' }, ['Desde']), el('input', { id: 'noveltiesDateFrom', className: 'input', type: 'date', value: selectedNoveltyDateFrom, max: todayBogota(), style: 'max-width:180px' })]),
         el('div', {}, [el('label', { className: 'label' }, ['Hasta']), el('input', { id: 'noveltiesDateTo', className: 'input', type: 'date', value: selectedNoveltyDateTo, max: todayBogota(), style: 'max-width:180px' })]),
         el('button', { id: 'btnGenerateNovelties', className: 'btn', type: 'button' }, ['Generar reporte']),
-        el('button', { id: 'btnExportNovelties', className: 'btn btn--primary', type: 'button', disabled: true }, ['Generar Excel'])
+        el('button', { id: 'btnExportNovelties', className: 'btn btn--primary', type: 'button', disabled: true, title: canExport ? '' : 'Modo consulta: no puedes exportar.' }, ['Generar Excel'])
       ]),
       el('div', { className: 'table-wrap mt-2' }, [
         el('table', { className: 'table', id: 'noveltiesTable' }, [
@@ -2638,33 +2641,13 @@ export const ConsolidatedReports = (mount, deps = {}) => {
     generatedNoveltyRows = [];
     generatedAbsenteeismRows = [];
     ui.querySelectorAll('.report-card').forEach((n) => n.classList.toggle('is-active', n.dataset.id === selectedReportId));
-    if (selectedReportId === 'employees_current') {
-      renderEmployeesPanel();
-      setMessage(' ');
-      return;
-    }
     if (selectedReportId === 'services_without_fs') {
       renderServicesWithoutFsPanel();
       setMessage(' ');
       return;
     }
-    if (selectedReportId === 'attendance_without_fs') {
-      renderAttendanceWithoutFsPanel();
-      setMessage(' ');
-      return;
-    }
     if (selectedReportId === 'daily_registry') {
       renderDailyPanel();
-      setMessage(' ');
-      return;
-    }
-    if (selectedReportId === 'hiring_by_sede') {
-      renderHiringPanel();
-      setMessage(' ');
-      return;
-    }
-    if (selectedReportId === 'novelties_consolidated') {
-      renderNoveltiesPanel();
       setMessage(' ');
       return;
     }
@@ -2678,6 +2661,7 @@ export const ConsolidatedReports = (mount, deps = {}) => {
 
   cards.forEach((card) => card.addEventListener('click', () => openReport(card.dataset.id || '')));
 
+  openReport('services_without_fs');
   mount.replaceChildren(ui);
   return () => {};
 };

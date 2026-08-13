@@ -12,9 +12,13 @@ export const ReportesDashboard = (mount, deps = {}) => renderModuleDashboard(mou
     'Separa consultas diarias de reportes institucionales.'
   ],
   actions: [
+    { label: 'Empleados', route: '/reports-employees', perm: PERMS.VIEW_REPORTS_EMPLOYEES, detail: 'Vigentes por cargo, tipo, zona, dependencia y sede.' },
+    { label: 'Contratacion por Sedes', route: '/reports-hiring', perm: PERMS.VIEW_REPORTS_HIRING, detail: 'Planeados, contratados y diferencia por sede.' },
     { label: 'Historico Registro Diario', route: '/reports-daily-history', perm: PERMS.VIEW_REPORTS_CLIENT, detail: 'Consulta por fecha y sede.' },
-    { label: 'Ausentismo', route: '/absenteeism', perm: PERMS.MANAGE_ABSENTEEISM, detail: 'Analisis de ausencias.' },
-    { label: 'Reportes consolidados', route: '/reports-consolidated', perm: PERMS.VIEW_REPORTS_COMPANY, detail: 'Exportables institucionales.' }
+    { label: 'Historico Registro QR', route: '/reports-qr-history', perm: PERMS.VIEW_REPORTS_QR_HISTORY, detail: 'Consulta ingresos, salidas, pendientes y alertas QR.' },
+    { label: 'Ausentismo', route: '/absenteeism', perm: PERMS.VIEW_REPORTS_ABSENTEEISM, detail: 'Analisis de ausencias.' },
+    { label: 'Consolidado Novedades', route: '/reports-novelties-consolidated', perm: PERMS.VIEW_REPORTS_NOVELTIES_CONSOLIDATED, detail: 'Novedades por periodo y cobertura.' },
+    { label: 'Consolidado Servicios', route: '/reports-services-consolidated', perm: PERMS.VIEW_REPORTS_SERVICES_CONSOLIDATED, detail: 'Servicios planeados, cedulas atendidas y ausentismos confirmados.' }
   ],
   metrics: [
     { label: 'Dias del mes', tone: 'blue', load: async () => daysElapsedInMonth() },

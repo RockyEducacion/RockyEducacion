@@ -223,7 +223,10 @@ async function init() {
       loadUserProfile: fb.loadUserProfile,
       streamRoleMatrix: fb.streamRoleMatrix,
       streamUserOverrides: fb.streamUserOverrides,
-      scanAttendanceQr: fb.scanAttendanceQr
+      scanAttendanceQr: async (...args) => {
+        if (!can(PERMS.USE_QR_SCANNER)) throw new Error('No tienes permiso para usar el lector QR.');
+        return fb.scanAttendanceQr(...args);
+      }
     };
     unsubscribeAuth = fb.authState(handleAuthUser);
   } catch (error) {

@@ -434,6 +434,13 @@ function mapEmployeeRow(row = {}) {
     ...mapCatalogRow(row),
     documento: row.documento || null,
     telefono: row.telefono || null,
+    fechaNacimiento: row.fecha_nacimiento || null,
+    eps: row.eps || null,
+    afp: row.afp || null,
+    arlRiesgo: row.arl_riesgo || null,
+    dotacionCamisa: row.dotacion_camisa || null,
+    dotacionPantalon: row.dotacion_pantalon || null,
+    dotacionZapatos: row.dotacion_zapatos || null,
     cargoCodigo: row.cargo_codigo || null,
     cargoNombre: row.cargo_nombre || null,
     sedeCodigo: row.sede_codigo || null,
@@ -1142,7 +1149,7 @@ async function computeDailyClosureSnapshot(fecha) {
     summary.registrados = actualRows.filter((row) => row.asistio === true).length;
     summary.ausentismos = 0;
     summary.faltan = 0;
-    summary.sobran = actualRows.length;
+    summary.sobran = summary.registrados;
   }
 
   summary.noContratados = Math.max(0, summary.planeados - summary.contratados);
@@ -1214,6 +1221,7 @@ async function computeDailySedeClosureSnapshot(fecha) {
 
   const registeredBySede = new Map();
   dedupeAttendanceRows(attRows).forEach((row) => {
+    if (row?.asistio !== true) return;
     const doc = String(row?.documento || '').trim();
     if (doc && replacementSuperDocs.has(`${String(row?.fecha || '').trim()}|${doc}`)) return;
     if (doc && supernumerarioDocs.has(doc)) return;
@@ -1236,7 +1244,7 @@ async function computeDailySedeClosureSnapshot(fecha) {
     const registrados = Number(registeredBySede.get(sedeCode)?.size || 0);
     const externalRegistered = Math.max(0, registrados - baseContracted);
     const contratados = Math.min(planeados, baseContracted + externalRegistered);
-    const faltantes = Math.max(0, planeados - registrados);
+    const faltantes = Math.max(0, planeados - contratados);
     const sobrantes = Math.max(0, registrados - planeados);
     return {
       id: `${day}_${sedeCode}`,
@@ -1658,6 +1666,30 @@ async function getDailyMetricsRowByDate(fecha) {
   return data || null;
 }
 
+async function normalizeZeroDemandDailyMetrics(fecha) {
+  const row = await getDailyMetricsRowByDate(fecha);
+  if (!row) return null;
+  const planned = Number(row?.planned || 0);
+  const expected = Number(row?.expected || 0);
+  if (planned !== 0 || expected !== 0) return row;
+  const attendanceCount = Number(row?.attendance_count || 0);
+  if (Number(row?.absenteeism || 0) === 0 && Number(row?.missing || 0) === 0 && Number(row?.paid_services || 0) === attendanceCount) {
+    return row;
+  }
+  const { data, error } = await supabase
+    .from('daily_metrics')
+    .update({
+      absenteeism: 0,
+      missing: 0,
+      paid_services: attendanceCount
+    })
+    .eq('fecha', String(fecha || '').trim())
+    .select('*')
+    .maybeSingle();
+  if (error) throw error;
+  return data || row;
+}
+
 async function removeInvalidScheduledEmployeeDailyStatusRows(fecha) {
   const day = String(fecha || '').trim();
   if (!day) return 0;
@@ -1762,6 +1794,7 @@ async function refreshOperationalSnapshotsFromEmployeeDailyStatus(fecha) {
     if (isMissingRpcError(error)) return null;
     throw error;
   }
+  await normalizeZeroDemandDailyMetrics(day);
 
   await notifyTableReload('sede_status');
   await notifyTableReload('daily_metrics');
@@ -1793,8 +1826,9 @@ async function recomputeDailyMetrics(fecha) {
     if (error) {
       if (!isMissingRpcError(error)) throw error;
     } else {
+      await normalizeZeroDemandDailyMetrics(day);
       await notifyTableReload('daily_metrics');
-      return unwrapRpcSingleRow(data) || (await getDailyMetricsRowByDate(day));
+      return (await getDailyMetricsRowByDate(day)) || unwrapRpcSingleRow(data);
     }
   }
 
@@ -1864,12 +1898,11 @@ async function recomputeDailyMetrics(fecha) {
   const uniqueDocs = new Set(baseAttendanceRows.map((row) => String(row.documento || row.empleadoId || '').trim()).filter(Boolean));
   const actualAttendanceRows = dedupeAttendanceRows(attRows);
   const actualAttendanceCount = actualAttendanceRows.filter((row) => row?.asistio === true).length;
-  const actualAbsenteeism = actualAttendanceRows.filter((row) => row?.asistio === false).length;
   const attendanceCount = planned === 0 && expected === 0
     ? actualAttendanceCount
     : baseAttendanceRows.filter((row) => metricAttendanceCountsAsService(row, replacementMap, replacementRules)).length;
   const absenteeism = planned === 0 && expected === 0
-    ? actualAbsenteeism
+    ? 0
     : baseAttendanceRows.filter((row) => metricAttendanceCountsAsAbsenteeism(row, replacementMap, replacementRules)).length;
   const paidServices = attendanceCount;
   const noContracted = Math.max(0, planned - expected);
@@ -1967,8 +2000,10 @@ async function recomputeSedeStatusSnapshot(fecha) {
     const source = assignment || employee;
     const sedeCode = String(row?.sedeCodigo || source?.sedeCodigo || source?.sede_codigo || '').trim();
     if (!sedeCode || !activeSedeCodes.has(sedeCode)) return;
-    if (!registeredBySede.has(sedeCode)) registeredBySede.set(sedeCode, new Set());
-    registeredBySede.get(sedeCode).add(doc || empId || String(row?.id || '').trim());
+    if (row?.asistio === true) {
+      if (!registeredBySede.has(sedeCode)) registeredBySede.set(sedeCode, new Set());
+      registeredBySede.get(sedeCode).add(doc || empId || String(row?.id || '').trim());
+    }
     const repl = replacementMap.get(metricReplacementKey(row)) || null;
     const hasReplacement = String(repl?.decision || '').trim().toLowerCase() === 'reemplazo';
     if (row?.asistio === false && metricAttendanceRequiresReplacement(row, replacementRules) && !hasReplacement) {
@@ -2326,6 +2361,13 @@ async function insertEmployeeRecord({
   documento,
   nombre,
   telefono,
+  fechaNacimiento,
+  eps,
+  afp,
+  arlRiesgo,
+  dotacionCamisa,
+  dotacionPantalon,
+  dotacionZapatos,
   cargoCodigo,
   cargoNombre,
   sedeCodigo,
@@ -2337,28 +2379,37 @@ async function insertEmployeeRecord({
   historySource = 'create_employee'
 }) {
   const normalizedPhone = normalizeStoredPhone(telefono);
+  const payload = applyEmployeeExtendedFields({
+    codigo: codigo || null,
+    documento: String(documento || '').trim() || null,
+    nombre: nombre || null,
+    telefono: normalizedPhone,
+    cargo_codigo: cargoCodigo || null,
+    cargo_nombre: cargoNombre || null,
+    sede_codigo: sedeCodigo || null,
+    sede_nombre: sedeNombre || null,
+    zona_codigo: zone?.zonaCodigo || null,
+    zona_nombre: zone?.zonaNombre || null,
+    fecha_ingreso: fechaIngreso || null,
+    fecha_retiro: null,
+    estado: 'activo',
+    created_by_uid: audit?.created_by_uid || null,
+    created_by_email: audit?.created_by_email || null,
+    last_modified_by_uid: audit?.created_by_uid || null,
+    last_modified_by_email: audit?.created_by_email || null,
+    last_modified_at: new Date().toISOString()
+  }, {
+    fechaNacimiento,
+    eps,
+    afp,
+    arlRiesgo,
+    dotacionCamisa,
+    dotacionPantalon,
+    dotacionZapatos
+  });
   const { data, error } = await supabase
     .from('employees')
-    .insert({
-      codigo: codigo || null,
-      documento: String(documento || '').trim() || null,
-      nombre: nombre || null,
-      telefono: normalizedPhone,
-      cargo_codigo: cargoCodigo || null,
-      cargo_nombre: cargoNombre || null,
-      sede_codigo: sedeCodigo || null,
-      sede_nombre: sedeNombre || null,
-      zona_codigo: zone?.zonaCodigo || null,
-      zona_nombre: zone?.zonaNombre || null,
-      fecha_ingreso: fechaIngreso || null,
-      fecha_retiro: null,
-      estado: 'activo',
-      created_by_uid: audit?.created_by_uid || null,
-      created_by_email: audit?.created_by_email || null,
-      last_modified_by_uid: audit?.created_by_uid || null,
-      last_modified_by_email: audit?.created_by_email || null,
-      last_modified_at: new Date().toISOString()
-    })
+    .insert(payload)
     .select('*')
     .single();
   if (error) throw error;
@@ -3155,6 +3206,9 @@ export async function createSedesBulk(rows = []) {
 }
 
 export async function updateSede(id, { codigo, nombre, dependenciaCodigo, dependenciaNombre, zonaCodigo, zonaNombre, numeroOperarios, jornada, qrEnabled, qrLatitude, qrLongitude, qrRadiusMeters }) {
+  const previous = await supabase.from('sedes').select('*').eq('id', id).single();
+  if (previous.error) throw previous.error;
+  const previousRow = previous.data || {};
   const patch = {};
   if (typeof codigo === 'string') patch.codigo = codigo;
   if (typeof nombre === 'string') patch.nombre = nombre;
@@ -3168,10 +3222,57 @@ export async function updateSede(id, { codigo, nombre, dependenciaCodigo, depend
   if (qrLatitude !== undefined) patch.qr_latitude = typeof qrLatitude === 'number' && Number.isFinite(qrLatitude) ? qrLatitude : null;
   if (qrLongitude !== undefined) patch.qr_longitude = typeof qrLongitude === 'number' && Number.isFinite(qrLongitude) ? qrLongitude : null;
   if (typeof qrRadiusMeters === 'number' && Number.isFinite(qrRadiusMeters)) patch.qr_radius_meters = qrRadiusMeters;
-  const { error } = await supabase.from('sedes').update(patch).eq('id', id);
+  const { data: updated, error } = await supabase.from('sedes').update(patch).eq('id', id).select('*').single();
   if (error) throw error;
-  await notifyTableReload('sedes');
+  try {
+    await syncSedeCatalogReferences(previousRow, updated || previousRow);
+  } catch (syncError) {
+    console.warn('No se pudieron sincronizar referencias de sede desde el cliente. Verifica que la migracion phase26 este aplicada.', syncError);
+  }
+  await Promise.all([
+    notifyTableReload('sedes'),
+    notifyTableReload('employees'),
+    notifyTableReload('employee_cargo_history'),
+    notifyTableReload('supervisor_profile'),
+    notifyTableReload('sede_devices')
+  ]);
   await refreshOperationalState(todayBogotaISO());
+}
+
+async function syncSedeCatalogReferences(previous = {}, current = {}) {
+  const previousCode = String(previous?.codigo || '').trim();
+  const currentCode = String(current?.codigo || previousCode || '').trim();
+  if (!previousCode || !currentCode) return;
+
+  const currentName = String(current?.nombre || '').trim() || null;
+  const currentZoneCode = current?.zona_codigo || null;
+  const currentZoneName = current?.zona_nombre || null;
+  const updateSedeFields = {
+    sede_codigo: currentCode,
+    sede_nombre: currentName
+  };
+  const updateSedeZoneFields = {
+    ...updateSedeFields,
+    zona_codigo: currentZoneCode,
+    zona_nombre: currentZoneName
+  };
+
+  const updates = [
+    supabase.from('employees').update(updateSedeZoneFields).eq('sede_codigo', previousCode),
+    supabase.from('employee_cargo_history').update(updateSedeFields).eq('sede_codigo', previousCode),
+    supabase.from('sede_devices').update(updateSedeFields).eq('sede_codigo', previousCode),
+    supabase.from('sede_device_sites').update(updateSedeFields).eq('sede_codigo', previousCode),
+    supabase.from('supervisor_profile').update({
+      sede_codigo: currentCode,
+      zona_codigo: currentZoneCode,
+      zona_nombre: currentZoneName
+    }).eq('sede_codigo', previousCode)
+  ];
+
+  for (const request of updates) {
+    const { error } = await request;
+    if (error) throw error;
+  }
 }
 
 export async function setSedeStatus(id, estado) {
@@ -3627,7 +3728,7 @@ export async function getNextEmployeeCode(prefix = 'EMP', width = 4) {
   return getNextPrefixedCode('employees', prefix, width);
 }
 
-export async function createEmployee({ codigo, documento, nombre, telefono, cargoCodigo, cargoNombre, sedeCodigo, sedeNombre, fechaIngreso }) {
+export async function createEmployee({ codigo, documento, nombre, telefono, fechaNacimiento, eps, afp, arlRiesgo, dotacionCamisa, dotacionPantalon, dotacionZapatos, cargoCodigo, cargoNombre, sedeCodigo, sedeNombre, fechaIngreso }) {
   const audit = await getCurrentAuditFields();
   const zone = await resolveZoneBySedeCode(sedeCodigo);
   const data = await insertEmployeeRecord({
@@ -3635,6 +3736,13 @@ export async function createEmployee({ codigo, documento, nombre, telefono, carg
     documento,
     nombre,
     telefono,
+    fechaNacimiento,
+    eps,
+    afp,
+    arlRiesgo,
+    dotacionCamisa,
+    dotacionPantalon,
+    dotacionZapatos,
     cargoCodigo,
     cargoNombre,
     sedeCodigo,
@@ -3749,6 +3857,17 @@ function normalizeBulkDate(value) {
   return parsed.toISOString();
 }
 
+function applyEmployeeExtendedFields(payload, source = {}) {
+  if (source.fechaNacimiento !== undefined) payload.fecha_nacimiento = source.fechaNacimiento || null;
+  if (source.eps !== undefined) payload.eps = String(source.eps || '').trim() || null;
+  if (source.afp !== undefined) payload.afp = String(source.afp || '').trim() || null;
+  if (source.arlRiesgo !== undefined) payload.arl_riesgo = String(source.arlRiesgo || '').trim() || null;
+  if (source.dotacionCamisa !== undefined) payload.dotacion_camisa = String(source.dotacionCamisa || '').trim() || null;
+  if (source.dotacionPantalon !== undefined) payload.dotacion_pantalon = String(source.dotacionPantalon || '').trim() || null;
+  if (source.dotacionZapatos !== undefined) payload.dotacion_zapatos = String(source.dotacionZapatos || '').trim() || null;
+  return payload;
+}
+
 export async function createEmployeesBulk(rows = [], options = {}) {
   const items = Array.isArray(rows) ? rows.filter(Boolean) : [];
   if (!items.length) return { created: 0 };
@@ -3793,7 +3912,7 @@ export async function createEmployeesBulk(rows = [], options = {}) {
     const payloads = batch.map((row) => {
       const codigo = row.codigo || buildNextPrefixedCode('EMP', ++nextCodeNumber, 4);
       const zone = zoneBySedeCode.get(String(row.sedeCodigo || '').trim()) || { zonaCodigo: null, zonaNombre: null };
-      return {
+      return applyEmployeeExtendedFields({
         codigo,
         documento: String(row.documento || '').trim() || null,
         nombre: row.nombre || null,
@@ -3812,7 +3931,7 @@ export async function createEmployeesBulk(rows = [], options = {}) {
         last_modified_by_uid: audit.created_by_uid,
         last_modified_by_email: audit.created_by_email,
         last_modified_at: timestamp
-      };
+      }, row);
     });
     const { data: insertedRows, error: insertError } = await supabase
       .from('employees')
@@ -3863,6 +3982,13 @@ export async function updateEmployee(id, data = {}) {
   if (typeof data.documento === 'string') patch.documento = data.documento;
   if (typeof data.nombre === 'string') patch.nombre = data.nombre;
   if (typeof data.telefono === 'string') patch.telefono = normalizeStoredPhone(data.telefono);
+  if (data.fechaNacimiento !== undefined) patch.fecha_nacimiento = data.fechaNacimiento || null;
+  if (data.eps !== undefined) patch.eps = String(data.eps || '').trim() || null;
+  if (data.afp !== undefined) patch.afp = String(data.afp || '').trim() || null;
+  if (data.arlRiesgo !== undefined) patch.arl_riesgo = String(data.arlRiesgo || '').trim() || null;
+  if (data.dotacionCamisa !== undefined) patch.dotacion_camisa = String(data.dotacionCamisa || '').trim() || null;
+  if (data.dotacionPantalon !== undefined) patch.dotacion_pantalon = String(data.dotacionPantalon || '').trim() || null;
+  if (data.dotacionZapatos !== undefined) patch.dotacion_zapatos = String(data.dotacionZapatos || '').trim() || null;
   if (typeof data.cargoCodigo === 'string') patch.cargo_codigo = data.cargoCodigo;
   if (typeof data.cargoNombre === 'string') patch.cargo_nombre = data.cargoNombre;
   if (typeof data.sedeCodigo === 'string') {
@@ -4195,6 +4321,45 @@ function isMissingRpcFunctionError(error) {
     || text.includes('schema cache');
 }
 
+async function enrichSupernumerariosWithEmployeeFields(rows = []) {
+  const needsEmployeeData = (rows || []).some((row) => !row.codigo || !row.cargoCodigo || !row.fechaIngreso);
+  if (!needsEmployeeData) return rows;
+
+  const ids = [...new Set((rows || []).map((row) => String(row?.id || '').trim()).filter(Boolean))];
+  const docs = [...new Set((rows || []).map((row) => String(row?.documento || '').trim()).filter(Boolean))];
+  if (!ids.length && !docs.length) return rows;
+
+  try {
+    const queries = [];
+    const select = 'id,codigo,documento,cargo_codigo,cargo_nombre,sede_codigo,sede_nombre,fecha_ingreso,fecha_retiro';
+    if (ids.length) queries.push(supabase.from('employees').select(select).in('id', ids));
+    if (docs.length) queries.push(supabase.from('employees').select(select).in('documento', docs));
+    const results = await Promise.all(queries);
+    const firstError = results.find((result) => result.error)?.error;
+    if (firstError) throw firstError;
+
+    const employeeRows = results.flatMap((result) => result.data || []);
+    const byId = new Map(employeeRows.map((row) => [String(row.id || '').trim(), row]));
+    const byDoc = new Map(employeeRows.map((row) => [String(row.documento || '').trim(), row]));
+    return rows.map((row) => {
+      const emp = byId.get(String(row.id || '').trim()) || byDoc.get(String(row.documento || '').trim()) || {};
+      return {
+        ...row,
+        codigo: row.codigo || emp.codigo || null,
+        cargoCodigo: row.cargoCodigo || emp.cargo_codigo || null,
+        cargoNombre: row.cargoNombre || emp.cargo_nombre || null,
+        sedeCodigo: row.sedeCodigo || emp.sede_codigo || null,
+        sedeNombre: row.sedeNombre || emp.sede_nombre || null,
+        fechaIngreso: row.fechaIngreso || emp.fecha_ingreso || null,
+        fechaRetiro: row.fechaRetiro || emp.fecha_retiro || null
+      };
+    });
+  } catch (error) {
+    console.warn('No se pudieron completar campos de supernumerarios desde empleados:', error);
+    return rows;
+  }
+}
+
 export async function listSupervisorAvailableSupernumerarios(fecha = null) {
   const day = toISODate(fecha);
   let response = day
@@ -4205,15 +4370,21 @@ export async function listSupervisorAvailableSupernumerarios(fecha = null) {
   }
   const { data, error } = response;
   if (error) throw error;
-  return (data || []).map((row) => ({
+  const rows = (data || []).map((row) => ({
     id: row.id,
+    codigo: row.codigo || row.employee_codigo || null,
     documento: row.documento || null,
     nombre: row.nombre || null,
     telefono: row.telefono || null,
     estado: row.estado || 'activo',
+    cargoCodigo: row.cargo_codigo || null,
+    cargoNombre: row.cargo_nombre || null,
     sedeCodigo: row.sede_codigo || null,
-    sedeNombre: row.sede_nombre || null
+    sedeNombre: row.sede_nombre || null,
+    fechaIngreso: row.fecha_ingreso || null,
+    fechaRetiro: row.fecha_retiro || null
   }));
+  return enrichSupernumerariosWithEmployeeFields(rows);
 }
 
 export async function getNextSupernumerarioCode(prefix = 'SUPN', width = 4) {
@@ -5461,23 +5632,33 @@ async function runPostClosureTasks(day) {
 
 async function finalizePendingAbsenteeismForClosure(day) {
   const audit = await getCurrentAuditFields();
-  const [{ data: attendanceRows, error: attendanceError }, { data: replacementRows, error: replacementsError }, novedadesRows] = await Promise.all([
+  await refreshEmployeeDailyStatusSnapshot(day);
+  const [
+    { data: attendanceRows, error: attendanceError },
+    { data: replacementRows, error: replacementsError },
+    { data: statusRows, error: statusError },
+    novedadesRows
+  ] = await Promise.all([
     supabase.from('attendance').select('*').eq('fecha', day),
     supabase.from('import_replacements').select('*').eq('fecha', day),
+    supabase.from('employee_daily_status').select('fecha, employee_id, documento, tipo_personal, servicio_programado').eq('fecha', day),
     selectAllRows('novedades', { select: 'codigo, codigo_novedad, nombre, reemplazo' })
   ]);
   if (attendanceError) throw attendanceError;
   if (replacementsError) throw replacementsError;
+  if (statusError) throw statusError;
 
   const replacementRules = buildNovedadReplacementRules((novedadesRows || []).map(mapNovedadRow));
   const replacementMap = new Map(((replacementRows || []).map((row) => {
     const mapped = mapImportReplacementRow(row);
     return [metricReplacementKey(mapped), mapped];
   })));
+  const scheduledServiceLookup = buildScheduledServiceLookup(statusRows || []);
 
   for (const raw of attendanceRows || []) {
     const row = mapAttendanceRow(raw);
     if (!metricAttendanceRequiresReplacement(row, replacementRules)) continue;
+    if (!attendanceHasScheduledService(row, scheduledServiceLookup)) continue;
     const key = metricReplacementKey(row);
     const existing = replacementMap.get(key);
     if (existing && String(existing?.decision || '').trim().toLowerCase() !== 'reemplazo' && String(existing?.decision || '').trim()) {
@@ -5525,19 +5706,43 @@ async function finalizePendingAbsenteeismForClosure(day) {
   });
 }
 
+function buildScheduledServiceLookup(statusRows = []) {
+  const lookup = new Set();
+  (statusRows || []).forEach((row) => {
+    if (String(row?.tipo_personal || row?.tipoPersonal || '').trim() !== 'empleado') return;
+    if (row?.servicio_programado !== true && row?.servicioProgramado !== true) return;
+    statusLookupKeys(row).forEach((key) => lookup.add(key));
+  });
+  return lookup;
+}
+
+function attendanceHasScheduledService(row = {}, lookup = new Set()) {
+  return statusLookupKeys(row).some((key) => lookup.has(key));
+}
+
+function statusLookupKeys(row = {}) {
+  const fecha = String(row?.fecha || '').trim();
+  const employeeId = String(row?.employee_id || row?.employeeId || row?.empleado_id || row?.empleadoId || '').trim();
+  const documento = String(row?.documento || '').trim();
+  return [
+    fecha && employeeId ? `${fecha}_id:${employeeId}` : '',
+    fecha && documento ? `${fecha}_doc:${documento}` : ''
+  ].filter(Boolean);
+}
+
 async function cleanupNonProgrammedClosedOperationalAbsenteeism(day) {
   const refreshed = await refreshEmployeeDailyStatusSnapshot(day);
   if (refreshed === null) return 0;
 
   const { data: statusRows, error } = await supabase
     .from('employee_daily_status')
-    .select('source_replacement_id, source_absenteeism_id, source_attendance_id, source_incapacity_id, tipo_personal, servicio_programado')
+    .select('employee_id, documento, source_replacement_id, source_absenteeism_id, source_attendance_id, source_incapacity_id, tipo_personal, servicio_programado')
     .eq('fecha', day)
     .eq('tipo_personal', 'empleado')
     .eq('servicio_programado', false);
   if (error) throw error;
 
-  const candidateRows = (statusRows || []).filter((row) => !row?.source_attendance_id && !row?.source_incapacity_id && (row?.source_replacement_id || row?.source_absenteeism_id));
+  const candidateRows = (statusRows || []).filter((row) => row?.source_replacement_id || row?.source_absenteeism_id);
   if (!candidateRows.length) return 0;
 
   const chunk = (items, size = 200) => {
@@ -5546,8 +5751,9 @@ async function cleanupNonProgrammedClosedOperationalAbsenteeism(day) {
     return output;
   };
 
-  const replacementIds = [...new Set(candidateRows.map((row) => row?.source_replacement_id).filter(Boolean))];
-  const absenteeismIds = [...new Set(candidateRows.map((row) => row?.source_absenteeism_id).filter(Boolean))];
+  const deterministicIds = candidateRows.map((row) => buildDailyRecordId(day, row?.documento, row?.employee_id)).filter(Boolean);
+  const replacementIds = [...new Set([...candidateRows.map((row) => row?.source_replacement_id), ...deterministicIds].filter(Boolean))];
+  const absenteeismIds = [...new Set([...candidateRows.map((row) => row?.source_absenteeism_id), ...deterministicIds].filter(Boolean))];
 
   const cronReplacementIds = [];
   for (const batch of chunk(replacementIds)) {

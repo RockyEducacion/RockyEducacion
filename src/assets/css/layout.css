@@ -101,6 +101,31 @@ html[data-theme="dark"] .main-card{
   background:linear-gradient(180deg,rgba(9,24,36,.96),rgba(13,31,46,.94));
   border-color:rgba(255,255,255,.06)
 }
+html[data-theme="color"] .sidebar{
+  box-shadow:inset -1px 0 0 rgba(255,255,255,.12), 14px 0 34px rgba(14,60,112,.08)
+}
+html[data-theme="color"] .app-content::before{
+  background:
+    linear-gradient(180deg,rgba(20,85,200,.08),transparent 240px),
+    radial-gradient(720px 300px at 20% 0%,rgba(20,85,200,.18),transparent 72%),
+    radial-gradient(620px 280px at 82% 4%,rgba(29,154,108,.18),transparent 70%),
+    radial-gradient(2px 2px at 14% 7%,rgba(20,85,200,.22),transparent 55%),
+    radial-gradient(2px 2px at 86% 17%,rgba(29,154,108,.2),transparent 55%)
+}
+html[data-theme="color"] .header::after{
+  background:
+    linear-gradient(90deg,transparent 0%,rgba(255,255,255,.82) 10%,rgba(20,85,200,.24) 44%,rgba(29,154,108,.28) 70%,rgba(212,151,31,.22) 88%,transparent 100%)
+}
+html[data-theme="color"] .footer{
+  border-top-color:rgba(160,189,213,.46)
+}
+html[data-theme="color"] .main-card{
+  background:
+    linear-gradient(180deg,rgba(255,255,255,.9),rgba(244,251,247,.88)),
+    linear-gradient(135deg,rgba(20,85,200,.1),rgba(29,154,108,.12));
+  border-color:rgba(143,183,211,.62);
+  box-shadow:0 22px 52px rgba(14,60,112,.14)
+}
 .sidebar-backdrop{
   position:fixed;
   inset:0;

@@ -2,6 +2,11 @@ let container = null;
 let installed = false;
 
 const MAX_VISIBLE_NOTICES = 4;
+const NOTICE_TIMEOUT_MS = {
+  default: 7000,
+  warning: 8000,
+  error: 10000
+};
 
 export function installBrowserAlertReplacement() {
   if (installed || typeof window === 'undefined' || typeof document === 'undefined') return;
@@ -100,7 +105,7 @@ function titleForType(type) {
 }
 
 function defaultTimeout(type) {
-  if (type === 'error') return 7000;
-  if (type === 'warning') return 5600;
-  return 4200;
+  if (type === 'error') return NOTICE_TIMEOUT_MS.error;
+  if (type === 'warning') return NOTICE_TIMEOUT_MS.warning;
+  return NOTICE_TIMEOUT_MS.default;
 }

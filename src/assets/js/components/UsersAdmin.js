@@ -1,4 +1,4 @@
-import { el, qs } from '../utils/dom.js';
+import { el, qs, infoIcon, moreIcon } from '../utils/dom.js';
 import { PERMS, can } from '../permissions.js';
 import { getState } from '../state.js';
 import { ALL_ROLES, ROLE_LABELS } from '../roles.js';
@@ -170,11 +170,11 @@ export const UsersAdmin = (mount, deps = {}) => {
 
   function actionsCell(u) {
     const box = el('div', { className: 'row-actions' }, []);
-    const btnMore = el('button', { className: 'btn btn--icon', type: 'button', title: 'Mas opciones', 'aria-label': 'Mas opciones' }, ['\u22EF']);
+    const btnMore = el('button', { className: 'btn btn--icon', type: 'button', title: 'Mas opciones', 'aria-label': 'Mas opciones' }, [moreIcon()]);
     btnMore.addEventListener('click', () => openMoreOptionsModal(u));
     box.append(btnMore);
 
-    const btnInfo = el('button', { className: 'btn btn--icon', type: 'button', title: 'Ver informacion', 'aria-label': 'Ver informacion' }, ['\u24D8']);
+    const btnInfo = el('button', { className: 'btn btn--icon', type: 'button', title: 'Ver informacion', 'aria-label': 'Ver informacion' }, [infoIcon()]);
     btnInfo.addEventListener('click', () => showInfoModal('Informacion del usuario', infoData(u)));
     box.append(btnInfo);
 

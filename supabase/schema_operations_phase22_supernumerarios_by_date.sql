@@ -1,15 +1,22 @@
 -- Phase 22: date-aware supernumerario availability for supervisor replacements.
 -- Apply after phase 18.
 
+drop function if exists public.list_supernumerarios_for_current_supervisor(text);
+
 create or replace function public.list_supernumerarios_for_current_supervisor(p_fecha text)
 returns table (
   id uuid,
+  codigo text,
   documento text,
   nombre text,
   telefono text,
   estado text,
+  cargo_codigo text,
+  cargo_nombre text,
   sede_codigo text,
-  sede_nombre text
+  sede_nombre text,
+  fecha_ingreso date,
+  fecha_retiro date
 )
 language sql
 stable
@@ -21,12 +28,17 @@ as $$
   )
   select
     e.id,
+    e.codigo,
     e.documento,
     e.nombre,
     e.telefono,
     e.estado,
+    coalesce(a.cargo_codigo, e.cargo_codigo) as cargo_codigo,
+    coalesce(a.cargo_nombre, e.cargo_nombre) as cargo_nombre,
     coalesce(a.sede_codigo, e.sede_codigo) as sede_codigo,
-    coalesce(a.sede_nombre, e.sede_nombre) as sede_nombre
+    coalesce(a.sede_nombre, e.sede_nombre) as sede_nombre,
+    coalesce(a.fecha_ingreso::date, e.fecha_ingreso::date) as fecha_ingreso,
+    coalesce(a.fecha_retiro::date, e.fecha_retiro::date) as fecha_retiro
   from params
   join public.employees e on params.day is not null
   left join lateral (

@@ -1,4 +1,4 @@
-import { el, qs } from '../utils/dom.js';
+import { el, qs, viewIcon } from '../utils/dom.js';
 import { createTablePagination } from '../utils/pagination.js';
 
 export const ImportHistory = (mount, deps = {}) => {
@@ -263,7 +263,7 @@ export const ImportHistory = (mount, deps = {}) => {
     const pageRows = paginator.slice(filtered);
     tbody.replaceChildren(...pageRows.map((r) => {
       const tr = el('tr', {}, []);
-      const btn = el('button', { className: 'btn', type: 'button' }, ['Ver']);
+      const btn = el('button', { className: 'btn btn--icon', type: 'button', title: 'Ver detalle', 'aria-label': 'Ver detalle' }, [viewIcon()]);
       btn.addEventListener('click', () => showDetail(r));
       tr.append(
         el('td', {}, [r.fecha || '-']),
@@ -317,7 +317,7 @@ export const ImportHistory = (mount, deps = {}) => {
   }
 
   function historyCard(row) {
-    const btn = el('button', { className: 'btn', type: 'button' }, ['Ver detalle']);
+    const btn = el('button', { className: 'btn btn--icon', type: 'button', title: 'Ver detalle', 'aria-label': 'Ver detalle' }, [viewIcon()]);
     btn.addEventListener('click', () => showDetail(row));
     return el('article', { className: 'record-card' }, [
       el('div', { className: 'record-card__header' }, [
