@@ -1,0 +1,148 @@
+{
+  "createdAt": "2026-08-13T03:56:24.315Z",
+  "employee": {
+    "id": "437a53b2-08c1-4097-935e-cdae899564d6",
+    "codigo": "EMP-1021",
+    "documento": "43180627",
+    "nombre": "ANA  CATALINA ZAPATA OSPINA",
+    "telefono": "573012679823",
+    "cargo_codigo": "CAR-0003",
+    "cargo_nombre": "SUPERNUMERARIO",
+    "sede_codigo": "SED-0419",
+    "sede_nombre": "SERVILIMPIEZA",
+    "zona_codigo": "ZON-0011",
+    "zona_nombre": "ADMINISTRATIVA",
+    "fecha_ingreso": "2025-06-03T05:00:00+00:00",
+    "fecha_retiro": null,
+    "estado": "activo",
+    "created_by_uid": "58d81c79-4777-4d2b-9dd1-7a3058592f76",
+    "created_by_email": "rocky.edu@capcol.com.co",
+    "created_at": "2026-03-12T19:27:33.379931+00:00",
+    "last_modified_by_uid": "58d81c79-4777-4d2b-9dd1-7a3058592f76",
+    "last_modified_by_email": "rocky.edu@capcol.com.co",
+    "last_modified_at": "2026-03-14T04:14:55.859+00:00",
+    "updated_at": "2026-03-14T04:14:59.007846+00:00",
+    "fecha_nacimiento": null,
+    "eps": null,
+    "afp": null,
+    "arl_riesgo": null,
+    "dotacion_camisa": null,
+    "dotacion_pantalon": null,
+    "dotacion_zapatos": null
+  },
+  "historyRows": [
+    {
+      "id": "8879efe5-e5d7-4bc2-8cfd-78ec02fc68bc",
+      "employee_id": "437a53b2-08c1-4097-935e-cdae899564d6",
+      "documento": "43180627",
+      "cargo_codigo": "CAR-0001",
+      "cargo_nombre": "OPERARIO ASEO Y CAFETERIA",
+      "sede_codigo": "SED-0419",
+      "sede_nombre": "SERVILIMPIEZA",
+      "fecha_ingreso": "2025-06-03T05:00:00+00:00",
+      "fecha_retiro": null,
+      "source": "bulk_create_employee",
+      "created_at": "2026-03-12T19:27:35.181612+00:00"
+    },
+    {
+      "id": "88726e35-dba4-4fcd-a6a9-857cc72985d7",
+      "employee_id": "437a53b2-08c1-4097-935e-cdae899564d6",
+      "documento": "43180627",
+      "cargo_codigo": "CAR-0003",
+      "cargo_nombre": "SUPERNUMERARIO",
+      "sede_codigo": null,
+      "sede_nombre": null,
+      "fecha_ingreso": "2026-03-14T04:14:59.293959+00:00",
+      "fecha_retiro": "2026-03-15T05:00:00+00:00",
+      "source": "cargo_change",
+      "created_at": "2026-03-14T04:14:59.293959+00:00"
+    },
+    {
+      "id": "068aeab1-3e6d-409d-b330-d9f56c9282d3",
+      "employee_id": "437a53b2-08c1-4097-935e-cdae899564d6",
+      "documento": "43180627",
+      "cargo_codigo": "CAR-0003",
+      "cargo_nombre": "SUPERNUMERARIO",
+      "sede_codigo": "SED-0419",
+      "sede_nombre": "SERVILIMPIEZA",
+      "fecha_ingreso": "2026-03-16T05:00:00+00:00",
+      "fecha_retiro": null,
+      "source": "backfill_sede_from_attendance",
+      "created_at": "2026-05-09T22:22:04.812433+00:00"
+    }
+  ],
+  "openRowsBefore": [
+    {
+      "id": "8879efe5-e5d7-4bc2-8cfd-78ec02fc68bc",
+      "employee_id": "437a53b2-08c1-4097-935e-cdae899564d6",
+      "documento": "43180627",
+      "cargo_codigo": "CAR-0001",
+      "cargo_nombre": "OPERARIO ASEO Y CAFETERIA",
+      "sede_codigo": "SED-0419",
+      "sede_nombre": "SERVILIMPIEZA",
+      "fecha_ingreso": "2025-06-03T05:00:00+00:00",
+      "fecha_retiro": null,
+      "source": "bulk_create_employee",
+      "created_at": "2026-03-12T19:27:35.181612+00:00"
+    },
+    {
+      "id": "068aeab1-3e6d-409d-b330-d9f56c9282d3",
+      "employee_id": "437a53b2-08c1-4097-935e-cdae899564d6",
+      "documento": "43180627",
+      "cargo_codigo": "CAR-0003",
+      "cargo_nombre": "SUPERNUMERARIO",
+      "sede_codigo": "SED-0419",
+      "sede_nombre": "SERVILIMPIEZA",
+      "fecha_ingreso": "2026-03-16T05:00:00+00:00",
+      "fecha_retiro": null,
+      "source": "backfill_sede_from_attendance",
+      "created_at": "2026-05-09T22:22:04.812433+00:00"
+    }
+  ],
+  "keepOpen": {
+    "id": "068aeab1-3e6d-409d-b330-d9f56c9282d3",
+    "employee_id": "437a53b2-08c1-4097-935e-cdae899564d6",
+    "documento": "43180627",
+    "cargo_codigo": "CAR-0003",
+    "cargo_nombre": "SUPERNUMERARIO",
+    "sede_codigo": "SED-0419",
+    "sede_nombre": "SERVILIMPIEZA",
+    "fecha_ingreso": "2026-03-16T05:00:00+00:00",
+    "fecha_retiro": null,
+    "source": "backfill_sede_from_attendance",
+    "created_at": "2026-05-09T22:22:04.812433+00:00"
+  },
+  "plannedUpdates": [
+    {
+      "id": "8879efe5-e5d7-4bc2-8cfd-78ec02fc68bc",
+      "fecha_retiro": "2026-03-15T05:00:00+00:00",
+      "closeDay": "2026-03-15",
+      "previous": {
+        "id": "8879efe5-e5d7-4bc2-8cfd-78ec02fc68bc",
+        "employee_id": "437a53b2-08c1-4097-935e-cdae899564d6",
+        "documento": "43180627",
+        "cargo_codigo": "CAR-0001",
+        "cargo_nombre": "OPERARIO ASEO Y CAFETERIA",
+        "sede_codigo": "SED-0419",
+        "sede_nombre": "SERVILIMPIEZA",
+        "fecha_ingreso": "2025-06-03T05:00:00+00:00",
+        "fecha_retiro": null,
+        "source": "bulk_create_employee",
+        "created_at": "2026-03-12T19:27:35.181612+00:00"
+      },
+      "next": {
+        "id": "068aeab1-3e6d-409d-b330-d9f56c9282d3",
+        "employee_id": "437a53b2-08c1-4097-935e-cdae899564d6",
+        "documento": "43180627",
+        "cargo_codigo": "CAR-0003",
+        "cargo_nombre": "SUPERNUMERARIO",
+        "sede_codigo": "SED-0419",
+        "sede_nombre": "SERVILIMPIEZA",
+        "fecha_ingreso": "2026-03-16T05:00:00+00:00",
+        "fecha_retiro": null,
+        "source": "backfill_sede_from_attendance",
+        "created_at": "2026-05-09T22:22:04.812433+00:00"
+      }
+    }
+  ]
+}

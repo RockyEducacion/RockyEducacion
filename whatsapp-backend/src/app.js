@@ -1779,8 +1779,27 @@ async function handleTransferSelection(phone, session, parsed) {
   if (error) throw error;
 
   try {
-    await syncEmployeeSedeHistoryAfterTransfer(employee, selected, transferDate);
+    const historySync = await syncEmployeeSedeHistoryAfterTransfer(employee, selected, transferDate);
     await refreshOperationalState(transferDate);
+    await insertSystemAuditLog({
+      actorEmail: 'whatsapp@system',
+      targetType: 'employee',
+      targetId: employee.id,
+      action: 'transfer_employee_whatsapp',
+      before: {
+        ...previousEmployeeSedeSnapshot,
+        history: historySync.before
+      },
+      after: {
+        sede_codigo: selected.codigo || null,
+        sede_nombre: selected.nombre || null,
+        zona_codigo: selected.zona_codigo || null,
+        zona_nombre: selected.zona_nombre || null,
+        transfer_date: transferDate,
+        history: historySync.after
+      },
+      note: `Cambio de sede solicitado desde WhatsApp (${phone}).`
+    });
   } catch (historyError) {
     await supabaseAdmin.from('employees').update({
       ...previousEmployeeSedeSnapshot,
@@ -1802,27 +1821,68 @@ async function handleTransferSelection(phone, session, parsed) {
 async function syncEmployeeSedeHistoryAfterTransfer(employee, selectedSede, transferDate) {
   const employeeId = String(employee?.id || '').trim();
   const selectedCode = String(selectedSede?.codigo || '').trim();
-  if (!employeeId || !selectedCode || !transferDate) return;
+  if (!employeeId || !selectedCode || !transferDate) return { before: [], after: [] };
 
   const selectedName = selectedSede?.nombre || null;
   const previousDay = addDaysToIsoDate(transferDate, -1) || transferDate;
+  const transferIngreso = `${transferDate}T05:00:00+00:00`;
 
   const { data: openRows, error: openRowsError } = await supabaseAdmin
     .from('employee_cargo_history')
-    .select('id, employee_id, sede_codigo, fecha_ingreso, fecha_retiro, created_at')
+    .select('*')
     .eq('employee_id', employeeId)
     .is('fecha_retiro', null)
     .order('created_at', { ascending: false });
   if (openRowsError) throw openRowsError;
 
   const normalizedOpenRows = openRows || [];
+  const beforeRows = normalizedOpenRows.map((row) => ({ ...row }));
   const openOnSelectedSede = normalizedOpenRows.find((row) => String(row?.sede_codigo || '').trim() === selectedCode) || null;
+  const openStartedToday = normalizedOpenRows
+    .filter((row) => isoDatePart(row?.fecha_ingreso) === transferDate)
+    .sort((left, right) => String(right?.created_at || '').localeCompare(String(left?.created_at || '')))[0] || null;
+  let selectedOpenRow = openOnSelectedSede || null;
+
+  if (!selectedOpenRow && openStartedToday?.id) {
+    const { data: patchedTodayRow, error: patchTodayError } = await supabaseAdmin
+      .from('employee_cargo_history')
+      .update({
+        employee_codigo: employee?.codigo || null,
+        documento: employee?.documento || null,
+        cargo_codigo: employee?.cargo_codigo || null,
+        cargo_nombre: employee?.cargo_nombre || null,
+        sede_codigo: selectedCode,
+        sede_nombre: selectedName,
+        source: 'sede_change'
+      })
+      .eq('id', openStartedToday.id)
+      .select('*')
+      .single();
+    if (patchTodayError) throw patchTodayError;
+    selectedOpenRow = patchedTodayRow || openStartedToday;
+  }
 
   for (const row of normalizedOpenRows) {
-    if (openOnSelectedSede && row.id === openOnSelectedSede.id) continue;
+    if (selectedOpenRow && row.id === selectedOpenRow.id) continue;
     const ingresoDate = isoDatePart(row?.fecha_ingreso);
+    if (ingresoDate && ingresoDate > transferDate) continue;
+    if (ingresoDate && ingresoDate === transferDate) {
+      const { error: deleteError } = await supabaseAdmin
+        .from('employee_cargo_history')
+        .delete()
+        .eq('id', row.id);
+      if (deleteError) throw deleteError;
+      continue;
+    }
     let retiroDate = previousDay;
-    if (ingresoDate && retiroDate < ingresoDate) retiroDate = ingresoDate;
+    if (ingresoDate && retiroDate < ingresoDate) {
+      const { error: deleteError } = await supabaseAdmin
+        .from('employee_cargo_history')
+        .delete()
+        .eq('id', row.id);
+      if (deleteError) throw deleteError;
+      continue;
+    }
     const patchedRetiro = withIsoDatePreservingTime(row?.fecha_retiro, retiroDate);
     const { error: closeError } = await supabaseAdmin
       .from('employee_cargo_history')
@@ -1831,22 +1891,34 @@ async function syncEmployeeSedeHistoryAfterTransfer(employee, selectedSede, tran
     if (closeError) throw closeError;
   }
 
-  if (openOnSelectedSede) return;
+  if (!selectedOpenRow) {
+    const { error: insertError } = await supabaseAdmin.from('employee_cargo_history').insert({
+      employee_id: employeeId,
+      employee_codigo: employee?.codigo || null,
+      documento: employee?.documento || null,
+      cargo_codigo: employee?.cargo_codigo || null,
+      cargo_nombre: employee?.cargo_nombre || null,
+      fecha_ingreso: transferIngreso,
+      fecha_retiro: null,
+      source: 'sede_change',
+      sede_codigo: selectedCode,
+      sede_nombre: selectedName
+    });
+    if (insertError) throw insertError;
+  }
 
-  const transferIngreso = `${transferDate}T05:00:00+00:00`;
-  const { error: insertError } = await supabaseAdmin.from('employee_cargo_history').insert({
-    employee_id: employeeId,
-    employee_codigo: employee?.codigo || null,
-    documento: employee?.documento || null,
-    cargo_codigo: employee?.cargo_codigo || null,
-    cargo_nombre: employee?.cargo_nombre || null,
-    fecha_ingreso: transferIngreso,
-    fecha_retiro: null,
-    source: 'sede_change',
-    sede_codigo: selectedCode,
-    sede_nombre: selectedName
-  });
-  if (insertError) throw insertError;
+  const { data: afterRows, error: afterRowsError } = await supabaseAdmin
+    .from('employee_cargo_history')
+    .select('*')
+    .eq('employee_id', employeeId)
+    .or(`fecha_retiro.is.null,fecha_retiro.gte.${previousDay}T00:00:00+00:00`)
+    .order('fecha_ingreso', { ascending: false });
+  if (afterRowsError) throw afterRowsError;
+
+  return {
+    before: beforeRows,
+    after: afterRows || []
+  };
 }
 
 async function handleWorkingSedeSelection(phone, session, parsed) {

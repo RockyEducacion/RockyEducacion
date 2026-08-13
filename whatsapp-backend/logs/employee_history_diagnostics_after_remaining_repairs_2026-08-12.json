@@ -1,0 +1,999 @@
+{
+  "summary": {
+    "generatedAt": "2026-08-13T04:06:02.960Z",
+    "today": "2026-08-12",
+    "employees": 1309,
+    "histories": 2963,
+    "multipleOpenRows": {
+      "total": 0,
+      "supernumerarios": 0,
+      "noSupernumerarios": 0
+    },
+    "multipleCurrentRowsToday": {
+      "total": 0,
+      "supernumerarios": 0,
+      "noSupernumerarios": 0
+    },
+    "multipleCurrentSedesToday": {
+      "total": 0,
+      "supernumerarios": 0,
+      "noSupernumerarios": 0
+    },
+    "overlappingRanges": {
+      "total": 5,
+      "supernumerarios": 5,
+      "noSupernumerarios": 0
+    },
+    "invalidDateRanges": {
+      "total": 4,
+      "supernumerarios": 4,
+      "noSupernumerarios": 0
+    },
+    "duplicateStartDates": {
+      "total": 4,
+      "supernumerarios": 3,
+      "noSupernumerarios": 1
+    },
+    "activeEmployeeWithoutCurrentHistory": {
+      "total": 1,
+      "supernumerarios": 0,
+      "noSupernumerarios": 1
+    },
+    "currentHistoryMismatchEmployees": {
+      "total": 1,
+      "supernumerarios": 1,
+      "noSupernumerarios": 0
+    },
+    "historyWithoutEmployee": {
+      "total": 13,
+      "supernumerarios": 0,
+      "noSupernumerarios": 13
+    },
+    "openRowNotLatestByStart": {
+      "total": 0,
+      "supernumerarios": 0,
+      "noSupernumerarios": 0
+    }
+  },
+  "multipleOpenRows": [],
+  "multipleCurrentRowsToday": [],
+  "multipleCurrentSedesToday": [],
+  "overlappingRanges": [
+    {
+      "doc": "1037593939",
+      "employee": {
+        "id": "f57965ed-0b59-48ea-bd1f-d022694d78e6",
+        "codigo": "EMP-0024",
+        "documento": "1037593939",
+        "nombre": "MARIA LILIANA ESPINOSA MANCO",
+        "cargo_codigo": "CAR-0003",
+        "cargo_nombre": "SUPERNUMERARIO",
+        "estado": "inactivo",
+        "sede_codigo": "SED-0419",
+        "sede_nombre": "SERVILIMPIEZA",
+        "zona_codigo": "ZON-0011",
+        "zona_nombre": "ADMINISTRATIVA",
+        "updated_at": "2026-07-28T16:59:49.101546+00:00",
+        "last_modified_at": "2026-07-28T16:59:49.761+00:00"
+      },
+      "a": {
+        "id": "287a233b-06a2-47e4-b1cf-7d70cfdbed64",
+        "employee_id": "f57965ed-0b59-48ea-bd1f-d022694d78e6",
+        "employee_codigo": "EMP-0024",
+        "documento": "1037593939",
+        "cargo_codigo": "CAR-0001",
+        "cargo_nombre": "OPERARIO ASEO Y CAFETERIA",
+        "fecha_ingreso": "2026-03-12T05:00:00+00:00",
+        "fecha_retiro": "2026-07-27T05:00:00+00:00",
+        "source": "backfill_sede_from_attendance",
+        "created_at": "2026-05-09T22:22:12.800787+00:00",
+        "sede_codigo": "SED-0007",
+        "sede_nombre": "IE ANTONIO DERKA SANTO DOMINGO SAVIO CE CARPINELO AMAPOLITA",
+        "fecha_ingreso_d": "2026-03-12",
+        "fecha_retiro_d": "2026-07-27"
+      },
+      "b": {
+        "id": "5e60c096-7378-4710-a5bf-eb8b4542263e",
+        "employee_id": "f57965ed-0b59-48ea-bd1f-d022694d78e6",
+        "employee_codigo": "EMP-0024",
+        "documento": "1037593939",
+        "cargo_codigo": "CAR-0003",
+        "cargo_nombre": "SUPERNUMERARIO",
+        "fecha_ingreso": "2026-07-27T05:00:00+00:00",
+        "fecha_retiro": "2026-07-27T05:00:00+00:00",
+        "source": "rehire_employee",
+        "created_at": "2026-07-27T12:58:17.303679+00:00",
+        "sede_codigo": "SED-0419",
+        "sede_nombre": "SERVILIMPIEZA",
+        "fecha_ingreso_d": "2026-07-27",
+        "fecha_retiro_d": "2026-07-27"
+      }
+    },
+    {
+      "doc": "1152462610",
+      "employee": {
+        "id": "e91527d5-c53c-4442-a0c6-2c5d76e765ac",
+        "codigo": "EMP-0886",
+        "documento": "1152462610",
+        "nombre": "CATALINA LOAIZA PUERTA",
+        "cargo_codigo": "CAR-0003",
+        "cargo_nombre": "SUPERNUMERARIO",
+        "estado": "activo",
+        "sede_codigo": "SED-0419",
+        "sede_nombre": "SERVILIMPIEZA",
+        "zona_codigo": "ZON-0011",
+        "zona_nombre": "ADMINISTRATIVA",
+        "updated_at": "2026-07-17T14:52:43.463234+00:00",
+        "last_modified_at": "2026-07-17T14:52:44.197+00:00"
+      },
+      "a": {
+        "id": "240d511a-092f-4128-8600-2268f8bcf890",
+        "employee_id": "e91527d5-c53c-4442-a0c6-2c5d76e765ac",
+        "employee_codigo": "EMP-0886",
+        "documento": "1152462610",
+        "cargo_codigo": "CAR-0001",
+        "cargo_nombre": "OPERARIO ASEO Y CAFETERIA",
+        "fecha_ingreso": "2025-06-03T05:00:00+00:00",
+        "fecha_retiro": "2026-07-17T05:00:00+00:00",
+        "source": "bulk_create_employee",
+        "created_at": "2026-03-12T19:27:35.181612+00:00",
+        "sede_codigo": "SED-0352",
+        "sede_nombre": "IE PEDRO OCTAVIO AMADO",
+        "fecha_ingreso_d": "2025-06-03",
+        "fecha_retiro_d": "2026-07-17"
+      },
+      "b": {
+        "id": "23bc689b-5bbf-4956-9941-592665c98585",
+        "employee_id": "e91527d5-c53c-4442-a0c6-2c5d76e765ac",
+        "employee_codigo": "EMP-0886",
+        "documento": "1152462610",
+        "cargo_codigo": "CAR-0001",
+        "cargo_nombre": "OPERARIO ASEO Y CAFETERIA",
+        "fecha_ingreso": "2026-07-16T05:00:00+00:00",
+        "fecha_retiro": "2026-07-17T05:00:00+00:00",
+        "source": "rehire_employee",
+        "created_at": "2026-07-15T22:07:38.093579+00:00",
+        "sede_codigo": "SED-0406",
+        "sede_nombre": "IE OCTAVIO CALDERON MEJIA",
+        "fecha_ingreso_d": "2026-07-16",
+        "fecha_retiro_d": "2026-07-17"
+      }
+    },
+    {
+      "doc": "32108042",
+      "employee": {
+        "id": "c37c3b56-aece-430e-9bdb-de7ee6881046",
+        "codigo": "EMP-0958",
+        "documento": "32108042",
+        "nombre": "PAULA ANDREA ACEVEDO ZULETA",
+        "cargo_codigo": "CAR-0003",
+        "cargo_nombre": "SUPERNUMERARIO",
+        "estado": "inactivo",
+        "sede_codigo": "SED-0419",
+        "sede_nombre": "SERVILIMPIEZA",
+        "zona_codigo": "ZON-0011",
+        "zona_nombre": "ADMINISTRATIVA",
+        "updated_at": "2026-08-04T19:26:25.291209+00:00",
+        "last_modified_at": "2026-08-04T19:26:25.709+00:00"
+      },
+      "a": {
+        "id": "12582fd2-03d2-4073-8062-aad0ca1ea234",
+        "employee_id": "c37c3b56-aece-430e-9bdb-de7ee6881046",
+        "employee_codigo": "EMP-0958",
+        "documento": "32108042",
+        "cargo_codigo": "CAR-0001",
+        "cargo_nombre": "OPERARIO ASEO Y CAFETERIA",
+        "fecha_ingreso": "2025-06-03T05:00:00+00:00",
+        "fecha_retiro": "2026-04-06T05:00:00+00:00",
+        "source": "bulk_create_employee",
+        "created_at": "2026-03-12T19:27:35.181612+00:00",
+        "sede_codigo": null,
+        "sede_nombre": null,
+        "fecha_ingreso_d": "2025-06-03",
+        "fecha_retiro_d": "2026-04-06"
+      },
+      "b": {
+        "id": "1ebca949-b96b-4988-b03c-52b656151241",
+        "employee_id": "c37c3b56-aece-430e-9bdb-de7ee6881046",
+        "employee_codigo": "EMP-0958",
+        "documento": "32108042",
+        "cargo_codigo": "CAR-0003",
+        "cargo_nombre": "SUPERNUMERARIO",
+        "fecha_ingreso": "2026-04-06T05:00:00+00:00",
+        "fecha_retiro": "2026-08-03T05:00:00+00:00",
+        "source": "sede_change",
+        "created_at": "2026-04-06T14:07:02.709087+00:00",
+        "sede_codigo": "SED-0419",
+        "sede_nombre": "SERVILIMPIEZA",
+        "fecha_ingreso_d": "2026-04-06",
+        "fecha_retiro_d": "2026-08-03"
+      }
+    },
+    {
+      "doc": "43180627",
+      "employee": {
+        "id": "437a53b2-08c1-4097-935e-cdae899564d6",
+        "codigo": "EMP-1021",
+        "documento": "43180627",
+        "nombre": "ANA  CATALINA ZAPATA OSPINA",
+        "cargo_codigo": "CAR-0003",
+        "cargo_nombre": "SUPERNUMERARIO",
+        "estado": "activo",
+        "sede_codigo": "SED-0419",
+        "sede_nombre": "SERVILIMPIEZA",
+        "zona_codigo": "ZON-0011",
+        "zona_nombre": "ADMINISTRATIVA",
+        "updated_at": "2026-03-14T04:14:59.007846+00:00",
+        "last_modified_at": "2026-03-14T04:14:55.859+00:00"
+      },
+      "a": {
+        "id": "8879efe5-e5d7-4bc2-8cfd-78ec02fc68bc",
+        "employee_id": "437a53b2-08c1-4097-935e-cdae899564d6",
+        "employee_codigo": "EMP-1021",
+        "documento": "43180627",
+        "cargo_codigo": "CAR-0001",
+        "cargo_nombre": "OPERARIO ASEO Y CAFETERIA",
+        "fecha_ingreso": "2025-06-03T05:00:00+00:00",
+        "fecha_retiro": "2026-03-15T05:00:00+00:00",
+        "source": "bulk_create_employee",
+        "created_at": "2026-03-12T19:27:35.181612+00:00",
+        "sede_codigo": "SED-0419",
+        "sede_nombre": "SERVILIMPIEZA",
+        "fecha_ingreso_d": "2025-06-03",
+        "fecha_retiro_d": "2026-03-15"
+      },
+      "b": {
+        "id": "88726e35-dba4-4fcd-a6a9-857cc72985d7",
+        "employee_id": "437a53b2-08c1-4097-935e-cdae899564d6",
+        "employee_codigo": "EMP-1021",
+        "documento": "43180627",
+        "cargo_codigo": "CAR-0003",
+        "cargo_nombre": "SUPERNUMERARIO",
+        "fecha_ingreso": "2026-03-14T04:14:59.293959+00:00",
+        "fecha_retiro": "2026-03-15T05:00:00+00:00",
+        "source": "cargo_change",
+        "created_at": "2026-03-14T04:14:59.293959+00:00",
+        "sede_codigo": null,
+        "sede_nombre": null,
+        "fecha_ingreso_d": "2026-03-14",
+        "fecha_retiro_d": "2026-03-15"
+      }
+    },
+    {
+      "doc": "6740898",
+      "employee": {
+        "id": "3f846f93-4b84-4853-8b6a-c55a191409f5",
+        "codigo": "EMP-1136",
+        "documento": "6740898",
+        "nombre": "LIZBETH YELITZA COROBA",
+        "cargo_codigo": "CAR-0003",
+        "cargo_nombre": "SUPERNUMERARIO",
+        "estado": "activo",
+        "sede_codigo": "SED-0419",
+        "sede_nombre": "SERVILIMPIEZA",
+        "zona_codigo": "ZON-0011",
+        "zona_nombre": "ADMINISTRATIVA",
+        "updated_at": "2026-03-18T14:49:06.698016+00:00",
+        "last_modified_at": "2026-03-18T14:49:06.436+00:00"
+      },
+      "a": {
+        "id": "c9759aad-42fe-4bf8-8631-946c736d9bd6",
+        "employee_id": "3f846f93-4b84-4853-8b6a-c55a191409f5",
+        "employee_codigo": "EMP-1136",
+        "documento": "6740898",
+        "cargo_codigo": "CAR-0003",
+        "cargo_nombre": "SUPERNUMERARIO",
+        "fecha_ingreso": "2025-03-06T05:00:00+00:00",
+        "fecha_retiro": "2026-03-14T05:00:00+00:00",
+        "source": "bulk_create_employee",
+        "created_at": "2026-03-12T19:34:55.279189+00:00",
+        "sede_codigo": null,
+        "sede_nombre": null,
+        "fecha_ingreso_d": "2025-03-06",
+        "fecha_retiro_d": "2026-03-14"
+      },
+      "b": {
+        "id": "ecde8692-1ec1-48cf-b955-2c6d782e24a6",
+        "employee_id": "3f846f93-4b84-4853-8b6a-c55a191409f5",
+        "employee_codigo": "EMP-1136",
+        "documento": "6740898",
+        "cargo_codigo": "CAR-0001",
+        "cargo_nombre": "OPERARIO ASEO Y CAFETERIA",
+        "fecha_ingreso": "2026-03-14T16:49:35.536484+00:00",
+        "fecha_retiro": "2026-03-14T05:00:00+00:00",
+        "source": "cargo_change",
+        "created_at": "2026-03-14T16:49:35.536484+00:00",
+        "sede_codigo": null,
+        "sede_nombre": null,
+        "fecha_ingreso_d": "2026-03-14",
+        "fecha_retiro_d": "2026-03-14"
+      }
+    }
+  ],
+  "invalidDateRanges": [
+    {
+      "doc": "39177300",
+      "employee": {
+        "id": "2f6d7d5c-2fc9-4525-acf4-e828c4a8d792",
+        "codigo": "EMP-1273",
+        "documento": "39177300",
+        "nombre": "EILEN YURANY ATEHORTUA ORTIZ",
+        "cargo_codigo": "CAR-0003",
+        "cargo_nombre": "SUPERNUMERARIO",
+        "estado": "activo",
+        "sede_codigo": "SED-0419",
+        "sede_nombre": "SERVILIMPIEZA",
+        "zona_codigo": "ZON-0011",
+        "zona_nombre": "ADMINISTRATIVA",
+        "updated_at": "2026-07-09T21:17:35.838019+00:00",
+        "last_modified_at": "2026-07-09T21:17:37.36+00:00"
+      },
+      "row": {
+        "id": "dfd63c1e-e78e-4170-80cc-5d823804a8d9",
+        "employee_id": "2f6d7d5c-2fc9-4525-acf4-e828c4a8d792",
+        "employee_codigo": "EMP-1273",
+        "documento": "39177300",
+        "cargo_codigo": "CAR-0001",
+        "cargo_nombre": "OPERARIO ASEO Y CAFETERIA",
+        "fecha_ingreso": "2026-06-17T05:00:00+00:00",
+        "fecha_retiro": "2026-06-16T05:00:00+00:00",
+        "source": "cargo_change",
+        "created_at": "2026-06-16T22:07:46.934772+00:00",
+        "sede_codigo": "SED-0419",
+        "sede_nombre": "SERVILIMPIEZA",
+        "fecha_ingreso_d": "2026-06-17",
+        "fecha_retiro_d": "2026-06-16"
+      }
+    },
+    {
+      "doc": "43253884",
+      "employee": {
+        "id": "919e814e-d28a-4ae7-a34c-1c1cc25a72ee",
+        "codigo": "EMP-0744",
+        "documento": "43253884",
+        "nombre": "DORIS ELENA ARIAS",
+        "cargo_codigo": "CAR-0003",
+        "cargo_nombre": "SUPERNUMERARIO",
+        "estado": "inactivo",
+        "sede_codigo": "SED-0419",
+        "sede_nombre": "SERVILIMPIEZA",
+        "zona_codigo": "ZON-0011",
+        "zona_nombre": "ADMINISTRATIVA",
+        "updated_at": "2026-03-19T15:12:14.781809+00:00",
+        "last_modified_at": "2026-03-19T15:12:14.885+00:00"
+      },
+      "row": {
+        "id": "e8eea5d7-0629-472f-ad5f-d32d03bedcae",
+        "employee_id": "919e814e-d28a-4ae7-a34c-1c1cc25a72ee",
+        "employee_codigo": "EMP-0744",
+        "documento": "43253884",
+        "cargo_codigo": "CAR-0002",
+        "cargo_nombre": "SUPERVISOR",
+        "fecha_ingreso": "2026-03-14T18:45:26.227062+00:00",
+        "fecha_retiro": "2026-03-13T05:00:00+00:00",
+        "source": "cargo_change",
+        "created_at": "2026-03-14T18:45:26.227062+00:00",
+        "sede_codigo": null,
+        "sede_nombre": null,
+        "fecha_ingreso_d": "2026-03-14",
+        "fecha_retiro_d": "2026-03-13"
+      }
+    },
+    {
+      "doc": "43253884",
+      "employee": {
+        "id": "919e814e-d28a-4ae7-a34c-1c1cc25a72ee",
+        "codigo": "EMP-0744",
+        "documento": "43253884",
+        "nombre": "DORIS ELENA ARIAS",
+        "cargo_codigo": "CAR-0003",
+        "cargo_nombre": "SUPERNUMERARIO",
+        "estado": "inactivo",
+        "sede_codigo": "SED-0419",
+        "sede_nombre": "SERVILIMPIEZA",
+        "zona_codigo": "ZON-0011",
+        "zona_nombre": "ADMINISTRATIVA",
+        "updated_at": "2026-03-19T15:12:14.781809+00:00",
+        "last_modified_at": "2026-03-19T15:12:14.885+00:00"
+      },
+      "row": {
+        "id": "8732bfac-d113-4924-a885-2c5904129ad0",
+        "employee_id": "919e814e-d28a-4ae7-a34c-1c1cc25a72ee",
+        "employee_codigo": "EMP-0744",
+        "documento": "43253884",
+        "cargo_codigo": "CAR-0003",
+        "cargo_nombre": "SUPERNUMERARIO",
+        "fecha_ingreso": "2026-03-16T19:26:40.867176+00:00",
+        "fecha_retiro": "2026-03-13T05:00:00+00:00",
+        "source": "cargo_change",
+        "created_at": "2026-03-16T19:26:40.867176+00:00",
+        "sede_codigo": null,
+        "sede_nombre": null,
+        "fecha_ingreso_d": "2026-03-16",
+        "fecha_retiro_d": "2026-03-13"
+      }
+    },
+    {
+      "doc": "6740898",
+      "employee": {
+        "id": "3f846f93-4b84-4853-8b6a-c55a191409f5",
+        "codigo": "EMP-1136",
+        "documento": "6740898",
+        "nombre": "LIZBETH YELITZA COROBA",
+        "cargo_codigo": "CAR-0003",
+        "cargo_nombre": "SUPERNUMERARIO",
+        "estado": "activo",
+        "sede_codigo": "SED-0419",
+        "sede_nombre": "SERVILIMPIEZA",
+        "zona_codigo": "ZON-0011",
+        "zona_nombre": "ADMINISTRATIVA",
+        "updated_at": "2026-03-18T14:49:06.698016+00:00",
+        "last_modified_at": "2026-03-18T14:49:06.436+00:00"
+      },
+      "row": {
+        "id": "144b203a-5be5-4333-a236-85e8f9ff9cbe",
+        "employee_id": "3f846f93-4b84-4853-8b6a-c55a191409f5",
+        "employee_codigo": "EMP-1136",
+        "documento": "6740898",
+        "cargo_codigo": "CAR-0003",
+        "cargo_nombre": "SUPERNUMERARIO",
+        "fecha_ingreso": "2026-03-17T16:04:38.997253+00:00",
+        "fecha_retiro": "2026-03-14T05:00:00+00:00",
+        "source": "cargo_change",
+        "created_at": "2026-03-17T16:04:38.997253+00:00",
+        "sede_codigo": null,
+        "sede_nombre": null,
+        "fecha_ingreso_d": "2026-03-17",
+        "fecha_retiro_d": "2026-03-14"
+      }
+    }
+  ],
+  "duplicateStartDates": [
+    {
+      "doc": "1017154710",
+      "employee": {
+        "id": "2b0fcfd9-8f6a-4943-baba-9095589a8e4b",
+        "codigo": "EMP-1119",
+        "documento": "1017154710",
+        "nombre": "ERIKA ALEISA PINEDA ZAPATA",
+        "cargo_codigo": "CAR-0003",
+        "cargo_nombre": "SUPERNUMERARIO",
+        "estado": "activo",
+        "sede_codigo": "SED-0246",
+        "sede_nombre": "IE EL CORAZON",
+        "zona_codigo": "ZON-0006",
+        "zona_nombre": "ZONA 06",
+        "updated_at": "2026-07-27T17:53:55.597628+00:00",
+        "last_modified_at": "2026-07-27T17:53:55.576+00:00"
+      },
+      "fecha_ingreso": "2026-07-27",
+      "rows": [
+        {
+          "id": "c002b394-5964-4d8f-b60b-a3a4e439c30e",
+          "employee_id": "2b0fcfd9-8f6a-4943-baba-9095589a8e4b",
+          "employee_codigo": "EMP-1119",
+          "documento": "1017154710",
+          "cargo_codigo": "CAR-0003",
+          "cargo_nombre": "SUPERNUMERARIO",
+          "fecha_ingreso": "2026-07-27T05:00:00+00:00",
+          "fecha_retiro": "2026-07-27T05:00:00+00:00",
+          "source": "sede_change",
+          "created_at": "2026-07-27T17:53:50.693794+00:00",
+          "sede_codigo": "SED-0245",
+          "sede_nombre": "IE EL CORAZON SECCION ESCUELA EL CORAZON",
+          "fecha_ingreso_d": "2026-07-27",
+          "fecha_retiro_d": "2026-07-27"
+        },
+        {
+          "id": "d6ba573d-37f2-495a-91ca-85ab15396f35",
+          "employee_id": "2b0fcfd9-8f6a-4943-baba-9095589a8e4b",
+          "employee_codigo": "EMP-1119",
+          "documento": "1017154710",
+          "cargo_codigo": "CAR-0003",
+          "cargo_nombre": "SUPERNUMERARIO",
+          "fecha_ingreso": "2026-07-27T05:00:00+00:00",
+          "fecha_retiro": null,
+          "source": "sede_change",
+          "created_at": "2026-07-27T17:53:55.675479+00:00",
+          "sede_codigo": "SED-0246",
+          "sede_nombre": "IE EL CORAZON",
+          "fecha_ingreso_d": "2026-07-27",
+          "fecha_retiro_d": null
+        }
+      ]
+    },
+    {
+      "doc": "1128277191",
+      "employee": {
+        "id": "52d7811a-a2d0-48eb-ab6b-c70bf2195411",
+        "codigo": "EMP-0878",
+        "documento": "1128277191",
+        "nombre": "MILENA ORTIZ VARGAS",
+        "cargo_codigo": "CAR-0001",
+        "cargo_nombre": "OPERARIO ASEO Y CAFETERIA",
+        "estado": "activo",
+        "sede_codigo": "SED-0358",
+        "sede_nombre": "IE HORACIO MUNOZ SUESCUN",
+        "zona_codigo": "ZON-0009",
+        "zona_nombre": "ZONA 09",
+        "updated_at": "2026-03-16T17:51:24.970907+00:00",
+        "last_modified_at": "2026-03-16T17:51:24.901+00:00"
+      },
+      "fecha_ingreso": "2025-06-03",
+      "rows": [
+        {
+          "id": "d171439e-da02-49be-a0f0-f41f1f6db6eb",
+          "employee_id": "52d7811a-a2d0-48eb-ab6b-c70bf2195411",
+          "employee_codigo": "EMP-0878",
+          "documento": "1128277191",
+          "cargo_codigo": "CAR-0001",
+          "cargo_nombre": "OPERARIO ASEO Y CAFETERIA",
+          "fecha_ingreso": "2025-06-03T05:00:00+00:00",
+          "fecha_retiro": "2026-03-11T05:00:00+00:00",
+          "source": "bulk_create_employee",
+          "created_at": "2026-03-12T19:27:35.181612+00:00",
+          "sede_codigo": null,
+          "sede_nombre": null,
+          "fecha_ingreso_d": "2025-06-03",
+          "fecha_retiro_d": "2026-03-11"
+        },
+        {
+          "id": "d171439e-da02-49be-a0f0-f41f1f6db6eb",
+          "employee_id": "52d7811a-a2d0-48eb-ab6b-c70bf2195411",
+          "employee_codigo": "EMP-0878",
+          "documento": "1128277191",
+          "cargo_codigo": "CAR-0001",
+          "cargo_nombre": "OPERARIO ASEO Y CAFETERIA",
+          "fecha_ingreso": "2025-06-03T05:00:00+00:00",
+          "fecha_retiro": "2026-03-11T05:00:00+00:00",
+          "source": "bulk_create_employee",
+          "created_at": "2026-03-12T19:27:35.181612+00:00",
+          "sede_codigo": null,
+          "sede_nombre": null,
+          "fecha_ingreso_d": "2025-06-03",
+          "fecha_retiro_d": "2026-03-11"
+        }
+      ]
+    },
+    {
+      "doc": "39177300",
+      "employee": {
+        "id": "2f6d7d5c-2fc9-4525-acf4-e828c4a8d792",
+        "codigo": "EMP-1273",
+        "documento": "39177300",
+        "nombre": "EILEN YURANY ATEHORTUA ORTIZ",
+        "cargo_codigo": "CAR-0003",
+        "cargo_nombre": "SUPERNUMERARIO",
+        "estado": "activo",
+        "sede_codigo": "SED-0419",
+        "sede_nombre": "SERVILIMPIEZA",
+        "zona_codigo": "ZON-0011",
+        "zona_nombre": "ADMINISTRATIVA",
+        "updated_at": "2026-07-09T21:17:35.838019+00:00",
+        "last_modified_at": "2026-07-09T21:17:37.36+00:00"
+      },
+      "fecha_ingreso": "2026-06-17",
+      "rows": [
+        {
+          "id": "dfd63c1e-e78e-4170-80cc-5d823804a8d9",
+          "employee_id": "2f6d7d5c-2fc9-4525-acf4-e828c4a8d792",
+          "employee_codigo": "EMP-1273",
+          "documento": "39177300",
+          "cargo_codigo": "CAR-0001",
+          "cargo_nombre": "OPERARIO ASEO Y CAFETERIA",
+          "fecha_ingreso": "2026-06-17T05:00:00+00:00",
+          "fecha_retiro": "2026-06-16T05:00:00+00:00",
+          "source": "cargo_change",
+          "created_at": "2026-06-16T22:07:46.934772+00:00",
+          "sede_codigo": "SED-0419",
+          "sede_nombre": "SERVILIMPIEZA",
+          "fecha_ingreso_d": "2026-06-17",
+          "fecha_retiro_d": "2026-06-16"
+        },
+        {
+          "id": "19e21f4d-1390-4221-b751-34bc180802e0",
+          "employee_id": "2f6d7d5c-2fc9-4525-acf4-e828c4a8d792",
+          "employee_codigo": "EMP-1273",
+          "documento": "39177300",
+          "cargo_codigo": "CAR-0001",
+          "cargo_nombre": "OPERARIO ASEO Y CAFETERIA",
+          "fecha_ingreso": "2026-06-17T05:00:00+00:00",
+          "fecha_retiro": "2026-07-01T05:00:00+00:00",
+          "source": "sede_change",
+          "created_at": "2026-06-16T22:08:18.307198+00:00",
+          "sede_codigo": "SED-0326",
+          "sede_nombre": "IE GABRIELA GOMEZ CARVAJAL",
+          "fecha_ingreso_d": "2026-06-17",
+          "fecha_retiro_d": "2026-07-01"
+        }
+      ]
+    },
+    {
+      "doc": "43996989",
+      "employee": {
+        "id": "a1e2721a-db3f-4de2-b1d4-a06145b21b32",
+        "codigo": "EMP-1126",
+        "documento": "43996989",
+        "nombre": "ALEXANDRA PATRICIA ZAPATA",
+        "cargo_codigo": "CAR-0003",
+        "cargo_nombre": "SUPERNUMERARIO",
+        "estado": "activo",
+        "sede_codigo": "SED-0204",
+        "sede_nombre": "IE PRESBITERO JUAN J ESCOBAR",
+        "zona_codigo": "ZON-0005",
+        "zona_nombre": "ZONA 05",
+        "updated_at": "2026-06-30T15:43:14.47764+00:00",
+        "last_modified_at": "2026-06-30T15:43:14.471+00:00"
+      },
+      "fecha_ingreso": "2026-06-30",
+      "rows": [
+        {
+          "id": "c046c98c-8c4d-456c-9bf5-19b9150a1b42",
+          "employee_id": "a1e2721a-db3f-4de2-b1d4-a06145b21b32",
+          "employee_codigo": "EMP-1126",
+          "documento": "43996989",
+          "cargo_codigo": "CAR-0003",
+          "cargo_nombre": "SUPERNUMERARIO",
+          "fecha_ingreso": "2026-06-30T05:00:00+00:00",
+          "fecha_retiro": "2026-06-30T05:00:00+00:00",
+          "source": "sede_change",
+          "created_at": "2026-06-30T15:38:46.075453+00:00",
+          "sede_codigo": "SED-0205",
+          "sede_nombre": "IE PRESBITERO JUAN J ESCOBAR SECCION NAPOMUCENO",
+          "fecha_ingreso_d": "2026-06-30",
+          "fecha_retiro_d": "2026-06-30"
+        },
+        {
+          "id": "83c8b1b9-cdb2-4055-bd62-072afb6db296",
+          "employee_id": "a1e2721a-db3f-4de2-b1d4-a06145b21b32",
+          "employee_codigo": "EMP-1126",
+          "documento": "43996989",
+          "cargo_codigo": "CAR-0003",
+          "cargo_nombre": "SUPERNUMERARIO",
+          "fecha_ingreso": "2026-06-30T05:00:00+00:00",
+          "fecha_retiro": null,
+          "source": "sede_change",
+          "created_at": "2026-06-30T15:43:14.549462+00:00",
+          "sede_codigo": "SED-0204",
+          "sede_nombre": "IE PRESBITERO JUAN J ESCOBAR",
+          "fecha_ingreso_d": "2026-06-30",
+          "fecha_retiro_d": null
+        }
+      ]
+    }
+  ],
+  "activeEmployeeWithoutCurrentHistory": [
+    {
+      "employee": {
+        "id": "52d7811a-a2d0-48eb-ab6b-c70bf2195411",
+        "codigo": "EMP-0878",
+        "documento": "1128277191",
+        "nombre": "MILENA ORTIZ VARGAS",
+        "cargo_codigo": "CAR-0001",
+        "cargo_nombre": "OPERARIO ASEO Y CAFETERIA",
+        "estado": "activo",
+        "sede_codigo": "SED-0358",
+        "sede_nombre": "IE HORACIO MUNOZ SUESCUN",
+        "zona_codigo": "ZON-0009",
+        "zona_nombre": "ZONA 09",
+        "updated_at": "2026-03-16T17:51:24.970907+00:00",
+        "last_modified_at": "2026-03-16T17:51:24.901+00:00"
+      }
+    }
+  ],
+  "currentHistoryMismatchEmployees": [
+    {
+      "employee": {
+        "id": "af17795b-7288-4b35-88e2-7e7f39577d13",
+        "codigo": "EMP-1123",
+        "documento": "1001139109",
+        "nombre": "MARIELA YEPES VELEZ",
+        "cargo_codigo": "CAR-0003",
+        "cargo_nombre": "SUPERNUMERARIO",
+        "estado": "activo",
+        "sede_codigo": "SED-0419",
+        "sede_nombre": "SERVILIMPIEZA",
+        "zona_codigo": "ZON-0011",
+        "zona_nombre": "ADMINISTRATIVA",
+        "updated_at": "2026-03-12T19:34:53.984786+00:00",
+        "last_modified_at": "2026-03-12T19:34:54.086+00:00"
+      },
+      "currentHistory": {
+        "id": "c4e0460e-49f1-400b-aa74-be146c875ced",
+        "employee_id": "af17795b-7288-4b35-88e2-7e7f39577d13",
+        "employee_codigo": "EMP-1123",
+        "documento": "1001139109",
+        "cargo_codigo": "CAR-0003",
+        "cargo_nombre": "SUPERNUMERARIO",
+        "fecha_ingreso": "2026-03-12T05:00:00+00:00",
+        "fecha_retiro": null,
+        "source": "backfill_sede_from_attendance",
+        "created_at": "2026-05-09T22:21:07.233963+00:00",
+        "sede_codigo": "SED-0093",
+        "sede_nombre": "IE GILBERTO ALZATE AVENDANO",
+        "fecha_ingreso_d": "2026-03-12",
+        "fecha_retiro_d": null
+      },
+      "diffs": [
+        "sede_codigo",
+        "sede_nombre"
+      ]
+    }
+  ],
+  "historyWithoutEmployee": [
+    {
+      "doc": "1017135020",
+      "rows": [
+        {
+          "id": "f58619b7-9598-4085-9a85-ebc73fd13f22",
+          "employee_id": "ec7a4761-3590-4874-9703-456ccf860c32",
+          "employee_codigo": "EMP-0043",
+          "documento": "1017135020",
+          "cargo_codigo": "CAR-0001",
+          "cargo_nombre": "OPERARIO ASEO Y CAFETERIA",
+          "fecha_ingreso": "2025-06-03T05:00:00+00:00",
+          "fecha_retiro": "2026-03-11T05:00:00+00:00",
+          "source": "bulk_create_employee",
+          "created_at": "2026-03-12T19:27:35.181612+00:00",
+          "sede_codigo": null,
+          "sede_nombre": null,
+          "fecha_ingreso_d": "2025-06-03",
+          "fecha_retiro_d": "2026-03-11"
+        }
+      ]
+    },
+    {
+      "doc": "1018232754",
+      "rows": [
+        {
+          "id": "a5af59df-a85f-440b-bf62-4dae465a51aa",
+          "employee_id": "45665dac-c4bc-48f1-9ef9-06d3ac5c1148",
+          "employee_codigo": "EMP-0892",
+          "documento": "1018232754",
+          "cargo_codigo": "CAR-0001",
+          "cargo_nombre": "OPERARIO ASEO Y CAFETERIA",
+          "fecha_ingreso": "2025-06-03T05:00:00+00:00",
+          "fecha_retiro": "2026-03-11T05:00:00+00:00",
+          "source": "bulk_create_employee",
+          "created_at": "2026-03-12T19:27:35.181612+00:00",
+          "sede_codigo": null,
+          "sede_nombre": null,
+          "fecha_ingreso_d": "2025-06-03",
+          "fecha_retiro_d": "2026-03-11"
+        }
+      ]
+    },
+    {
+      "doc": "1020295344",
+      "rows": [
+        {
+          "id": "14f114bd-7d6f-41d0-9d14-71038b698606",
+          "employee_id": "2c8f294d-85db-47ae-b1eb-d7d88ea7e2e9",
+          "employee_codigo": "EMP-0129",
+          "documento": "1020295344",
+          "cargo_codigo": "CAR-0001",
+          "cargo_nombre": "OPERARIO ASEO Y CAFETERIA",
+          "fecha_ingreso": "2025-06-03T05:00:00+00:00",
+          "fecha_retiro": "2026-03-11T05:00:00+00:00",
+          "source": "bulk_create_employee",
+          "created_at": "2026-03-12T19:27:35.181612+00:00",
+          "sede_codigo": null,
+          "sede_nombre": null,
+          "fecha_ingreso_d": "2025-06-03",
+          "fecha_retiro_d": "2026-03-11"
+        }
+      ]
+    },
+    {
+      "doc": "1037662078",
+      "rows": [
+        {
+          "id": "a7018ba8-a702-4197-9791-17cab990ca4d",
+          "employee_id": "bfcddd70-8042-42d9-afab-078e6baa4587",
+          "employee_codigo": "EMP-0643",
+          "documento": "1037662078",
+          "cargo_codigo": "CAR-0001",
+          "cargo_nombre": "OPERARIO ASEO Y CAFETERIA",
+          "fecha_ingreso": "2025-06-03T05:00:00+00:00",
+          "fecha_retiro": "2026-03-13T05:00:00+00:00",
+          "source": "bulk_create_employee",
+          "created_at": "2026-03-12T19:27:35.181612+00:00",
+          "sede_codigo": null,
+          "sede_nombre": null,
+          "fecha_ingreso_d": "2025-06-03",
+          "fecha_retiro_d": "2026-03-13"
+        }
+      ]
+    },
+    {
+      "doc": "1042151017",
+      "rows": [
+        {
+          "id": "3514b5f4-3e41-4593-9b0a-425807a43289",
+          "employee_id": "b0492d73-13e9-4e7d-8f00-410acd521bf4",
+          "employee_codigo": "EMP-0255",
+          "documento": "1042151017",
+          "cargo_codigo": "CAR-0001",
+          "cargo_nombre": "OPERARIO ASEO Y CAFETERIA",
+          "fecha_ingreso": "2025-06-03T05:00:00+00:00",
+          "fecha_retiro": "2026-03-13T05:00:00+00:00",
+          "source": "bulk_create_employee",
+          "created_at": "2026-03-12T19:27:35.181612+00:00",
+          "sede_codigo": null,
+          "sede_nombre": null,
+          "fecha_ingreso_d": "2025-06-03",
+          "fecha_retiro_d": "2026-03-13"
+        }
+      ]
+    },
+    {
+      "doc": "104667877",
+      "rows": [
+        {
+          "id": "83ae0851-5fb7-46db-a0a6-13922cdd3f12",
+          "employee_id": "478d2a32-7b23-4bd3-9a94-fdfc1f37e07a",
+          "employee_codigo": "EMP-0688",
+          "documento": "104667877",
+          "cargo_codigo": "CAR-0001",
+          "cargo_nombre": "OPERARIO ASEO Y CAFETERIA",
+          "fecha_ingreso": "2025-06-03T05:00:00+00:00",
+          "fecha_retiro": "2026-03-15T05:00:00+00:00",
+          "source": "bulk_create_employee",
+          "created_at": "2026-03-12T19:27:35.181612+00:00",
+          "sede_codigo": null,
+          "sede_nombre": null,
+          "fecha_ingreso_d": "2025-06-03",
+          "fecha_retiro_d": "2026-03-15"
+        }
+      ]
+    },
+    {
+      "doc": "112842290",
+      "rows": [
+        {
+          "id": "15502f02-eb1b-482c-94a5-434cd7a34286",
+          "employee_id": "0c7eaaec-df93-4196-8a9f-ad6585f02d24",
+          "employee_codigo": "EMP-0621",
+          "documento": "112842290",
+          "cargo_codigo": "CAR-0001",
+          "cargo_nombre": "OPERARIO ASEO Y CAFETERIA",
+          "fecha_ingreso": "2025-06-03T05:00:00+00:00",
+          "fecha_retiro": "2026-03-12T05:00:00+00:00",
+          "source": "bulk_create_employee",
+          "created_at": "2026-03-12T19:27:35.181612+00:00",
+          "sede_codigo": null,
+          "sede_nombre": null,
+          "fecha_ingreso_d": "2025-06-03",
+          "fecha_retiro_d": "2026-03-12"
+        }
+      ]
+    },
+    {
+      "doc": "11284736456",
+      "rows": [
+        {
+          "id": "cb425550-f311-4408-a692-3337e5cfc9b7",
+          "employee_id": "316b4fa0-b332-49aa-b937-ef83d088be26",
+          "employee_codigo": "EMP-0722",
+          "documento": "11284736456",
+          "cargo_codigo": "CAR-0001",
+          "cargo_nombre": "OPERARIO ASEO Y CAFETERIA",
+          "fecha_ingreso": "2025-06-03T05:00:00+00:00",
+          "fecha_retiro": "2026-03-15T05:00:00+00:00",
+          "source": "bulk_create_employee",
+          "created_at": "2026-03-12T19:27:35.181612+00:00",
+          "sede_codigo": null,
+          "sede_nombre": null,
+          "fecha_ingreso_d": "2025-06-03",
+          "fecha_retiro_d": "2026-03-15"
+        }
+      ]
+    },
+    {
+      "doc": "1128475406",
+      "rows": [
+        {
+          "id": "9c43eaf0-f9ac-4cb3-a256-e7a232629f2d",
+          "employee_id": "cb0c3c08-a493-47b1-961e-d1a20751f347",
+          "employee_codigo": "EMP-0769",
+          "documento": "1128475406",
+          "cargo_codigo": "CAR-0001",
+          "cargo_nombre": "OPERARIO ASEO Y CAFETERIA",
+          "fecha_ingreso": "2025-06-03T05:00:00+00:00",
+          "fecha_retiro": "2026-04-17T05:00:00+00:00",
+          "source": "bulk_create_employee",
+          "created_at": "2026-03-12T19:27:35.181612+00:00",
+          "sede_codigo": "SED-0322",
+          "sede_nombre": "IE HECTOR ABAD GOMEZ",
+          "fecha_ingreso_d": "2025-06-03",
+          "fecha_retiro_d": "2026-04-17"
+        }
+      ]
+    },
+    {
+      "doc": "43003712",
+      "rows": [
+        {
+          "id": "498e36fe-6dfc-4ed1-9724-1bfef1d96ed5",
+          "employee_id": "0ebefbd8-1e37-4c08-8ba3-139b1ee47547",
+          "employee_codigo": "EMP-1164",
+          "documento": "43003712",
+          "cargo_codigo": "CAR-0001",
+          "cargo_nombre": "OPERARIO ASEO Y CAFETERIA",
+          "fecha_ingreso": "2025-06-03T05:00:00+00:00",
+          "fecha_retiro": "2026-03-15T05:00:00+00:00",
+          "source": "create_employee",
+          "created_at": "2026-03-13T23:12:30.088024+00:00",
+          "sede_codigo": null,
+          "sede_nombre": null,
+          "fecha_ingreso_d": "2025-06-03",
+          "fecha_retiro_d": "2026-03-15"
+        }
+      ]
+    },
+    {
+      "doc": "43546640",
+      "rows": [
+        {
+          "id": "6c11dd76-c281-47aa-a47f-76976002d423",
+          "employee_id": "787275a4-d08b-4868-9da0-3ff57cbf6f80",
+          "employee_codigo": "EMP-0746",
+          "documento": "43546640",
+          "cargo_codigo": "CAR-0001",
+          "cargo_nombre": "OPERARIO ASEO Y CAFETERIA",
+          "fecha_ingreso": "2025-06-03T05:00:00+00:00",
+          "fecha_retiro": "2026-03-15T05:00:00+00:00",
+          "source": "bulk_create_employee",
+          "created_at": "2026-03-12T19:27:35.181612+00:00",
+          "sede_codigo": null,
+          "sede_nombre": null,
+          "fecha_ingreso_d": "2025-06-03",
+          "fecha_retiro_d": "2026-03-15"
+        }
+      ]
+    },
+    {
+      "doc": "43971646",
+      "rows": [
+        {
+          "id": "b3cc8d20-ea4e-4ce3-b256-076e151758c9",
+          "employee_id": "e2e059c5-3ec4-4600-8b93-ec4086ef16bf",
+          "employee_codigo": "EMP-1173",
+          "documento": "43971646",
+          "cargo_codigo": "CAR-0001",
+          "cargo_nombre": "OPERARIO ASEO Y CAFETERIA",
+          "fecha_ingreso": "2025-06-03T05:00:00+00:00",
+          "fecha_retiro": "2026-03-13T05:00:00+00:00",
+          "source": "create_employee",
+          "created_at": "2026-03-13T23:47:56.385223+00:00",
+          "sede_codigo": null,
+          "sede_nombre": null,
+          "fecha_ingreso_d": "2025-06-03",
+          "fecha_retiro_d": "2026-03-13"
+        }
+      ]
+    },
+    {
+      "doc": "PPT-4227668",
+      "rows": [
+        {
+          "id": "e049f96e-e0b8-4b0d-a8b2-1229315f97f6",
+          "employee_id": "4a44df11-ff7b-42d2-ac3d-fa4c3e6e4052",
+          "employee_codigo": "EMP-0219",
+          "documento": "PPT-4227668",
+          "cargo_codigo": "CAR-0001",
+          "cargo_nombre": "OPERARIO ASEO Y CAFETERIA",
+          "fecha_ingreso": "2025-06-03T05:00:00+00:00",
+          "fecha_retiro": "2026-03-13T05:00:00+00:00",
+          "source": "bulk_create_employee",
+          "created_at": "2026-03-12T19:27:35.181612+00:00",
+          "sede_codigo": null,
+          "sede_nombre": null,
+          "fecha_ingreso_d": "2025-06-03",
+          "fecha_retiro_d": "2026-03-13"
+        }
+      ]
+    }
+  ],
+  "openRowNotLatestByStart": []
+}
