@@ -355,7 +355,12 @@ function extractMessages(body = {}) {
     (Array.isArray(entry?.changes) ? entry.changes : []).flatMap((change) => {
       const value = change?.value || {};
       const metadata = value?.metadata || {};
-      return (Array.isArray(value?.messages) ? value.messages : []).map((message) => ({ ...message, metadata }));
+      const senderContacts = Array.isArray(value?.contacts) ? value.contacts : [];
+      return (Array.isArray(value?.messages) ? value.messages : []).map((message) => ({
+        ...message,
+        metadata,
+        sender_contact: senderContacts[0] || null
+      }));
     })
   );
 }
@@ -1356,7 +1361,7 @@ async function storeIncomingEvent({ eventType, payload }) {
     source: 'whatsapp_cloud_api',
     event_type: eventType,
     message_id: payload?.id || payload?.message_id || null,
-    wa_from: payload?.from || payload?.recipient_id || null,
+    wa_from: getWhatsAppRecipient(payload) || null,
     wa_timestamp: payload?.timestamp || null,
     wa_type: payload?.type || payload?.status || null,
     text_body: extractMessageText(payload),
@@ -1384,7 +1389,7 @@ async function markIncomingProcessed(id, status, reason) {
 
 async function notifyProcessingError(message, error) {
   if (error?.userNotified === true) return;
-  const phone = normalizePhone(message?.from);
+  const phone = getWhatsAppRecipient(message);
   if (!phone) return;
   try {
     await sendText(phone, userMessageForProcessingError(error));
@@ -1414,11 +1419,16 @@ function userMessageForProcessingError(error) {
 }
 
 async function processIncomingMessage(message) {
-  const phone = normalizePhone(message?.from);
-  if (!phone) throw new Error('missing_phone_number');
+  const phone = getWhatsAppRecipient(message);
+  if (!phone) throw new Error('missing_whatsapp_recipient');
 
   const session = await getSession(phone);
   const parsed = parseInboundAction(message);
+
+  if (parsed.contactPhone) {
+    await handleSharedContact(phone, session, parsed);
+    return;
+  }
 
   if (!parsed.value && !parsed.id && !parsed.location) {
     await sendText(phone, 'No entendí tu respuesta. Por favor selecciona una opción del menú.');
@@ -1482,15 +1492,25 @@ async function processIncomingMessage(message) {
   }
 }
 async function startIdentificationFlow(phone) {
-  const employeeByPhone = await findEmployeeByPhone(phone);
+  const employeeByPhone = await findEmployeeByPhone(getSessionPhone({ id: phone, phone_number: phone }));
   if (employeeByPhone) {
     await storeSession(phone, {
+      phone_number: employeeByPhone.telefono || normalizePhone(phone) || null,
       employee_id: employeeByPhone.id,
       documento: employeeByPhone.documento,
       session_state: SESSION.AWAITING_ACTION,
       session_data: { employee: sessionEmployee(employeeByPhone), identifiedBy: 'phone' }
     });
     await sendIdentityOrMenu(phone, employeeByPhone);
+    return;
+  }
+
+  if (!normalizePhone(phone)) {
+    await storeSession(phone, {
+      session_state: SESSION.AWAITING_DOCUMENT,
+      session_data: { identifiedBy: 'hidden_phone', awaitingContact: true }
+    });
+    await sendContactRequest(phone);
     return;
   }
 
@@ -1501,7 +1521,49 @@ async function startIdentificationFlow(phone) {
   await sendText(phone, 'Hola, no encontramos tu número registrado en la base de datos, por favor escribe tu cédula sin puntos.');
 }
 
+async function handleSharedContact(phone, session, parsed) {
+  const sharedPhone = normalizePhone(parsed.contactPhone);
+  if (!sharedPhone) {
+    await sendContactRequest(phone);
+    return;
+  }
+
+  const employee = await findEmployeeByPhone(sharedPhone);
+  if (employee) {
+    await storeSession(phone, {
+      phone_number: sharedPhone,
+      employee_id: employee.id,
+      documento: employee.documento,
+      session_state: SESSION.AWAITING_ACTION,
+      session_data: {
+        ...(session.session_data || {}),
+        employee: sessionEmployee(employee),
+        identifiedBy: parsed.contactOrigin === 'contact_request' ? 'shared_contact_request' : 'shared_contact',
+        sharedPhone
+      }
+    });
+    await sendIdentityOrMenu(phone, employee);
+    return;
+  }
+
+  await storeSession(phone, {
+    phone_number: sharedPhone,
+    session_state: SESSION.AWAITING_DOCUMENT,
+    session_data: {
+      ...(session.session_data || {}),
+      identifiedBy: parsed.contactOrigin === 'contact_request' ? 'shared_contact_request_unknown' : 'shared_contact_unknown',
+      sharedPhone
+    }
+  });
+  await sendText(phone, 'No encontramos ese número registrado en la base de datos, por favor escribe tu cédula sin puntos.');
+}
+
 async function handleDocumentInput(phone, session, value) {
+  if (session?.session_data?.awaitingContact && !getSessionPhone(session) && !normalizePhone(phone)) {
+    await sendContactRequest(phone);
+    return;
+  }
+
   const document = normalizeDocument(value);
   if (!document) {
     await sendText(phone, 'Por favor escribe tu número de cédula sin puntos.');
@@ -1516,6 +1578,7 @@ async function handleDocumentInput(phone, session, value) {
   }
 
   await storeSession(phone, {
+    phone_number: getSessionPhone(session) || normalizePhone(phone) || null,
     employee_id: employee.id,
     documento: employee.documento,
     session_state: SESSION.AWAITING_ACTION,
@@ -1706,6 +1769,7 @@ async function handlePhoneUpdate(phone, session, value) {
 
   const refreshed = { ...employee, telefono: normalizedPhone };
   await storeSession(phone, {
+    phone_number: normalizedPhone,
     employee_id: employee.id,
     documento: employee.documento,
     session_state: SESSION.COMPLETED,
@@ -2141,6 +2205,8 @@ function distanceBetweenMeters(latA, lngA, latB, lngB) {
 
 async function sendAttendanceQr(phone, employee, action, selectedSede = null, locationProof = null) {
   const freshEmployee = await reloadEmployeeForAttendance(employee);
+  const session = await getSession(phone);
+  const contactPhone = getSessionPhone(session) || normalizePhone(phone) || null;
   const documento = normalizeDocument(freshEmployee?.documento);
   const sedeCodigo = selectedSede?.codigo || freshEmployee?.sede_codigo || null;
   const sedeNombre = selectedSede?.nombre || freshEmployee?.sede_nombre || null;
@@ -2158,7 +2224,7 @@ async function sendAttendanceQr(phone, employee, action, selectedSede = null, lo
     nombre: freshEmployee.nombre || null,
     sede_codigo: sedeCodigo,
     sede_nombre: sedeNombre || null,
-    phone_number: phone,
+    phone_number: contactPhone,
     request_latitude: typeof locationProof?.latitude === 'number' ? locationProof.latitude : null,
     request_longitude: typeof locationProof?.longitude === 'number' ? locationProof.longitude : null,
     request_distance_meters: Number.isFinite(Number(locationProof?.distanceMeters)) ? Number(locationProof.distanceMeters) : null,
@@ -3957,17 +4023,27 @@ async function getSession(phone) {
 
 async function storeSession(phone, patch = {}) {
   const existing = await getSession(phone);
+  const phoneNumber = patch.phone_number === undefined
+    ? getSessionPhone(existing) || normalizePhone(phone) || null
+    : normalizePhone(patch.phone_number) || null;
   const payload = {
     id: phone,
-    phone_number: phone,
+    phone_number: phoneNumber,
     employee_id: patch.employee_id === undefined ? existing.employee_id || null : patch.employee_id,
     documento: patch.documento === undefined ? existing.documento || null : patch.documento,
     session_state: patch.session_state || SESSION.IDLE,
-    session_data: patch.session_data || {},
+    session_data: {
+      ...(patch.session_data || {}),
+      ...(phoneNumber ? { sharedPhone: phoneNumber } : {})
+    },
     last_message_at: new Date().toISOString()
   };
   const { error } = await supabaseAdmin.from('whatsapp_sessions').upsert(payload, { onConflict: 'id' });
   if (error) throw error;
+}
+
+function getSessionPhone(session = {}) {
+  return normalizePhone(session?.phone_number || session?.session_data?.sharedPhone || session?.session_data?.employee?.telefono);
 }
 
 async function resetSession(phone, session, extraData) {
@@ -4014,11 +4090,46 @@ function parseInboundAction(message) {
   const interactive = message?.interactive || {};
   const buttonReply = interactive?.button_reply || null;
   const listReply = interactive?.list_reply || null;
+  const contact = extractMessageContact(message);
   return {
     id: String(buttonReply?.id || listReply?.id || '').trim(),
     title: String(buttonReply?.title || listReply?.title || '').trim(),
     value: String(buttonReply?.title || listReply?.title || textValue || '').trim(),
-    location: extractMessageLocation(message)
+    location: extractMessageLocation(message),
+    contactPhone: contact?.phone || null,
+    contactWaId: contact?.waId || null,
+    contactOrigin: contact?.origin || null
+  };
+}
+
+function getWhatsAppRecipient(message = {}) {
+  return String(
+    message?.from ||
+    message?.from_user_id ||
+    message?.user_id ||
+    message?.recipient_id ||
+    message?.sender_contact?.wa_id ||
+    message?.sender_contact?.user_id ||
+    message?.customer?.id ||
+    message?.contacts?.[0]?.wa_id ||
+    message?.contacts?.[0]?.user_id ||
+    message?.contacts?.[0]?.phones?.[0]?.wa_id ||
+    ''
+  ).trim();
+}
+
+function extractMessageContact(payload) {
+  const contacts = Array.isArray(payload?.contacts) ? payload.contacts : [];
+  const contact = contacts[0] || null;
+  if (!contact) return null;
+  const phones = Array.isArray(contact?.phones) ? contact.phones : [];
+  const phoneEntry = phones.find((item) => normalizePhone(item?.wa_id || item?.phone)) || phones[0] || {};
+  const phone = normalizePhone(phoneEntry?.wa_id || phoneEntry?.phone || contact?.wa_id);
+  if (!phone) return null;
+  return {
+    phone,
+    waId: normalizePhone(phoneEntry?.wa_id || contact?.wa_id),
+    origin: String(contact?.origin || phoneEntry?.origin || '').trim()
   };
 }
 
@@ -4150,6 +4261,23 @@ async function sendText(to, body) {
   await sendWhatsAppMessage(to, { type: 'text', text: { body } });
 }
 
+async function sendContactRequest(to) {
+  const body = 'Para continuar con tu registro necesitamos que compartas tu número de WhatsApp.';
+  try {
+    await sendWhatsAppMessage(to, {
+      type: 'interactive',
+      interactive: {
+        type: 'request_contact_info',
+        body: { text: body },
+        action: { name: 'request_contact_info' }
+      }
+    });
+  } catch (error) {
+    console.error('No se pudo enviar solicitud nativa de contacto, enviando texto:', error);
+    await sendText(to, `${body}\n\nUsa la opción de WhatsApp para compartir tu contacto.`);
+  }
+}
+
 async function sendButtons(to, body, buttons) {
   await sendWhatsAppMessage(to, {
     type: 'interactive',
@@ -4207,6 +4335,13 @@ async function sendWhatsAppMessage(to, payload) {
   if (!config.whatsappAccessToken || !config.whatsappPhoneNumberId) {
     throw new Error('missing_whatsapp_credentials_or_recipient');
   }
+  const normalizedRecipientPhone = normalizePhone(to);
+  const recipientPayload = normalizedRecipientPhone
+    ? { to: normalizedRecipientPhone }
+    : { recipient: String(to || '').trim() };
+  if (!recipientPayload.to && !recipientPayload.recipient) {
+    throw new Error('missing_whatsapp_recipient');
+  }
 
   const response = await fetch(`https://graph.facebook.com/${config.whatsappGraphVersion}/${config.whatsappPhoneNumberId}/messages`, {
     method: 'POST',
@@ -4217,7 +4352,7 @@ async function sendWhatsAppMessage(to, payload) {
     body: JSON.stringify({
       messaging_product: 'whatsapp',
       recipient_type: 'individual',
-      to,
+      ...recipientPayload,
       ...payload
     })
   });
