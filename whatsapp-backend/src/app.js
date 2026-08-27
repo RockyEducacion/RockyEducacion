@@ -1492,7 +1492,8 @@ async function processIncomingMessage(message) {
   }
 }
 async function startIdentificationFlow(phone) {
-  const employeeByPhone = await findEmployeeByPhone(getSessionPhone({ id: phone, phone_number: phone }));
+  const isBsuidRecipient = Boolean(normalizeBusinessScopedUserId(phone));
+  const employeeByPhone = isBsuidRecipient ? null : await findEmployeeByPhone(getSessionPhone({ id: phone, phone_number: phone }));
   if (employeeByPhone) {
     await storeSession(phone, {
       phone_number: employeeByPhone.telefono || normalizePhone(phone) || null,
@@ -1505,7 +1506,7 @@ async function startIdentificationFlow(phone) {
     return;
   }
 
-  if (!normalizePhone(phone)) {
+  if (isBsuidRecipient || !normalizePhone(phone)) {
     await storeSession(phone, {
       session_state: SESSION.AWAITING_DOCUMENT,
       session_data: { identifiedBy: 'hidden_phone', awaitingContact: true }
@@ -1560,6 +1561,14 @@ async function handleSharedContact(phone, session, parsed) {
 
 async function handleDocumentInput(phone, session, value) {
   if (session?.session_data?.awaitingContact && !getSessionPhone(session) && !normalizePhone(phone)) {
+    const typedPhone = normalizePhone(value);
+    if (typedPhone) {
+      await handleSharedContact(phone, session, {
+        contactPhone: typedPhone,
+        contactOrigin: 'typed_phone'
+      });
+      return;
+    }
     await sendContactRequest(phone);
     return;
   }
@@ -2118,6 +2127,10 @@ async function handleQrLocationInput(phone, session, parsed) {
   const location = parsed.location || null;
   if (!location) {
     await sendText(phone, 'Por favor comparte tu ubicacion actual usando la opcion Ubicacion de WhatsApp para generar el QR.');
+    return;
+  }
+  if (parsed.forwarded) {
+    await sendText(phone, 'Recibimos una ubicacion reenviada. Para generar el QR debes compartir tu ubicacion actual directamente desde WhatsApp.');
     return;
   }
   if (isNamedLocation(location)) {
@@ -4096,6 +4109,7 @@ function parseInboundAction(message) {
     title: String(buttonReply?.title || listReply?.title || '').trim(),
     value: String(buttonReply?.title || listReply?.title || textValue || '').trim(),
     location: extractMessageLocation(message),
+    forwarded: isForwardedMessage(message),
     contactPhone: contact?.phone || null,
     contactWaId: contact?.waId || null,
     contactOrigin: contact?.origin || null
@@ -4103,19 +4117,37 @@ function parseInboundAction(message) {
 }
 
 function getWhatsAppRecipient(message = {}) {
-  return String(
-    message?.from ||
-    message?.from_user_id ||
-    message?.user_id ||
-    message?.recipient_id ||
-    message?.sender_contact?.wa_id ||
-    message?.sender_contact?.user_id ||
-    message?.customer?.id ||
-    message?.contacts?.[0]?.wa_id ||
-    message?.contacts?.[0]?.user_id ||
-    message?.contacts?.[0]?.phones?.[0]?.wa_id ||
-    ''
-  ).trim();
+  const contacts = Array.isArray(message?.contacts) ? message.contacts : [];
+  const contactPhones = contacts.flatMap((contact) => {
+    const phones = Array.isArray(contact?.phones) ? contact.phones : [];
+    return [
+      contact?.wa_id,
+      contact?.phone,
+      ...phones.flatMap((phone) => [phone?.wa_id, phone?.phone])
+    ];
+  });
+  const phoneCandidates = [
+    message?.sender_contact?.wa_id,
+    ...contactPhones
+  ];
+  const normalizedPhone = phoneCandidates.map((value) => normalizePhone(value)).find(Boolean);
+  if (normalizedPhone) return normalizedPhone;
+
+  const userIdCandidates = [
+    message?.sender_contact?.user_id,
+    contacts[0]?.user_id
+  ];
+  const bsuid = userIdCandidates.map((value) => normalizeBusinessScopedUserId(value)).find(Boolean);
+  if (bsuid) return bsuid;
+
+  const fallbackCandidates = [
+    message?.from,
+    message?.recipient_id,
+    message?.from_user_id,
+    message?.user_id,
+    message?.customer?.id
+  ];
+  return String(fallbackCandidates.find((value) => String(value || '').trim()) || '').trim();
 }
 
 function extractMessageContact(payload) {
@@ -4145,6 +4177,11 @@ function extractMessageLocation(payload) {
     name: location.name || null,
     address: location.address || null
   };
+}
+
+function isForwardedMessage(payload) {
+  const context = payload?.context || {};
+  return context?.forwarded === true || context?.frequently_forwarded === true;
 }
 
 function extractMessageText(payload) {
@@ -4335,11 +4372,8 @@ async function sendWhatsAppMessage(to, payload) {
   if (!config.whatsappAccessToken || !config.whatsappPhoneNumberId) {
     throw new Error('missing_whatsapp_credentials_or_recipient');
   }
-  const normalizedRecipientPhone = normalizePhone(to);
-  const recipientPayload = normalizedRecipientPhone
-    ? { to: normalizedRecipientPhone }
-    : { recipient: String(to || '').trim() };
-  if (!recipientPayload.to && !recipientPayload.recipient) {
+  const recipientPayload = getWhatsAppRecipientPayload(to);
+  if (!recipientPayload) {
     throw new Error('missing_whatsapp_recipient');
   }
 
@@ -4378,6 +4412,21 @@ function normalizePhone(value) {
   if (digits.length === 10) return `57${digits}`;
   if (digits.length > 10) return digits;
   return '';
+}
+
+function getWhatsAppRecipientPayload(value) {
+  const bsuid = normalizeBusinessScopedUserId(value);
+  if (bsuid) return { recipient: bsuid };
+
+  const normalizedPhone = normalizePhone(value);
+  if (normalizedPhone) return { to: normalizedPhone };
+
+  return null;
+}
+
+function normalizeBusinessScopedUserId(value) {
+  const raw = String(value || '').trim();
+  return /^[A-Z]{2}\.\d+$/i.test(raw) ? raw : '';
 }
 
 function normalizeDocument(value) {
