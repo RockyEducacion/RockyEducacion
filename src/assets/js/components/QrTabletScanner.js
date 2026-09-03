@@ -5,18 +5,21 @@ const SCANNER_STATE_KEY = 'rocky_qr_scanner_state';
 const IDLE_PAUSE_MS = 3 * 60 * 1000;
 const AFTER_SCAN_PAUSE_MS = 3 * 60 * 1000;
 const SUPPORT_UNLOCK_MS = 90 * 1000;
+const SCAN_TIMEOUT_MS = 15 * 1000;
 const SCANNER_READY_STATE = 'ready_to_resume';
 
 export const QrTabletScanner = (mount, deps = {}) => {
   let stream = null;
   let detector = null;
   let scanning = false;
+  let startingCamera = false;
   let lastValue = '';
   let lastScanAt = 0;
   let pauseTimer = null;
   let supportUnlockTimer = null;
   let supportUnlocked = false;
   let wakeLock = null;
+  const cameraListeners = [];
 
   const savedToken = getDeviceToken();
   const ui = el('section', { className: 'main-card' }, [
@@ -73,7 +76,14 @@ export const QrTabletScanner = (mount, deps = {}) => {
   function setMessage(text, kind = 'muted') {
     const msg = qs('#qrMessage', ui);
     if (!msg) return;
-    msg.className = `mt-2 ${kind === 'error' ? 'text-danger' : kind === 'ok' ? 'text-success' : 'text-muted'}`;
+    const stateClass = kind === 'error'
+      ? 'text-danger qr-message--error'
+      : kind === 'ok'
+        ? 'text-success qr-message--ok'
+        : kind === 'busy'
+          ? 'text-muted qr-message--busy'
+          : 'text-muted qr-message--muted';
+    msg.className = `mt-2 ${stateClass}`;
     msg.textContent = text;
   }
 
@@ -112,6 +122,18 @@ export const QrTabletScanner = (mount, deps = {}) => {
     if (supportUnlockTimer) {
       clearTimeout(supportUnlockTimer);
       supportUnlockTimer = null;
+    }
+  }
+
+  function addCameraListener(target, type, handler) {
+    target?.addEventListener?.(type, handler);
+    cameraListeners.push({ target, type, handler });
+  }
+
+  function clearCameraListeners() {
+    while (cameraListeners.length) {
+      const { target, type, handler } = cameraListeners.pop();
+      target?.removeEventListener?.(type, handler);
     }
   }
 
@@ -154,8 +176,26 @@ export const QrTabletScanner = (mount, deps = {}) => {
       ? 'Registro completado. El lector quedo en pausa para ahorrar energia.'
       : reason === 'screen'
         ? 'La tablet entro en reposo. Toca el recuadro para activar la camara.'
-        : 'Lector en pausa por inactividad. Toca el recuadro para continuar.';
+        : reason === 'camera'
+          ? 'La camara se suspendio. Toca el recuadro para reactivar.'
+          : 'Lector en pausa por inactividad. Toca el recuadro para continuar.';
     setMessage(message, 'muted');
+  }
+
+  function handleCameraInterrupted() {
+    if (!scanning) return;
+    pauseScanner('camera');
+  }
+
+  function attachCameraRecoveryListeners(video, activeStream) {
+    clearCameraListeners();
+    ['pause', 'ended', 'stalled', 'error'].forEach((eventName) => {
+      addCameraListener(video, eventName, handleCameraInterrupted);
+    });
+    activeStream?.getTracks?.().forEach((track) => {
+      addCameraListener(track, 'ended', handleCameraInterrupted);
+      addCameraListener(track, 'mute', handleCameraInterrupted);
+    });
   }
 
   function syncDeviceStatus() {
@@ -198,6 +238,7 @@ export const QrTabletScanner = (mount, deps = {}) => {
   }
 
   async function startCamera() {
+    if (startingCamera) return;
     const token = getDeviceToken();
     if (!token) {
       setMessage('Activa primero la tablet con su token de dispositivo.', 'error');
@@ -207,24 +248,32 @@ export const QrTabletScanner = (mount, deps = {}) => {
       setMessage('Este navegador no soporta lectura QR por camara. Usa la lectura manual.', 'error');
       return;
     }
-    detector = detector || new window.BarcodeDetector({ formats: ['qr_code'] });
-    clearPauseTimer();
-    setMessage('Activando camara...', 'muted');
-    stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' }, audio: false });
-    const video = qs('#qrVideo', ui);
-    video.srcObject = stream;
-    await video.play();
-    scanning = true;
-    setScannerState(SCANNER_READY_STATE);
-    setPausedOverlay(false);
-    requestWakeLock();
-    setMessage('Camara activa. Acerca el QR al recuadro.', 'muted');
-    schedulePause(IDLE_PAUSE_MS, 'idle');
-    scanLoop();
+    startingCamera = true;
+    try {
+      if (stream || scanning) stopCamera({ silent: true, keepResumeState: true });
+      detector = detector || new window.BarcodeDetector({ formats: ['qr_code'] });
+      clearPauseTimer();
+      setMessage('Activando camara...', 'busy');
+      stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' }, audio: false });
+      const video = qs('#qrVideo', ui);
+      video.srcObject = stream;
+      await video.play();
+      attachCameraRecoveryListeners(video, stream);
+      scanning = true;
+      setScannerState(SCANNER_READY_STATE);
+      setPausedOverlay(false);
+      requestWakeLock();
+      setMessage('Camara activa. Acerca el QR al recuadro.', 'muted');
+      schedulePause(IDLE_PAUSE_MS, 'idle');
+      scanLoop();
+    } finally {
+      startingCamera = false;
+    }
   }
 
   function stopCamera({ silent = false, keepResumeState = false } = {}) {
     clearPauseTimer();
+    clearCameraListeners();
     scanning = false;
     if (stream) {
       stream.getTracks().forEach((track) => track.stop());
@@ -265,6 +314,11 @@ export const QrTabletScanner = (mount, deps = {}) => {
     }
     if (document.visibilityState === 'visible' && scanning) {
       requestWakeLock();
+      return;
+    }
+    if (document.visibilityState === 'visible' && !scanning && getScannerState() === SCANNER_READY_STATE) {
+      setPausedOverlay(true);
+      setMessage('Lector listo. Toca el recuadro para activar la camara.', 'muted');
     }
   }
 
@@ -298,15 +352,15 @@ export const QrTabletScanner = (mount, deps = {}) => {
       return;
     }
     try {
-      setMessage('Validando QR...', 'muted');
-      const result = await deps.scanAttendanceQr?.({ qrValue: value, deviceToken });
+      setMessage('Validando QR...', 'busy');
+      const result = await deps.scanAttendanceQr?.({ qrValue: value, deviceToken, timeoutMs: SCAN_TIMEOUT_MS });
       const action = result?.action === 'exit' ? 'Salida' : 'Ingreso';
       const name = result?.employee?.nombre || result?.employee?.documento || 'Empleado';
       const phone = result?.employee?.phoneNumber ? ` Telefono origen: ${result.employee.phoneNumber}.` : '';
-      setMessage(`${action} registrado: ${name}.${phone}`, 'ok');
+      setMessage(`${action} registrado correctamente: ${name}.${phone}`, 'ok');
       schedulePause(AFTER_SCAN_PAUSE_MS, 'after_scan');
     } catch (error) {
-      setMessage(error?.message || 'No se pudo validar el QR.', 'error');
+      setMessage(`QR no validado: ${error?.message || 'No se pudo validar el QR.'}`, 'error');
       markActivity();
     }
   }

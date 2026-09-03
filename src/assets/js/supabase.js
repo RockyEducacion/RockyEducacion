@@ -3294,20 +3294,30 @@ async function getAccessToken() {
   return token;
 }
 
-async function backendJson(path, { method = 'GET', body = null, headers = {} } = {}) {
+async function backendJson(path, { method = 'GET', body = null, headers = {}, timeoutMs = 0 } = {}) {
   const base = backendApiBase();
   if (!base) throw new Error('Configura EMPLOYEE_PORTAL_API_BASE para usar el backend.');
-  const response = await fetch(`${base}${path}`, {
-    method,
-    headers: {
-      'Content-Type': 'application/json',
-      ...headers
-    },
-    body: body ? JSON.stringify(body) : null
-  });
-  const payload = await response.json().catch(() => ({}));
-  if (!response.ok || payload?.ok === false) throw new Error(payload?.error || `Error backend ${response.status}`);
-  return payload;
+  const controller = timeoutMs > 0 ? new AbortController() : null;
+  const timer = controller ? setTimeout(() => controller.abort(), timeoutMs) : null;
+  try {
+    const response = await fetch(`${base}${path}`, {
+      method,
+      headers: {
+        'Content-Type': 'application/json',
+        ...headers
+      },
+      body: body ? JSON.stringify(body) : null,
+      signal: controller?.signal
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok || payload?.ok === false) throw new Error(payload?.error || `Error backend ${response.status}`);
+    return payload;
+  } catch (error) {
+    if (error?.name === 'AbortError') throw new Error('La validacion tardo demasiado. Intenta nuevamente.');
+    throw error;
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
 }
 
 async function backendBlob(path, { method = 'GET', body = null, headers = {} } = {}) {
@@ -3371,11 +3381,12 @@ export async function setQrDeviceStatus(deviceId, estado) {
   return result;
 }
 
-export async function scanAttendanceQr({ qrValue, deviceToken }) {
+export async function scanAttendanceQr({ qrValue, deviceToken, timeoutMs = 0 }) {
   return backendJson('/api/attendance-qr/scan', {
     method: 'POST',
     headers: { 'X-QR-Device-Token': deviceToken },
-    body: { qrValue }
+    body: { qrValue },
+    timeoutMs
   });
 }
 
