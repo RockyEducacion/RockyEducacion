@@ -469,10 +469,8 @@ export const WhatsAppLive = (mount, deps = {}) => {
   function optionsForRow(row) {
     const rowDate = String(row?.fecha || '').trim() || today;
     const active = (supernumerarios || []).filter((s) => isPersonActiveForDate(s, rowDate, { allowMissingIngreso: true }));
-    const sameSede = active.filter((s) => String(s.sedeCodigo || '').trim() === String(row.sedeCodigo || '').trim());
-    const list = sameSede.length ? sameSede : active;
     const used = usedReplacementDocsForDate(row.fecha, row.empleadoId);
-    return list
+    return active
       .map((s) => ({
         id: s.id,
         documento: String(s.documento || '').trim() || '',
