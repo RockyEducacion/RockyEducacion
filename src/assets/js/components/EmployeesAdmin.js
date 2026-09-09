@@ -737,9 +737,6 @@ export const EmployeesAdmin=(mount,deps={})=>{
     }
     try{
       const retiroDate=new Date(`${retiro}T00:00:00`);
-      for(const row of programmed){
-        if(row?.id) await deps.cancelProgrammedEmployeeAssignment?.(row.id);
-      }
       await deps.setEmployeeStatus?.(e.id,'inactivo',{ fechaRetiro:retiroDate, cancelProgrammedAssignments:true });
       await deps.addAuditLog?.({ targetType:'employee', targetId:e.id, action:'retire_employee', before:{estado:e.estado, fechaRetiro:e.fechaRetiro||null}, after:{estado:'inactivo', fechaRetiro:retiro, cancelledProgrammedAssignments:programmed.map((row)=>({ id:row.id, fechaIngreso:row.fechaIngreso, sedeCodigo:row.sedeCodigo, sedeNombre:row.sedeNombre, cargoCodigo:row.cargoCodigo, cargoNombre:row.cargoNombre }))}, note:modal.values.detail||null });
     }catch(err){ alert('Error: '+(err?.message||err)); }
