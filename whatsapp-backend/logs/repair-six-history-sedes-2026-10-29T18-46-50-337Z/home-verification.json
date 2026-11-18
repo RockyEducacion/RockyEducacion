@@ -1,0 +1,17 @@
+{
+  "at": "2026-10-29T18:47:10.980Z",
+  "home": {
+    "activeSedes": 427,
+    "planned": 1129,
+    "contracted": 1129,
+    "surplus": 2,
+    "missing": 2
+  },
+  "hiring": {
+    "planned": 1129,
+    "contracted": 1129,
+    "missing": 2,
+    "surplus": 2
+  },
+  "match": true
+}

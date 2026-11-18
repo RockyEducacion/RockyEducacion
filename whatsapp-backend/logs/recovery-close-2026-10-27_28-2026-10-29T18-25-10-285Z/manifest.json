@@ -1,0 +1,18 @@
+{
+  "createdAt": "2026-10-29T18:25:10.299Z",
+  "requestedDays": [
+    "2026-10-27",
+    "2026-10-28"
+  ],
+  "reason": "Reabrir el 28 y cerrar el 27 antes de volver a cerrar el 28, por solicitud del usuario.",
+  "tables": {
+    "daily_closures": 1,
+    "daily_metrics": 3,
+    "daily_sede_closures": 427,
+    "employee_daily_status": 3480,
+    "sede_status": 1281,
+    "attendance": 3438,
+    "import_replacements": 68,
+    "absenteeism": 107
+  }
+}

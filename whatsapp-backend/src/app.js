@@ -79,8 +79,10 @@ app.get(['/cron/close-daily-operation', '/api/cron/close-daily-operation'], asyn
   try {
     assertCronAuthorized(req);
     const day = addDaysToIsoDate(currentDate(), -1) || currentDate();
-    const result = await closeOperationDay(day);
-    res.json({ ok: true, ...result });
+    const { results, skipped } = await runScheduledDailyClosures(day);
+    const failed = results.filter((item) => item.status === 'failed');
+    const target = results.find((item) => item.date === day) || { date: day, status: 'not_attempted' };
+    res.status(failed.length ? 500 : 200).json({ ok: failed.length === 0, ...target, days: results, skipped });
   } catch (error) {
     const message = error?.message || 'cron_close_failed';
     const status = message === 'unauthorized_cron' ? 401 : 500;
@@ -3481,6 +3483,120 @@ export async function closeOperationDay(date) {
   }
 
   return { date: day, status: 'closed' };
+}
+
+const CLOSURE_CATCH_UP_LOOKBACK_DAYS = 7;
+const CLOSURE_MAX_ATTEMPTS = 3;
+const CLOSURE_RETRY_DELAY_MS = 5000;
+// Vercel corta la funcion a los 300 s; no se inicia un cierre nuevo pasado este tiempo.
+const CLOSURE_TIME_BUDGET_MS = 200000;
+
+function isTransientClosureError(error) {
+  const code = String(error?.code || '').trim();
+  const message = String(error?.message || error || '').toLowerCase();
+  return code === '57014'
+    || code === '40001'
+    || code === '40P01'
+    || message.includes('statement timeout')
+    || message.includes('fetch failed')
+    || message.includes('econnreset')
+    || message.includes('etimedout')
+    || message.includes('socket hang up');
+}
+
+async function closeOperationDayWithRetry(day) {
+  let lastError = null;
+  for (let attempt = 1; attempt <= CLOSURE_MAX_ATTEMPTS; attempt += 1) {
+    try {
+      const result = await closeOperationDay(day);
+      return { ...result, attempts: attempt };
+    } catch (error) {
+      lastError = error;
+      const canRetry = attempt < CLOSURE_MAX_ATTEMPTS && isTransientClosureError(error);
+      if (!canRetry) break;
+      await insertSystemAuditLog({
+        actorEmail: 'cron@system',
+        targetType: 'daily_closure',
+        targetId: day,
+        action: 'cron_close_retry',
+        after: serializeErrorForAudit(error),
+        note: 'Reintento ' + (attempt + 1) + ' de ' + CLOSURE_MAX_ATTEMPTS + ' del cierre de ' + day + ' tras error transitorio.'
+      });
+      await new Promise((resolve) => setTimeout(resolve, CLOSURE_RETRY_DELAY_MS * attempt));
+    }
+  }
+  throw lastError;
+}
+
+async function findPendingClosureDays(beforeDay) {
+  const fromDay = addDaysToIsoDate(beforeDay, -CLOSURE_CATCH_UP_LOOKBACK_DAYS);
+  const toDay = addDaysToIsoDate(beforeDay, -1);
+  if (!fromDay || !toDay) return [];
+  const { data, error } = await supabaseAdmin
+    .from('daily_closures')
+    .select('fecha, locked, status')
+    .gte('fecha', fromDay)
+    .lte('fecha', toDay);
+  if (error) throw error;
+  const closed = new Set(
+    (data || [])
+      .filter((row) => row?.locked === true || String(row?.status || '').trim().toLowerCase() === 'closed')
+      .map((row) => String(row?.fecha || '').slice(0, 10))
+  );
+  const pending = [];
+  for (let day = fromDay; day && day <= toDay; day = addDaysToIsoDate(day, 1)) {
+    if (!closed.has(day)) pending.push(day);
+  }
+  return pending;
+}
+
+// Cierra primero los dias anteriores que quedaron abiertos (del mas antiguo al mas reciente)
+// y luego el dia objetivo, reintentando errores transitorios como statement timeout.
+async function runScheduledDailyClosures(targetDay) {
+  const startedAt = Date.now();
+  let pendingDays = [];
+  try {
+    pendingDays = await findPendingClosureDays(targetDay);
+  } catch (error) {
+    console.error('No se pudieron consultar dias pendientes de cierre:', error);
+  }
+  if (pendingDays.length) {
+    await insertSystemAuditLog({
+      actorEmail: 'cron@system',
+      targetType: 'daily_closure',
+      targetId: targetDay,
+      action: 'cron_close_catch_up_detected',
+      after: { pendingDays },
+      note: 'Dias anteriores sin cerrar detectados: ' + pendingDays.join(', ') + '.'
+    });
+  }
+
+  const days = [...pendingDays, targetDay];
+  const results = [];
+  const skipped = [];
+  for (const day of days) {
+    if (Date.now() - startedAt > CLOSURE_TIME_BUDGET_MS) {
+      skipped.push(day);
+      continue;
+    }
+    try {
+      results.push(await closeOperationDayWithRetry(day));
+    } catch (error) {
+      console.error('Error en cierre automatico de ' + day + ':', error);
+      results.push({ date: day, status: 'failed', error: error?.message || 'cron_close_failed' });
+    }
+  }
+  if (skipped.length) {
+    await insertSystemAuditLog({
+      actorEmail: 'cron@system',
+      targetType: 'daily_closure',
+      targetId: targetDay,
+      action: 'cron_close_deferred_time_budget',
+      after: { skipped },
+      note: 'Sin tiempo para cerrar: ' + skipped.join(', ') + '. Se intentaran en la proxima ejecucion.'
+    });
+  }
+  return { results, skipped };
 }
 
 async function runPostClosureTasks(day) {

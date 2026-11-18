@@ -1,0 +1,66 @@
+[
+  {
+    "day": "2026-10-27",
+    "checks": {
+      "locked": true,
+      "metricsClosed": true,
+      "planned": true,
+      "contracted": true,
+      "covered": true,
+      "metricsAbsenteeism": true,
+      "closureAbsenteeism": true,
+      "missing": true,
+      "excess": true,
+      "sedeSnapshotsComplete": true,
+      "completed": true,
+      "noFailures": true
+    },
+    "closure": {
+      "planned": 1129,
+      "contracted": 1127,
+      "attendance": 1116,
+      "operationalAbsenteeism": 11
+    },
+    "metrics": {
+      "attendance": 1116,
+      "absenteeism": 11,
+      "uniqueCount": 1162,
+      "previousUniqueCount": 1162
+    },
+    "sedeCount": 427,
+    "scheduledCount": 1127,
+    "completedAt": "2026-10-29T18:25:53.204716+00:00"
+  },
+  {
+    "day": "2026-10-28",
+    "checks": {
+      "locked": true,
+      "metricsClosed": true,
+      "planned": true,
+      "contracted": true,
+      "covered": true,
+      "metricsAbsenteeism": true,
+      "closureAbsenteeism": true,
+      "missing": true,
+      "excess": true,
+      "sedeSnapshotsComplete": true,
+      "completed": true,
+      "noFailures": true
+    },
+    "closure": {
+      "planned": 1129,
+      "contracted": 1130,
+      "attendance": 1101,
+      "operationalAbsenteeism": 28
+    },
+    "metrics": {
+      "attendance": 1101,
+      "absenteeism": 29,
+      "uniqueCount": 1153,
+      "previousUniqueCount": 1128
+    },
+    "sedeCount": 427,
+    "scheduledCount": 1130,
+    "completedAt": "2026-10-29T18:26:26.103027+00:00"
+  }
+]

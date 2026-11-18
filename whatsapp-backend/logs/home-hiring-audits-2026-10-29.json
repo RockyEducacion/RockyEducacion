@@ -1,0 +1,230 @@
+[
+  {
+    "created_at": "2026-10-28T16:36:09.49654+00:00",
+    "target_id": "ba733fe1-8341-4f04-a6f3-c04312bf4f06",
+    "action": "change_employee_cargo",
+    "note": "CAMBIO DE CARGO",
+    "before_data": {
+      "cargoCodigo": "CAR-0003",
+      "cargoNombre": "SUPERNUMERARIO"
+    },
+    "after_data": {
+      "cargoCodigo": "CAR-0001",
+      "cargoNombre": "OPERARIO ASEO Y CAFETERIA",
+      "assignmentFechaRetiro": "2026-10-27",
+      "assignmentFechaIngreso": "2026-10-28"
+    }
+  },
+  {
+    "created_at": "2026-10-02T13:17:07.981045+00:00",
+    "target_id": "b4b5cae3-659a-4a4b-988b-cdb0acc4dbc5",
+    "action": "change_employee_cargo",
+    "note": "CAMBIO PERFIL",
+    "before_data": {
+      "cargoCodigo": "CAR-0003",
+      "cargoNombre": "SUPERNUMERARIO"
+    },
+    "after_data": {
+      "cargoCodigo": "CAR-0001",
+      "cargoNombre": "OPERARIO ASEO Y CAFETERIA",
+      "assignmentFechaRetiro": "2026-10-01",
+      "assignmentFechaIngreso": "2026-10-02"
+    }
+  },
+  {
+    "created_at": "2026-10-01T13:07:44.336091+00:00",
+    "target_id": "ef718578-7c19-4adc-8e6f-5468ca4987ed",
+    "action": "change_employee_cargo",
+    "note": "cambio de perfil",
+    "before_data": {
+      "cargoCodigo": "CAR-0003",
+      "cargoNombre": "SUPERNUMERARIO"
+    },
+    "after_data": {
+      "cargoCodigo": "CAR-0001",
+      "cargoNombre": "OPERARIO ASEO Y CAFETERIA",
+      "assignmentFechaRetiro": "2026-09-30",
+      "assignmentFechaIngreso": "2026-10-01"
+    }
+  },
+  {
+    "created_at": "2026-10-01T13:04:54.515214+00:00",
+    "target_id": "3f48596b-701c-4a8a-9ddf-818c86e70de3",
+    "action": "change_employee_cargo",
+    "note": "cambio perfil",
+    "before_data": {
+      "cargoCodigo": "CAR-0003",
+      "cargoNombre": "SUPERNUMERARIO"
+    },
+    "after_data": {
+      "cargoCodigo": "CAR-0001",
+      "cargoNombre": "OPERARIO ASEO Y CAFETERIA",
+      "assignmentFechaRetiro": "2026-09-30",
+      "assignmentFechaIngreso": "2026-10-01"
+    }
+  },
+  {
+    "created_at": "2026-10-01T13:02:47.455663+00:00",
+    "target_id": "56852117-e242-45b6-89bb-87241b27506b",
+    "action": "change_employee_cargo",
+    "note": "queda fijo",
+    "before_data": {
+      "cargoCodigo": "CAR-0003",
+      "cargoNombre": "SUPERNUMERARIO"
+    },
+    "after_data": {
+      "cargoCodigo": "CAR-0001",
+      "cargoNombre": "OPERARIO ASEO Y CAFETERIA",
+      "assignmentFechaRetiro": "2026-09-30",
+      "assignmentFechaIngreso": "2026-10-01"
+    }
+  },
+  {
+    "created_at": "2026-09-23T21:21:39.474566+00:00",
+    "target_id": "b4b5cae3-659a-4a4b-988b-cdb0acc4dbc5",
+    "action": "create_employee",
+    "note": null,
+    "before_data": null,
+    "after_data": {
+      "codigo": "EMP-1346",
+      "estado": "activo",
+      "nombre": "LUIS JACINTO ROMAÑA PALACIOS",
+      "documento": "1040368986",
+      "sedeCodigo": "SED-0419"
+    }
+  },
+  {
+    "created_at": "2026-09-17T21:50:45.466888+00:00",
+    "target_id": "ba733fe1-8341-4f04-a6f3-c04312bf4f06",
+    "action": "change_employee_cargo",
+    "note": "CAMBIO",
+    "before_data": {
+      "cargoCodigo": "CAR-0001",
+      "cargoNombre": "OPERARIO ASEO Y CAFETERIA"
+    },
+    "after_data": {
+      "cargoCodigo": "CAR-0003",
+      "cargoNombre": "SUPERNUMERARIO",
+      "assignmentFechaRetiro": "2026-09-17",
+      "assignmentFechaIngreso": "2026-09-18"
+    }
+  },
+  {
+    "created_at": "2026-09-17T13:47:26.290358+00:00",
+    "target_id": "7dc82163-2621-4a7d-a4bd-c675b7348603",
+    "action": "change_employee_cargo",
+    "note": "cambio sede",
+    "before_data": {
+      "cargoCodigo": "CAR-0003",
+      "cargoNombre": "SUPERNUMERARIO"
+    },
+    "after_data": {
+      "cargoCodigo": "CAR-0001",
+      "cargoNombre": "OPERARIO ASEO Y CAFETERIA",
+      "assignmentFechaRetiro": "2026-09-16",
+      "assignmentFechaIngreso": "2026-09-17"
+    }
+  },
+  {
+    "created_at": "2026-09-17T13:24:42.989639+00:00",
+    "target_id": "56852117-e242-45b6-89bb-87241b27506b",
+    "action": "create_employee",
+    "note": null,
+    "before_data": null,
+    "after_data": {
+      "codigo": "EMP-1344",
+      "estado": "activo",
+      "nombre": "JAIME ALBERTO GAVIRIA GARZON",
+      "documento": "98668250",
+      "sedeCodigo": "SED-0419"
+    }
+  },
+  {
+    "created_at": "2026-09-15T21:51:47.244681+00:00",
+    "target_id": "3f48596b-701c-4a8a-9ddf-818c86e70de3",
+    "action": "create_employee",
+    "note": null,
+    "before_data": null,
+    "after_data": {
+      "codigo": "EMP-1341",
+      "estado": "activo",
+      "nombre": "LINEY DURAN GOMEZ",
+      "documento": "32292543",
+      "sedeCodigo": "SED-0419"
+    }
+  },
+  {
+    "created_at": "2026-09-15T21:50:33.574781+00:00",
+    "target_id": "7dc82163-2621-4a7d-a4bd-c675b7348603",
+    "action": "create_employee",
+    "note": null,
+    "before_data": null,
+    "after_data": {
+      "codigo": "EMP-1340",
+      "estado": "activo",
+      "nombre": "KELLY TATIANA CASTRILLON GIRALDO",
+      "documento": "1026152029",
+      "sedeCodigo": "SED-0419"
+    }
+  },
+  {
+    "created_at": "2026-09-04T21:14:14.862627+00:00",
+    "target_id": "ef718578-7c19-4adc-8e6f-5468ca4987ed",
+    "action": "create_employee",
+    "note": null,
+    "before_data": null,
+    "after_data": {
+      "codigo": "EMP-1328",
+      "estado": "activo",
+      "nombre": "DAYANA PALACIO RENTERIA",
+      "documento": "1022005625",
+      "sedeCodigo": "SED-0419"
+    }
+  },
+  {
+    "created_at": "2026-07-31T21:29:08.697654+00:00",
+    "target_id": "ba733fe1-8341-4f04-a6f3-c04312bf4f06",
+    "action": "change_employee_cargo",
+    "note": "PASA AFIJO",
+    "before_data": {
+      "cargoCodigo": "CAR-0003",
+      "cargoNombre": "SUPERNUMERARIO"
+    },
+    "after_data": {
+      "cargoCodigo": "CAR-0001",
+      "cargoNombre": "OPERARIO ASEO Y CAFETERIA",
+      "assignmentFechaRetiro": "2026-07-31",
+      "assignmentFechaIngreso": "2026-08-01"
+    }
+  },
+  {
+    "created_at": "2026-07-17T19:13:54.394233+00:00",
+    "target_id": "ba733fe1-8341-4f04-a6f3-c04312bf4f06",
+    "action": "change_employee_cargo",
+    "note": "CAMBIO PERFIL",
+    "before_data": {
+      "cargoCodigo": "CAR-0001",
+      "cargoNombre": "OPERARIO ASEO Y CAFETERIA"
+    },
+    "after_data": {
+      "cargoCodigo": "CAR-0003",
+      "cargoNombre": "SUPERNUMERARIO",
+      "assignmentFechaRetiro": "2026-07-17",
+      "assignmentFechaIngreso": "2026-07-18"
+    }
+  },
+  {
+    "created_at": "2026-07-17T13:12:07.059054+00:00",
+    "target_id": "ba733fe1-8341-4f04-a6f3-c04312bf4f06",
+    "action": "create_employee",
+    "note": null,
+    "before_data": null,
+    "after_data": {
+      "codigo": "EMP-1292",
+      "estado": "activo",
+      "nombre": "RIGOBERTO ISAZA",
+      "documento": "71639292",
+      "sedeCodigo": "SED-0059"
+    }
+  }
+]

@@ -1,0 +1,29 @@
+{
+  "createdAt": "2026-11-18T17:10:25.796Z",
+  "requestedDays": [
+    "2026-11-13",
+    "2026-11-14",
+    "2026-11-15",
+    "2026-11-16",
+    "2026-11-17"
+  ],
+  "backedUpDays": [
+    "2026-11-13",
+    "2026-11-14",
+    "2026-11-15",
+    "2026-11-16",
+    "2026-11-17",
+    "2026-11-18"
+  ],
+  "reason": "Cierre del 13/11 (fallo cron por statement timeout) y recierre 14-17/11 para consistencia, por solicitud del usuario.",
+  "tables": {
+    "daily_closures": 4,
+    "daily_metrics": 6,
+    "daily_sede_closures": 427,
+    "employee_daily_status": 3571,
+    "sede_status": 1281,
+    "attendance": 3532,
+    "import_replacements": 66,
+    "absenteeism": 102
+  }
+}

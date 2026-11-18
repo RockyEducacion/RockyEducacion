@@ -1,0 +1,188 @@
+{
+  "day": "2026-10-29",
+  "counts": {
+    "employees": 1362,
+    "base": 1129,
+    "history": 3305
+  },
+  "home": {
+    "activeSedes": 427,
+    "planned": 1129,
+    "contracted": 1129,
+    "surplus": 7,
+    "missing": 7
+  },
+  "hiringTotals": {
+    "planned": 1129,
+    "contracted": 1129,
+    "missing": 2,
+    "surplus": 2
+  },
+  "hiringDifferences": [
+    {
+      "dependencia": "EDUCACION",
+      "zona": "ZONA 01",
+      "sede": "IE CIRO MENDIA",
+      "empleadosPlaneados": 4,
+      "empleadosContratados": 3,
+      "diferencia": 1
+    },
+    {
+      "dependencia": "EDUCACION",
+      "zona": "ZONA 01",
+      "sede": "IE LA AVANZADA",
+      "empleadosPlaneados": 3,
+      "empleadosContratados": 4,
+      "diferencia": -1
+    },
+    {
+      "dependencia": "EDUCACION",
+      "zona": "ZONA 01",
+      "sede": "IE PABLO VI NUEVO HORIZONTE",
+      "empleadosPlaneados": 4,
+      "empleadosContratados": 3,
+      "diferencia": 1
+    },
+    {
+      "dependencia": "EDUCACION",
+      "zona": "ZONA 01",
+      "sede": "IE VILLA DEL SOCORRO ESCUELA VILLA NIZA",
+      "empleadosPlaneados": 3,
+      "empleadosContratados": 4,
+      "diferencia": -1
+    }
+  ],
+  "homeDifferences": [
+    {
+      "code": "SED-0281",
+      "name": "IE JOAQUIN VALLEJO",
+      "planned": 6,
+      "contracted": 5,
+      "difference": 1
+    },
+    {
+      "code": "SED-0034",
+      "name": "IE MANUEL URIBE ANGEL SECCION GERARDO DAVID",
+      "planned": 2,
+      "contracted": 1,
+      "difference": 1
+    },
+    {
+      "code": "SED-0026",
+      "name": "IE CIRO MENDIA",
+      "planned": 4,
+      "contracted": 3,
+      "difference": 1
+    },
+    {
+      "code": "SED-0163",
+      "name": "IE REPUBLICA DE URUGUAY",
+      "planned": 4,
+      "contracted": 3,
+      "difference": 1
+    },
+    {
+      "code": "SED-0419",
+      "name": "SERVILIMPIEZA",
+      "planned": 0,
+      "contracted": 6,
+      "difference": -6
+    },
+    {
+      "code": "SED-0004",
+      "name": "IE LA AVANZADA",
+      "planned": 3,
+      "contracted": 4,
+      "difference": -1
+    },
+    {
+      "code": "SED-0262",
+      "name": "IE CAMILO TORRES RESTREPO",
+      "planned": 2,
+      "contracted": 1,
+      "difference": 1
+    },
+    {
+      "code": "SED-0170",
+      "name": "IE LA HUERTA",
+      "planned": 5,
+      "contracted": 4,
+      "difference": 1
+    },
+    {
+      "code": "SED-0009",
+      "name": "IE PABLO VI NUEVO HORIZONTE",
+      "planned": 4,
+      "contracted": 3,
+      "difference": 1
+    }
+  ],
+  "assignmentDifferences": [
+    {
+      "employeeId": "3f48596b-701c-4a8a-9ddf-818c86e70de3",
+      "name": "LINEY DURAN GOMEZ",
+      "employeeSede": "SED-0281",
+      "employeeSedeName": "IE JOAQUIN VALLEJO",
+      "historySede": "SED-0419",
+      "historySedeName": "SERVILIMPIEZA",
+      "historyId": "6f28f2d3-837c-4e69-bd88-9b4665d0f35a",
+      "from": "2026-10-01T05:00:00+00:00",
+      "to": null
+    },
+    {
+      "employeeId": "56852117-e242-45b6-89bb-87241b27506b",
+      "name": "JAIME ALBERTO GAVIRIA GARZON",
+      "employeeSede": "SED-0163",
+      "employeeSedeName": "IE REPUBLICA DE URUGUAY",
+      "historySede": "SED-0419",
+      "historySedeName": "SERVILIMPIEZA",
+      "historyId": "a53ed4bd-4ea5-418b-9f5c-f6298745dd7c",
+      "from": "2026-10-01T05:00:00+00:00",
+      "to": null
+    },
+    {
+      "employeeId": "7dc82163-2621-4a7d-a4bd-c675b7348603",
+      "name": "KELLY TATIANA CASTRILLON GIRALDO",
+      "employeeSede": "SED-0262",
+      "employeeSedeName": "IE CAMILO TORRES RESTREPO",
+      "historySede": "SED-0419",
+      "historySedeName": "SERVILIMPIEZA",
+      "historyId": "ad96580f-2c4f-4421-a1c0-beeb3e02c4c1",
+      "from": "2026-09-17T05:00:00+00:00",
+      "to": null
+    },
+    {
+      "employeeId": "b4b5cae3-659a-4a4b-988b-cdb0acc4dbc5",
+      "name": "LUIS JACINTO ROMAÑA PALACIOS",
+      "employeeSede": "SED-0170",
+      "employeeSedeName": "IE LA HUERTA",
+      "historySede": "SED-0419",
+      "historySedeName": "SERVILIMPIEZA",
+      "historyId": "a31fdfc9-8622-4547-a063-1f95b5088e4f",
+      "from": "2026-10-02T05:00:00+00:00",
+      "to": null
+    },
+    {
+      "employeeId": "ba733fe1-8341-4f04-a6f3-c04312bf4f06",
+      "name": "RIGOBERTO ISAZA",
+      "employeeSede": "SED-0025",
+      "employeeSedeName": "IE VILLA DEL SOCORRO ESCUELA VILLA NIZA",
+      "historySede": "SED-0419",
+      "historySedeName": "SERVILIMPIEZA",
+      "historyId": "4ce75204-0903-473e-950c-68ea2b9d43ce",
+      "from": "2026-10-28T05:00:00+00:00",
+      "to": null
+    },
+    {
+      "employeeId": "ef718578-7c19-4adc-8e6f-5468ca4987ed",
+      "name": "DAYANA PALACIO RENTERIA",
+      "employeeSede": "SED-0034",
+      "employeeSedeName": "IE MANUEL URIBE ANGEL SECCION GERARDO DAVID",
+      "historySede": "SED-0419",
+      "historySedeName": "SERVILIMPIEZA",
+      "historyId": "beb697cb-0613-4c4a-bb33-bddcd5b4e413",
+      "from": "2026-10-01T05:00:00+00:00",
+      "to": null
+    }
+  ]
+}

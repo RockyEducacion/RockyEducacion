@@ -1,0 +1,62 @@
+{
+  "2026-11-13": {
+    "cierre": "closed/true",
+    "metrics_closed": true,
+    "plan/contr/asist/aus/falt/sobr antes": "-",
+    "despues": "1129/1127/1113/13/11/9",
+    "sede_closures": "427 (antes 0)",
+    "attendance": "1157 (antes 1157)",
+    "absenteeism": "40 (antes 40)",
+    "repl_cron": "14 (antes 0)"
+  },
+  "2026-11-14": {
+    "cierre": "closed/true",
+    "metrics_closed": true,
+    "plan/contr/asist/aus/falt/sobr antes": "0/0/34/0/0/34",
+    "despues": "0/0/34/0/0/34",
+    "sede_closures": "0 (antes 0)",
+    "attendance": "56 (antes 34)",
+    "absenteeism": "4 (antes 0)",
+    "repl_cron": "0 (antes 0)"
+  },
+  "2026-11-15": {
+    "cierre": "closed/true",
+    "metrics_closed": true,
+    "plan/contr/asist/aus/falt/sobr antes": "0/0/0/0/0/0",
+    "despues": "0/0/0/0/0/0",
+    "sede_closures": "0 (antes 0)",
+    "attendance": "17 (antes 15)",
+    "absenteeism": "2 (antes 2)",
+    "repl_cron": "0 (antes 0)"
+  },
+  "2026-11-16": {
+    "cierre": "closed/true",
+    "metrics_closed": true,
+    "plan/contr/asist/aus/falt/sobr antes": "0/0/0/0/0/0",
+    "despues": "0/0/0/0/0/0",
+    "sede_closures": "0 (antes 0)",
+    "attendance": "17 (antes 15)",
+    "absenteeism": "2 (antes 2)",
+    "repl_cron": "0 (antes 0)"
+  },
+  "2026-11-17": {
+    "cierre": "closed/true",
+    "metrics_closed": true,
+    "plan/contr/asist/aus/falt/sobr antes": "1129/1129/1124/4/11/11",
+    "despues": "1129/1129/1124/4/11/11",
+    "sede_closures": "427 (antes 427)",
+    "attendance": "1162 (antes 1162)",
+    "absenteeism": "32 (antes 32)",
+    "repl_cron": "5 (antes 5)"
+  },
+  "2026-11-18": {
+    "cierre": "-",
+    "metrics_closed": false,
+    "plan/contr/asist/aus/falt/sobr antes": "-",
+    "despues": "-",
+    "sede_closures": "0 (antes 0)",
+    "attendance": "1149 (antes 1149)",
+    "absenteeism": "26 (antes 26)",
+    "repl_cron": "0 (antes 0)"
+  }
+}

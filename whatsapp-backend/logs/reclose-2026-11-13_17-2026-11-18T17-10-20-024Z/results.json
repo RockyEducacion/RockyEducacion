@@ -1,0 +1,32 @@
+[
+  {
+    "date": "2026-11-13",
+    "status": "closed",
+    "attempt": 1,
+    "ms": 32282
+  },
+  {
+    "date": "2026-11-14",
+    "status": "closed",
+    "attempt": 1,
+    "ms": 19537
+  },
+  {
+    "date": "2026-11-15",
+    "status": "closed",
+    "attempt": 1,
+    "ms": 18693
+  },
+  {
+    "date": "2026-11-16",
+    "status": "closed",
+    "attempt": 1,
+    "ms": 24502
+  },
+  {
+    "date": "2026-11-17",
+    "status": "closed",
+    "attempt": 1,
+    "ms": 28931
+  }
+]

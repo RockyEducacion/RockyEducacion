@@ -1,0 +1,20 @@
+[
+  {
+    "id": "2026-10-28",
+    "fecha": "2026-10-28",
+    "status": "closed",
+    "locked": true,
+    "planeados": 1129,
+    "contratados": 1130,
+    "ausentismos": 28,
+    "no_contratados": 0,
+    "closed_by_uid": "49aa2fcd-2fe8-4a75-9c27-df1a8acbe303",
+    "closed_by_email": "rockyeducacion@gmail.com",
+    "closed_at": "2026-10-28T22:05:46.720933+00:00",
+    "created_at": "2026-10-28T22:05:46.720933+00:00",
+    "updated_at": "2026-10-28T22:05:46.720933+00:00",
+    "asistencias": 1101,
+    "faltan": 5,
+    "sobran": 6
+  }
+]
